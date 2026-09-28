@@ -149,7 +149,7 @@ atualizado.
 | 2026-09-28 | `/admin` exige TEACHER ou mais; lista de usuários só para ADMIN; sem permissão → 404 | 404 não revela que a área existe |
 | 2026-09-28 | Limite de **2 dispositivos** logados; o login novo derruba o mais antigo | Antipirataria (compartilhamento de senha) sem bloquear o aluno que troca de aparelho |
 | 2026-09-28 | Login dura 7 dias e é renovado a cada dia de uso; trocar a senha desloga os outros dispositivos | Conforto para quem estuda todo dia + segurança se a senha vazar |
-| 2026-09-28 | E-mail verificado **não** é exigido para entrar (a verificação é enviada e há aviso na área do aluno) | Menos atrito no cadastro. Reavaliar antes do lançamento/Fase 4 (pagamentos) |
+| 2026-09-28 | Confirmar o e-mail é um **extra**, não um requisito: o aluno entra sem confirmar (a confirmação é enviada e há aviso na área do aluno) | **Decisão do dono do projeto** (confirmada após a revisão do PR #1): menos atrito no cadastro. Consequência aceita: ver a linha da proteção do link mágico abaixo |
 | 2026-09-28 | Rate limit (tentativas de login) guardado no banco (`rate_limits`), ativo só em produção | Na Vercel cada requisição pode cair num servidor diferente; memória não é compartilhada |
 | 2026-09-28 | Tabelas e colunas do banco em snake_case (`users.email_verified`) via `@map` | Facilita SQL direto no console da Neon e em ferramentas de dados |
 | 2026-09-28 | Schema da Fase 1 só com tabelas de contas; as demais entram na fase em que forem usadas | Evita tabelas sem código e retrabalho de migração |
@@ -159,7 +159,7 @@ atualizado.
 | 2026-09-28 | Componentes shadcn/ui copiados à mão nesta fase (estilo new-york) | O ambiente do Claude bloqueia `ui.shadcn.com`. Na sua máquina, `npx shadcn@latest add <componente>` funciona normalmente com o `components.json` |
 | 2026-09-28 | Páginas do servidor só **leem** a sessão; a renovação diária é feita pelo navegador (`SessionRefresher` nos layouts das áreas logadas) | Encontrado na revisão: renovar durante a renderização estendia o banco mas não o cookie, e o aluno era deslogado em 7 dias mesmo usando o site |
 | 2026-09-28 | Quem se cadastra pelo link mágico ganha um nome provisório tirado do e-mail (`maria.silva@...` → "Maria Silva") | O link mágico não pede nome; sem isso a conta ficava com nome vazio |
-| 2026-09-28 | Mantida a proteção do Better Auth: entrar pelo link mágico numa conta com e-mail **não confirmado** apaga a senha antiga e desloga os outros dispositivos. A área do aluno avisa "Sua conta não tem senha" e "Esqueci minha senha" cria uma nova | Impede o golpe de alguém se cadastrar antes com o e-mail de outra pessoa. Ver decisão pendente na seção 10 |
+| 2026-09-28 | Mantida a proteção do Better Auth: entrar pelo link mágico numa conta com e-mail **não confirmado** apaga a senha antiga e desloga os outros dispositivos. A área do aluno avisa "Sua conta não tem senha" e "Esqueci minha senha" cria uma nova | Impede o golpe de alguém se cadastrar antes com o e-mail de outra pessoa. Efeito colateral aceito de não exigir confirmação de e-mail |
 | 2026-09-28 | Em produção com Resend, `EMAIL_FROM` com `@resend.dev` impede o app de iniciar | Esse remetente de teste só entrega para o dono da conta do Resend; os alunos não receberiam nada |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
@@ -195,10 +195,9 @@ atualizado.
 
 **Como testar:** [README.md → "Como testar a Fase 1"](./README.md#2-como-testar-a-fase-1-passo-a-passo).
 
-**Decisão pendente (do dono do projeto):**
-- **Exigir confirmação de e-mail para entrar?** Hoje não exige. Exigir deixa os fluxos mais coerentes: sem ela, entrar pelo link mágico
-  apaga a senha de contas não confirmadas (proteção de segurança) e o Google não se liga a essas contas. O custo é o aluno precisar
-  clicar no e-mail antes do primeiro acesso. Recomendação: exigir antes do lançamento (é 1 linha em `auth.ts` + ajustes de tela).
+**Decisão tomada na revisão:** a confirmação de e-mail continua **opcional** (um extra, não é exigida para entrar).
+Os efeitos colaterais foram tratados na própria Fase 1: aviso "Sua conta não tem senha" com atalho para criar uma, e mensagem
+explicando o erro do Google para contas não confirmadas.
 
 **Pendências conhecidas (não bloqueiam a Fase 2):**
 - Textos definitivos de Termos e Privacidade + registro formal de consentimento (LGPD) → Fase 7.

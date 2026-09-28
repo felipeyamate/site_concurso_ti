@@ -56,8 +56,8 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 8,
     maxPasswordLength: 128,
-    // Não exigimos e-mail verificado para entrar (menos atrito no cadastro).
-    // Isso pode mudar antes do lançamento — decisão registrada no PROJECT.md.
+    // Não exigimos e-mail verificado para entrar: confirmar o e-mail é um extra, não um requisito
+    // (decisão do dono do projeto — PROJECT.md, seção 8). Menos atrito no cadastro.
     requireEmailVerification: false,
     // Ao trocar a senha, todos os outros dispositivos são deslogados (caso a senha tenha vazado).
     revokeSessionsOnPasswordReset: true,
