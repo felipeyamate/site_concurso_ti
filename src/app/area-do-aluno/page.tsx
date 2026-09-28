@@ -7,6 +7,8 @@
  * Fase 1: mostra os dados da conta, o aviso de e-mail não confirmado e os dispositivos
  * conectados (limite de sessões). Os cursos entram na Fase 2.
  */
+import "server-only";
+
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -32,12 +34,19 @@ export const metadata: Metadata = {
 export default async function StudentAreaPage() {
   const { user, session } = await requireSession("/area-do-aluno");
 
-  // Busca os logins ativos do aluno (só campos de exibição; nunca o token).
-  const activeSessions = await prisma.session.findMany({
-    where: { userId: user.id, expiresAt: { gt: new Date() } },
-    select: { id: true, userAgent: true, createdAt: true },
-    orderBy: { createdAt: "desc" },
-  });
+  // Busca, em paralelo (como um `asyncio.gather`), os logins ativos do aluno (só campos de
+  // exibição; nunca o token) e se a conta tem senha cadastrada.
+  const [activeSessions, passwordAccounts] = await Promise.all([
+    prisma.session.findMany({
+      where: { userId: user.id, expiresAt: { gt: new Date() } },
+      select: { id: true, userAgent: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.account.count({ where: { userId: user.id, providerId: "credential" } }),
+  ]);
+  // Conta sem senha: quem só usa o link por e-mail ou o Google — ou quem teve a senha removida
+  // pela proteção do Better Auth ao entrar pelo link mágico sem ter confirmado o e-mail.
+  const hasPassword = passwordAccounts > 0;
 
   const sessionItems: SessionListItem[] = activeSessions.map((item) => ({
     id: item.id,
@@ -76,6 +85,21 @@ export default async function StudentAreaPage() {
               receba avisos de compra e consiga recuperar a senha.
             </p>
             <ResendVerificationButton email={user.email} />
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {hasPassword ? null : (
+        <Alert>
+          <AlertTitle>Sua conta não tem senha</AlertTitle>
+          <AlertDescription>
+            <p>
+              Você entra pelo link enviado por e-mail (ou pelo Google). Se quiser também entrar com
+              e-mail e senha, crie uma senha:
+            </p>
+            <Button asChild variant="outline" size="sm" className="w-fit">
+              <Link href="/esqueci-senha">Criar uma senha</Link>
+            </Button>
           </AlertDescription>
         </Alert>
       )}

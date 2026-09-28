@@ -7,6 +7,8 @@
  * Fase 1: só a estrutura e a lista de usuários (visível apenas para ADMIN).
  * O cadastro de cursos, vídeos e PDFs entra na Fase 3.
  */
+import "server-only";
+
 import type { Metadata } from "next";
 import Link from "next/link";
 

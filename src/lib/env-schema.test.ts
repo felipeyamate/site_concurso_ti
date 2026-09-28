@@ -43,4 +43,15 @@ describe("parseEnv", () => {
     const env = parseEnv({ ...validEnv, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "segredo" });
     expect(env.GOOGLE_CLIENT_ID).toBe("id");
   });
+
+  it("em produção com Resend, recusa o remetente de teste @resend.dev", () => {
+    const production = { ...validEnv, NODE_ENV: "production", RESEND_API_KEY: "re_123" };
+    expect(() => parseEnv(production)).toThrowError(/EMAIL_FROM/);
+    expect(parseEnv({ ...production, EMAIL_FROM: "Concurso TI <contato@meusite.com.br>" }).EMAIL_FROM).toContain(
+      "meusite",
+    );
+    // Sem chave do Resend (ex.: build no CI) ou fora de produção, o padrão continua valendo.
+    expect(() => parseEnv({ ...validEnv, NODE_ENV: "production" })).not.toThrow();
+    expect(() => parseEnv({ ...validEnv, RESEND_API_KEY: "re_123" })).not.toThrow();
+  });
 });

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 
 import { authClient } from "../auth-client";
 import { getAuthErrorMessage } from "../error-messages";
+import { loginPath } from "../redirect";
 
 type GoogleButtonProps = {
   redirectTo: string;
@@ -29,7 +30,7 @@ export function GoogleButton({ redirectTo, onError }: GoogleButtonProps) {
     const { error } = await authClient.signIn.social({
       provider: "google",
       callbackURL: redirectTo,
-      errorCallbackURL: "/entrar",
+      errorCallbackURL: loginPath(redirectTo),
     });
     // Se deu certo, o navegador já está indo para o Google; só tratamos o erro.
     if (error) {

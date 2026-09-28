@@ -8,7 +8,8 @@ import { getAuthErrorMessage } from "./error-messages";
 
 describe("getAuthErrorMessage", () => {
   it("traduz códigos conhecidos", () => {
-    expect(getAuthErrorMessage({ code: "INVALID_EMAIL_OR_PASSWORD" })).toBe("E-mail ou senha incorretos.");
+    expect(getAuthErrorMessage({ code: "INVALID_EMAIL_OR_PASSWORD" })).toContain("E-mail ou senha incorretos.");
+    expect(getAuthErrorMessage({ code: "ACCOUNT_NOT_LINKED" })).toContain("Confirme o e-mail");
     expect(getAuthErrorMessage({ code: "INVALID_TOKEN" })).toContain("inválido");
   });
 

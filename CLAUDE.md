@@ -19,3 +19,6 @@
 - Código de servidor que acessa banco/segredos começa com `import "server-only"`.
 - Toda página protegida chama `requireSession`/`requireRole` (`src/modules/auth/session.ts`);
   o `proxy.ts` sozinho não basta.
+- Sessão: Server Components só LEEM a sessão (`getCurrentSession` usa `disableRefresh`); quem renova o login
+  é o `SessionRefresher`. Toda nova área logada precisa de um `layout.tsx` que inclua o `SessionRefresher`.
+- Todo PR segue o guia `docs/COMO-REVISAR.md` (descrição com "como testar" e "por onde revisar").

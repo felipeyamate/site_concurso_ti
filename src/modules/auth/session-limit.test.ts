@@ -41,6 +41,14 @@ describe("selectSessionsToRevoke", () => {
     expect(revoked).toHaveLength(2);
   });
 
+  it("desempata horários iguais sempre do mesmo jeito, independente da ordem de entrada", () => {
+    const options = { maxActiveSessions: 2, now: NOW, keepSessionId: "new" };
+    const forward = selectSessionsToRevoke([session("b", 5), session("a", 5), session("new", 0)], options);
+    const backward = selectSessionsToRevoke([session("new", 0), session("a", 5), session("b", 5)], options);
+    expect(forward).toEqual(backward);
+    expect(forward).toEqual(["b"]);
+  });
+
   it("sessões expiradas são removidas e não contam no limite", () => {
     const sessions = [session("expired", 10_000, PAST), session("active", 30), session("new", 0)];
     expect(selectSessionsToRevoke(sessions, { maxActiveSessions: 2, now: NOW, keepSessionId: "new" })).toEqual([

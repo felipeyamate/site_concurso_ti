@@ -56,6 +56,19 @@ const envSchema = z
         message: "Para o login com Google, preencha GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET juntos.",
       });
     }
+
+    // Em produção, com o Resend ligado, o remetente precisa ser de um domínio NOSSO verificado.
+    // O remetente de teste "@resend.dev" só entrega para o dono da conta do Resend: os alunos
+    // nunca receberiam os e-mails (e o erro só apareceria no log). Melhor barrar já no deploy.
+    const usesResendSandbox = values.EMAIL_FROM.toLowerCase().includes("@resend.dev");
+    if (values.NODE_ENV === "production" && values.RESEND_API_KEY && usesResendSandbox) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["EMAIL_FROM"],
+        message:
+          "Em produção, EMAIL_FROM precisa usar um domínio verificado no Resend (ex.: Concurso TI <contato@seudominio.com.br>).",
+      });
+    }
   });
 
 export type Env = z.infer<typeof envSchema>;

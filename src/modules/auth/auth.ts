@@ -13,6 +13,7 @@
  *  3. E-mails: verificação de e-mail, redefinição de senha e link mágico.
  *  4. Perfil (`role`): campo extra no usuário; nasce STUDENT e o usuário não consegue mudá-lo.
  *  5. Limite de sessões: após cada login, remove os logins mais antigos acima do limite.
+ *     (e nome provisório para quem se cadastra pelo link mágico, que não pede nome).
  *  6. Proteção contra força bruta (rate limit) guardada no banco.
  *
  * Paralelo em Python: é como o `settings.py` do django-allauth — um lugar só com todas as regras.
@@ -33,6 +34,7 @@ import {
   verifyEmailTemplate,
 } from "@/modules/email/templates";
 
+import { nameFromEmail } from "./display-name";
 import { DEFAULT_ROLE, ROLES } from "./roles";
 import { enforceSessionLimit } from "./session-limit.server";
 
@@ -118,6 +120,18 @@ export const auth = betterAuth({
 
   // 5. "Ganchos" do banco: código nosso que roda antes/depois de o Better Auth gravar algo.
   databaseHooks: {
+    user: {
+      create: {
+        // Antes de criar um usuário: se veio sem nome (cadastro pelo link mágico),
+        // usa um nome provisório tirado do e-mail. Devolver `{ data }` troca os dados gravados.
+        before: async (user) => {
+          if (user.name?.trim()) {
+            return;
+          }
+          return { data: { ...user, name: nameFromEmail(user.email) } };
+        },
+      },
+    },
     session: {
       create: {
         // Logo após cada novo login, aplica o limite de dispositivos simultâneos.

@@ -10,7 +10,10 @@
  */
 
 const MESSAGES_BY_CODE: Record<string, string> = {
-  INVALID_EMAIL_OR_PASSWORD: "E-mail ou senha incorretos.",
+  // A dica cobre quem entra só por link mágico/Google (conta sem senha): o Better Auth não diz
+  // se a conta existe ou tem senha, para não revelar quem é aluno. "Esqueci minha senha" cria uma.
+  INVALID_EMAIL_OR_PASSWORD:
+    'E-mail ou senha incorretos. Se você esqueceu a senha, ou nunca criou uma, use "Esqueci minha senha".',
   INVALID_EMAIL: "E-mail inválido.",
   INVALID_PASSWORD: "Senha incorreta.",
   USER_ALREADY_EXISTS: "Já existe uma conta com este e-mail. Tente entrar ou recuperar a senha.",
@@ -22,6 +25,11 @@ const MESSAGES_BY_CODE: Record<string, string> = {
   TOKEN_EXPIRED: "Este link expirou. Peça um novo.",
   EMAIL_NOT_VERIFIED: "Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.",
   USER_NOT_FOUND: "Não encontramos uma conta com este e-mail.",
+  // Vêm do login com Google (a URL traz ?error=account_not_linked, que viramos em maiúsculas).
+  // Acontece quando já existe uma conta com senha e e-mail ainda NÃO confirmado: por segurança
+  // o Better Auth não junta as duas até o dono provar que o e-mail é dele.
+  ACCOUNT_NOT_LINKED:
+    'Já existe uma conta com este e-mail que ainda não foi confirmada. Confirme o e-mail (pelo link enviado no cadastro ou pelo botão "Receber link de acesso por e-mail") e depois tente o Google de novo.',
   CREDENTIAL_ACCOUNT_NOT_FOUND:
     "Esta conta não tem senha cadastrada. Entre com o Google ou com o link por e-mail.",
 };

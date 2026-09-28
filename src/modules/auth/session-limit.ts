@@ -56,7 +56,10 @@ export function selectSessionsToRevoke(
   const newestFirst = [...active].sort((a, b) => {
     if (a.id === keepSessionId) return -1;
     if (b.id === keepSessionId) return 1;
-    return b.createdAt.getTime() - a.createdAt.getTime();
+    const byCreatedAt = b.createdAt.getTime() - a.createdAt.getTime();
+    if (byCreatedAt !== 0) return byCreatedAt;
+    // Desempate (dois logins no mesmo milissegundo): pelo ID, para o resultado ser sempre o mesmo.
+    return a.id.localeCompare(b.id);
   });
 
   const overLimit = newestFirst.slice(maxActiveSessions);

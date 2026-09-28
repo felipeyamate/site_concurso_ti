@@ -69,10 +69,15 @@ Com o `npm run dev` rodando:
 | 10 | Em `/esqueci-senha`, peça a redefinição e abra o link do terminal | Tela de nova senha. Depois de trocar, os outros dispositivos são deslogados e a senha nova funciona |
 | 11 | Rode `npm run user:set-role -- seu@email.com ADMIN` e abra `/admin` | Painel admin com a tabela de usuários |
 | 12 | Tente `/entrar?voltar=https://google.com` e faça login | Você vai para `/area-do-aluno`, nunca para outro site |
+| 13 | Saia e, em `/entrar`, peça um link mágico com um e-mail **que ainda não tem conta** | Ao abrir o link, a conta é criada com um nome tirado do e-mail (ex.: `ana.lima@...` → "Ana Lima") e aparece o aviso "Sua conta não tem senha" |
+| 14 | No aviso, clique em "Criar uma senha" e siga o e-mail | Depois de criar, você entra com e-mail e senha e o aviso some |
 
 **Login com Google** (opcional): preencha `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` no
 `.env.local` (instruções no `.env.example`) e reinicie o `npm run dev`. O botão "Continuar com
 Google" aparece no login e no cadastro.
+
+**Revisando um PR?** O guia completo (como rodar a branch do PR, o que olhar no código e como aprovar)
+está em [`docs/COMO-REVISAR.md`](./docs/COMO-REVISAR.md).
 
 ---
 

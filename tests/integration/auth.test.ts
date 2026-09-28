@@ -49,10 +49,13 @@ describe("cadastro", () => {
       })
       .catch(() => null);
 
+    // Esta verificação roda SEMPRE (mesmo se o cadastro tiver sido recusado):
+    // o banco começou vazio, então não pode existir nenhum ADMIN.
+    expect(await prisma.user.count({ where: { role: "ADMIN" } })).toBe(0);
+
+    // Comportamento atual do Better Auth: ignora o campo e cria a conta como aluno.
     const user = await prisma.user.findUnique({ where: { email: "hacker@exemplo.com" } });
-    if (user) {
-      expect(user.role).toBe("STUDENT");
-    }
+    expect(user?.role).toBe("STUDENT");
   });
 
   it("guarda a senha só como hash, nunca em texto puro", async () => {
@@ -62,6 +65,48 @@ describe("cadastro", () => {
     });
     expect(account.password).toBeTruthy();
     expect(account.password).not.toContain(PASSWORD);
+  });
+});
+
+// Pede um link mágico e "clica" nele, pegando o token direto do banco (no lugar do e-mail).
+async function signInWithMagicLink(email: string) {
+  await auth.api.signInMagicLink({ body: { email }, headers: new Headers() });
+  const verification = await prisma.verification.findFirstOrThrow({
+    where: { NOT: { identifier: { startsWith: "reset-password:" } } },
+    orderBy: { createdAt: "desc" },
+  });
+  return auth.api.magicLinkVerify({ query: { token: verification.identifier }, headers: new Headers() });
+}
+
+describe("link mágico", () => {
+  it("quem se cadastra pelo link ganha um nome tirado do e-mail (nunca vazio)", async () => {
+    await signInWithMagicLink("maria.silva@exemplo.com");
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: "maria.silva@exemplo.com" } });
+    expect(user.name).toBe("Maria Silva");
+    expect(user.emailVerified).toBe(true); // clicar no link prova que o e-mail é da pessoa
+  });
+
+  it("em conta com e-mail NÃO confirmado, remove a senha antiga (proteção) e 'Esqueci minha senha' recupera", async () => {
+    // Por que o Better Auth faz isso: alguém poderia se cadastrar com o e-mail de outra pessoa
+    // antes dela. Quando o dono de verdade prova o e-mail (pelo link), a senha "não provada" some.
+    const email = "nao.confirmado@exemplo.com";
+    await signUp(email);
+    await signInWithMagicLink(email);
+
+    await expect(signIn(email)).rejects.toThrow(); // a senha antiga não vale mais
+    expect(await prisma.account.count({ where: { user: { email }, providerId: "credential" } })).toBe(0);
+
+    // Recuperação: pedir redefinição cria uma senha nova.
+    await auth.api.requestPasswordReset({ body: { email, redirectTo: "/redefinir-senha" } });
+    const reset = await prisma.verification.findFirstOrThrow({
+      where: { identifier: { startsWith: "reset-password:" } },
+    });
+    const token = reset.identifier.replace("reset-password:", "");
+    await auth.api.resetPassword({ body: { token, newPassword: "novaSenha456" } });
+
+    await expect(
+      auth.api.signInEmail({ body: { email, password: "novaSenha456" } }),
+    ).resolves.toBeTruthy();
   });
 });
 

@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 
 import { authClient } from "../auth-client";
 import { getAuthErrorMessage } from "../error-messages";
+import { loginPath } from "../redirect";
 import { emailOnlySchema, getFieldErrors, signInSchema } from "../validation";
 import { FormField } from "./form-field";
 import { FormMessage } from "./form-message";
@@ -87,7 +88,8 @@ export function SignInForm({ redirectTo, googleEnabled, initialError = null }: S
     const { error } = await authClient.signIn.magicLink({
       email: parsed.data.email,
       callbackURL: redirectTo,
-      errorCallbackURL: "/entrar",
+      // Se o link vencer, volta para o login com o erro, sem perder o destino.
+      errorCallbackURL: loginPath(redirectTo),
     });
     setPending(false);
 

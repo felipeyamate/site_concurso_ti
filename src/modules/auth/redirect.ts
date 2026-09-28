@@ -37,3 +37,14 @@ export function safeRedirectPath(value: unknown, fallback: string = DEFAULT_AFTE
   }
   return value;
 }
+
+/**
+ * Monta o endereço da tela de login que, depois de entrar, volta para `returnTo`.
+ * Ex.: loginPath("/admin") → "/entrar?voltar=%2Fadmin"
+ *
+ * Usado também como "endereço em caso de erro" do link mágico e do Google: assim, se o link
+ * vencer, a pessoa cai no login com a mensagem de erro SEM perder para onde ia.
+ */
+export function loginPath(returnTo: string): string {
+  return `/entrar?${RETURN_TO_PARAM}=${encodeURIComponent(safeRedirectPath(returnTo))}`;
+}

@@ -20,7 +20,7 @@ import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
 import { auth } from "./auth";
-import { RETURN_TO_PARAM } from "./redirect";
+import { loginPath } from "./redirect";
 import { hasMinimumRole, type Role } from "./roles";
 
 /**
@@ -29,9 +29,17 @@ import { hasMinimumRole, type Role } from "./roles";
  * `cache` (do React) guarda o resultado durante UMA renderização de página: se o cabeçalho,
  * a página e um componente perguntarem "quem está logado?", o banco é consultado só uma vez.
  * (Parecido com um `functools.lru_cache` que dura só uma requisição.)
+ *
+ * Por que `disableRefresh: true`: aqui só LEMOS a sessão. Durante a renderização de uma página
+ * o Next.js não deixa gravar cookies; se renovássemos aqui, o banco ganharia mais 7 dias mas o
+ * cookie do navegador não, e o aluno seria deslogado mesmo usando o site todo dia.
+ * Quem renova é o `SessionRefresher` (components/session-refresher.tsx), pelo navegador.
  */
 export const getCurrentSession = cache(async () => {
-  return auth.api.getSession({ headers: await headers() });
+  return auth.api.getSession({
+    headers: await headers(),
+    query: { disableRefresh: true },
+  });
 });
 
 /**
@@ -41,7 +49,7 @@ export const getCurrentSession = cache(async () => {
 export async function requireSession(returnTo: string) {
   const session = await getCurrentSession();
   if (!session) {
-    redirect(`/entrar?${RETURN_TO_PARAM}=${encodeURIComponent(returnTo)}`);
+    redirect(loginPath(returnTo));
   }
   return session;
 }
