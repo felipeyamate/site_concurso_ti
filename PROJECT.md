@@ -122,8 +122,8 @@ Coupon, Affiliate, WebhookEvent (log de tudo que chega dos provedores)
 | Fase | Entrega | Status |
 |---|---|---|
 | 0 | Decisões registradas neste arquivo | ✅ concluída |
-| 1 | Setup do projeto, banco, schema Prisma, autenticação e papéis | ⏳ próxima |
-| 2 | Catálogo, área do aluno, player, progresso | — |
+| 1 | Setup do projeto, banco, schema Prisma, autenticação e papéis | ✅ concluída (ver seção 10) |
+| 2 | Catálogo, área do aluno, player, progresso | ⏳ próxima |
 | 3 | Admin: CRUD de cursos, upload de vídeos (Panda) e PDFs (R2) | — |
 | 4 | Checkout (Asaas), webhooks, matrículas, assinaturas, reembolso, NFS-e | — |
 | 5 | Banco de questões, simulados, mapa de incidência por banca | — |
@@ -142,11 +142,30 @@ atualizado.
 | 2026-09-28 | Começar por um Curso Base, depois trilhas por concurso | Validar o método antes de especializar |
 | 2026-09-28 | Orçamento de ferramentas sem restrição rígida | Priorizar qualidade e antipirataria sobre custo |
 | 2026-09-28 | Stack da seção 4 | Ver justificativas na tabela |
+| 2026-09-28 | Versões: Next.js 16, Prisma 7, Better Auth 1.7, Zod 4, Tailwind CSS 4, Vitest 5, Node 22+ | Versões estáveis atuais. Mudanças importantes: `proxy.ts` no lugar de `middleware.ts` (Next 16); `prisma.config.ts` + cliente gerado em `src/generated/prisma` + driver adapter `pg` (Prisma 7) |
+| 2026-09-28 | URLs em português (`/entrar`, `/cadastro`, `/area-do-aluno`, `/esqueci-senha`) | São texto visível para o aluno e ajudam no SEO. Exceção consciente à regra "nomes em inglês", que continua valendo para código, arquivos `.ts` e banco |
+| 2026-09-28 | Perfis hierárquicos: STUDENT < TEACHER < ADMIN (`hasMinimumRole`) | Evita listas de perfis repetidas; ADMIN pode tudo que TEACHER pode |
+| 2026-09-28 | Perfil nunca é escolhido no cadastro; só muda via `npm run user:set-role` | Impede alguém de se cadastrar como ADMIN. Tela de gestão de perfis fica para a Fase 3 |
+| 2026-09-28 | `/admin` exige TEACHER ou mais; lista de usuários só para ADMIN; sem permissão → 404 | 404 não revela que a área existe |
+| 2026-09-28 | Limite de **2 dispositivos** logados; o login novo derruba o mais antigo | Antipirataria (compartilhamento de senha) sem bloquear o aluno que troca de aparelho |
+| 2026-09-28 | Login dura 7 dias e é renovado a cada dia de uso; trocar a senha desloga os outros dispositivos | Conforto para quem estuda todo dia + segurança se a senha vazar |
+| 2026-09-28 | Confirmar o e-mail é um **extra**, não um requisito: o aluno entra sem confirmar (a confirmação é enviada e há aviso na área do aluno) | **Decisão do dono do projeto** (confirmada após a revisão do PR #1): menos atrito no cadastro. Consequência aceita: ver a linha da proteção do link mágico abaixo |
+| 2026-09-28 | Rate limit (tentativas de login) guardado no banco (`rate_limits`), ativo só em produção | Na Vercel cada requisição pode cair num servidor diferente; memória não é compartilhada |
+| 2026-09-28 | Tabelas e colunas do banco em snake_case (`users.email_verified`) via `@map` | Facilita SQL direto no console da Neon e em ferramentas de dados |
+| 2026-09-28 | Schema da Fase 1 só com tabelas de contas; as demais entram na fase em que forem usadas | Evita tabelas sem código e retrabalho de migração |
+| 2026-09-28 | Sem `RESEND_API_KEY`: em dev os e-mails são impressos no terminal; em produção dá erro (logado) | Testar tudo localmente sem configurar e-mail, sem falhas silenciosas em produção |
+| 2026-09-28 | Migrações de produção aplicadas manualmente (`npm run db:deploy`), não no deploy automático | Evita que um deploy de preview altere o banco de produção. Reavaliar na Fase 7 |
+| 2026-09-28 | Testes de integração exigem banco separado (`TEST_DATABASE_URL`, ex.: branch `test` na Neon); CI no GitHub Actions com Postgres temporário | Os testes apagam dados; nunca podem rodar no banco do app |
+| 2026-09-28 | Componentes shadcn/ui copiados à mão nesta fase (estilo new-york) | O ambiente do Claude bloqueia `ui.shadcn.com`. Na sua máquina, `npx shadcn@latest add <componente>` funciona normalmente com o `components.json` |
+| 2026-09-28 | Páginas do servidor só **leem** a sessão; a renovação diária é feita pelo navegador (`SessionRefresher` nos layouts das áreas logadas) | Encontrado na revisão: renovar durante a renderização estendia o banco mas não o cookie, e o aluno era deslogado em 7 dias mesmo usando o site |
+| 2026-09-28 | Quem se cadastra pelo link mágico ganha um nome provisório tirado do e-mail (`maria.silva@...` → "Maria Silva") | O link mágico não pede nome; sem isso a conta ficava com nome vazio |
+| 2026-09-28 | Mantida a proteção do Better Auth: entrar pelo link mágico numa conta com e-mail **não confirmado** apaga a senha antiga e desloga os outros dispositivos. A área do aluno avisa "Sua conta não tem senha" e "Esqueci minha senha" cria uma nova | Impede o golpe de alguém se cadastrar antes com o e-mail de outra pessoa. Efeito colateral aceito de não exigir confirmação de e-mail |
+| 2026-09-28 | Em produção com Resend, `EMAIL_FROM` com `@resend.dev` impede o app de iniciar | Esse remetente de teste só entrega para o dono da conta do Resend; os alunos não receberiam nada |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
-- [ ] GitHub vinculado ao Claude (claude.ai → Settings → Connectors) para commits no repositório
-- [ ] Neon (banco PostgreSQL)
+- [x] GitHub vinculado ao Claude (claude.ai → Settings → Connectors) para commits no repositório
+- [ ] Neon (banco PostgreSQL) — criar também uma branch `test` para os testes de integração
 - [ ] Vercel (hospedagem, conectada ao repositório)
 - [ ] Google Cloud Console (login com Google) — pode ficar para o fim da Fase 1
 - [ ] Resend (e-mails) — Fase 1
@@ -157,3 +176,31 @@ atualizado.
 
 > Nunca colar senhas ou chaves de API no chat. Elas vão só no arquivo `.env.local`
 > (que não sobe para o GitHub) e nas variáveis de ambiente da Vercel.
+
+## 10. Histórico de entregas
+
+### Fase 1 — Setup, banco, autenticação e perfis (2026-09-28)
+
+**Entregue:**
+- Projeto Next.js 16 + TypeScript + Tailwind 4 + shadcn/ui, organizado em módulos (`src/modules/auth`, `src/modules/email`).
+- Banco: `prisma/schema.prisma` com `users` (com `role`), `sessions`, `accounts`, `verifications`, `rate_limits`; migração inicial.
+- Variáveis de ambiente validadas com Zod ao iniciar (`src/lib/env.ts`), modelo em `.env.example`.
+- Autenticação (Better Auth): e-mail/senha, link mágico por e-mail, Google (liga sozinho quando as chaves existem),
+  verificação de e-mail, "esqueci minha senha", proteção contra força bruta.
+- Perfis `STUDENT`/`TEACHER`/`ADMIN`, proteção de páginas (`proxy.ts` + `requireSession`/`requireRole`), script `user:set-role`.
+- Limite de 2 dispositivos, com lista "Dispositivos conectados" e botão para desconectar.
+- Páginas: início (provisória), entrar, cadastro, esqueci/redefinir senha, área do aluno, painel admin, termos e privacidade (provisórios).
+- Testes: 46 unitários + 8 de integração; CI no GitHub Actions (lint, tipos, testes, build).
+- Revisão de código feita no PR [#1](https://github.com/felipeyamate/site_concurso_ti/pull/1): 10 achados, todos corrigidos (detalhes no PR).
+
+**Como testar:** [README.md → "Como testar a Fase 1"](./README.md#2-como-testar-a-fase-1-passo-a-passo).
+
+**Decisão tomada na revisão:** a confirmação de e-mail continua **opcional** (um extra, não é exigida para entrar).
+Os efeitos colaterais foram tratados na própria Fase 1: aviso "Sua conta não tem senha" com atalho para criar uma, e mensagem
+explicando o erro do Google para contas não confirmadas.
+
+**Pendências conhecidas (não bloqueiam a Fase 2):**
+- Textos definitivos de Termos e Privacidade + registro formal de consentimento (LGPD) → Fase 7.
+- Exclusão de conta pelo próprio aluno (LGPD) → Fase 7.
+- Deploys de preview da Vercel: `BETTER_AUTH_URL` aponta para um endereço fixo; login em previews exigirá ajuste → Fase 7.
+- `npm audit` aponta alertas em dependências internas do CLI do Prisma (usado só em desenvolvimento, não vai para o site). Acompanhar atualizações do Prisma.

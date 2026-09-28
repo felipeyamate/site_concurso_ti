@@ -1,0 +1,122 @@
+// =============================================================================
+// schema.prisma — Estrutura do banco de dados (tabelas, colunas e relações).
+//
+// Quem usa: o CLI do Prisma. A partir deste arquivo ele:
+//   1. gera as migrações SQL (`npm run db:migrate`), que criam/alteram as tabelas;
+//   2. gera o cliente TypeScript tipado em `src/generated/prisma` (`npm run db:generate`).
+//
+// Paralelo em Python: é como os `models.py` do SQLAlchemy/Django num único arquivo.
+//
+// Convenções:
+// - No código, os nomes ficam em camelCase (padrão do TypeScript): `emailVerified`.
+// - No banco, tabelas e colunas ficam em snake_case (`email_verified`) via @map/@@map,
+//   para facilitar consultas SQL diretas (ex.: no console da Neon ou em ferramentas de BI).
+//
+// Fase 1: apenas as tabelas de contas/autenticação. As tabelas de catálogo, matrículas,
+// pagamentos etc. (seção 6 do PROJECT.md) entram nas fases em que forem usadas.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // A URL de conexão fica em `prisma.config.ts` (lida das variáveis de ambiente).
+}
+
+// Perfis de usuário. A ordem de poder é: STUDENT < TEACHER < ADMIN
+// (a regra de "quem pode o quê" fica em `src/modules/auth/roles.ts`).
+enum Role {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+// -----------------------------------------------------------------------------
+// Tabelas usadas pelo Better Auth (biblioteca de autenticação).
+// Os nomes dos campos seguem o que o Better Auth espera — não renomeie no código
+// sem ajustar a configuração em `src/modules/auth/auth.ts`.
+// -----------------------------------------------------------------------------
+
+// Uma pessoa cadastrada (aluno, professor ou administrador).
+model User {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false) @map("email_verified")
+  image         String?
+  // Perfil do usuário. Todo cadastro novo nasce como STUDENT; só um script/admin promove.
+  role          Role      @default(STUDENT)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  sessions      Session[]
+  accounts      Account[]
+
+  @@map("users")
+}
+
+// Um login ativo em um dispositivo/navegador. O navegador guarda só o `token` (num cookie).
+// Apagar a linha = deslogar aquele dispositivo. Usamos isso para o limite de sessões.
+model Session {
+  id        String   @id
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// Forma de login ligada ao usuário: "credential" (e-mail/senha, com o hash da senha)
+// ou um provedor externo como "google" (com os tokens OAuth).
+model Account {
+  id                    String    @id
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id")
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?
+  // Hash da senha (algoritmo scrypt). A senha em texto puro nunca é gravada.
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+// Códigos temporários: verificação de e-mail, redefinição de senha, link mágico.
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+// Contador de tentativas por IP/rota (proteção contra força bruta no login).
+// Fica no banco porque, na Vercel, cada requisição pode cair num servidor diferente.
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest BigInt @map("last_request")
+
+  @@map("rate_limits")
+}

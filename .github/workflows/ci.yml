@@ -1,0 +1,71 @@
+# =============================================================================
+# ci.yml — Verificação automática a cada push e pull request (GitHub Actions).
+#
+# O que roda, em ordem: lint → checagem de tipos → testes unitários →
+# testes de integração (com um PostgreSQL temporário) → build de produção.
+# Se qualquer etapa falhar, o GitHub marca o commit com um X vermelho.
+#
+# Os valores abaixo são FALSOS e servem só para o CI. Segredos reais ficam
+# no .env.local (sua máquina) e nas variáveis de ambiente da Vercel.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Banco PostgreSQL descartável, só para os testes de integração.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: concurso_ti_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://app:app@localhost:5432/concurso_ti_ci_app
+      TEST_DATABASE_URL: postgresql://app:app@localhost:5432/concurso_ti_test
+      BETTER_AUTH_SECRET: segredo-falso-apenas-para-o-ci-com-32-caracteres
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # Instala as dependências exatamente como no package-lock.json
+      # (o "postinstall" também gera o cliente do Prisma).
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Checagem de tipos
+        run: npm run typecheck
+
+      - name: Testes unitários
+        run: npm test
+
+      - name: Testes de integração
+        run: npm run test:integration
+
+      - name: Build de produção
+        run: npm run build
