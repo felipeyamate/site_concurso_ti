@@ -4,8 +4,8 @@
  * Quem chama: o Next.js. Antes, o `proxy.ts` já barrou quem não tem cookie de login;
  * aqui o `requireSession` confere a sessão de verdade no banco.
  *
- * Fase 1: mostra os dados da conta, o aviso de e-mail não confirmado e os dispositivos
- * conectados (limite de sessões). Os cursos entram na Fase 2.
+ * Mostra os dados da conta, avisos (e-mail não confirmado, conta sem senha), "Meus cursos"
+ * com o progresso e o botão "Continuar", e os dispositivos conectados (limite de sessões).
  */
 import "server-only";
 
@@ -23,6 +23,8 @@ import { SessionList, type SessionListItem } from "@/modules/auth/components/ses
 import { SignOutButton } from "@/modules/auth/components/sign-out-button";
 import { ROLE_LABELS, hasMinimumRole, isRole } from "@/modules/auth/roles";
 import { requireSession } from "@/modules/auth/session";
+import { MyCourses } from "@/modules/progress/components/my-courses";
+import { listMyCourseViews } from "@/modules/progress/course-view.server";
 import { MAX_ACTIVE_SESSIONS } from "@/modules/auth/session-limit";
 import { describeUserAgent } from "@/modules/auth/user-agent";
 
@@ -34,15 +36,16 @@ export const metadata: Metadata = {
 export default async function StudentAreaPage() {
   const { user, session } = await requireSession("/area-do-aluno");
 
-  // Busca, em paralelo (como um `asyncio.gather`), os logins ativos do aluno (só campos de
-  // exibição; nunca o token) e se a conta tem senha cadastrada.
-  const [activeSessions, passwordAccounts] = await Promise.all([
+  // Busca, em paralelo (como um `asyncio.gather`): os logins ativos do aluno (só campos de
+  // exibição; nunca o token), se a conta tem senha cadastrada e os cursos com o progresso.
+  const [activeSessions, passwordAccounts, myCourses] = await Promise.all([
     prisma.session.findMany({
       where: { userId: user.id, expiresAt: { gt: new Date() } },
       select: { id: true, userAgent: true, createdAt: true },
       orderBy: { createdAt: "desc" },
     }),
     prisma.account.count({ where: { userId: user.id, providerId: "credential" } }),
+    listMyCourseViews({ userId: user.id, role: user.role }),
   ]);
   // Conta sem senha: quem só usa o link por e-mail ou o Google — ou quem teve a senha removida
   // pela proteção do Better Auth ao entrar pelo link mágico sem ter confirmado o e-mail.
@@ -104,15 +107,7 @@ export default async function StudentAreaPage() {
         </Alert>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Meus cursos</CardTitle>
-          <CardDescription>Seus cursos vão aparecer aqui.</CardDescription>
-        </CardHeader>
-        <CardContent className="text-muted-foreground text-sm">
-          Em breve: o Curso Base &quot;Informática e TI para Concursos — do zero&quot;.
-        </CardContent>
-      </Card>
+      <MyCourses courses={myCourses} />
 
       <Card>
         <CardHeader>

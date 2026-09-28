@@ -1,0 +1,151 @@
+"use client";
+
+/**
+ * video-player.tsx — O player de vídeo das aulas.
+ *
+ * Quem chama: `src/modules/progress/components/lesson-player.tsx`.
+ * O que faz:
+ *  - toca o vídeo (arquivo direto pelo navegador, ou o player do fornecedor num <iframe>);
+ *  - começa de onde o aluno parou (`initialPositionSeconds`);
+ *  - avisa quem chamou sobre o andamento (`onProgress`) a cada 10 s, ao pausar, ao sair da aba
+ *    e ao terminar — quem chamou decide o que fazer (salvar no banco);
+ *  - mostra a marca d'água com o e-mail do aluno.
+ *
+ * Os `on...` do <video> são "eventos" do navegador (como callbacks em Python): o navegador chama
+ * a nossa função quando o vídeo carrega, avança, pausa ou termina.
+ */
+import { useEffect, useRef, type SyntheticEvent } from "react";
+
+import type { VideoPlayback } from "../types";
+import { Watermark } from "./watermark";
+
+export type PlaybackProgress = {
+  positionSeconds: number;
+  durationSeconds: number | null;
+  ended: boolean;
+};
+
+type VideoPlayerProps = {
+  playback: VideoPlayback;
+  title: string;
+  watermarkText: string;
+  initialPositionSeconds: number;
+  onProgress: (progress: PlaybackProgress) => void;
+};
+
+// De quanto em quanto tempo (de vídeo assistido) avisamos o andamento.
+const REPORT_EVERY_SECONDS = 10;
+
+export function VideoPlayer({ playback, title, watermarkText, initialPositionSeconds, onProgress }: VideoPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const lastReportedRef = useRef(initialPositionSeconds);
+  // Guarda sempre a versão MAIS RECENTE de `onProgress`. O evento de "trocar de aba" é registrado
+  // uma vez só; sem isto, ele continuaria chamando uma versão antiga (ex.: de outra aula).
+  const onProgressRef = useRef(onProgress);
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+  }, [onProgress]);
+
+  // "Continuar de onde parou". O HTML do vídeo chega pronto do servidor e o navegador pode
+  // carregar os dados do vídeo ANTES de o React ligar o `onLoadedMetadata` — aí o evento passa
+  // sem ninguém ouvindo. Por isso, ao montar, conferimos: se já carregou, aplicamos agora.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      applyInitialPosition(video);
+    }
+    // Só na montagem: a posição inicial vale para a abertura da aula.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ao trocar de aba ou minimizar, salva onde parou (o aluno pode fechar a aba em seguida).
+  // E ao SAIR da página da aula (ex.: clicar em "Próxima"), salva também: nesse caso o navegador
+  // não dispara "pause" nem "visibilitychange", e perderíamos até 10 s de posição.
+  useEffect(() => {
+    const video = videoRef.current; // guardado agora: na "limpeza" o ref já pode estar vazio
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden" && video && video.currentTime > 0) {
+        reportFrom(video, false);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      // "Limpeza" do efeito = o componente está saindo da tela.
+      if (video && !video.ended && Math.abs(video.currentTime - lastReportedRef.current) >= 1) {
+        reportFrom(video, false);
+      }
+    };
+    // Só na montagem/desmontagem; `reportFrom` usa refs (sempre atualizados).
+  }, []);
+
+  // Lê a posição atual do <video> e avisa quem chamou.
+  function reportFrom(video: HTMLVideoElement, ended: boolean) {
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null;
+    lastReportedRef.current = video.currentTime;
+    onProgressRef.current({ positionSeconds: video.currentTime, durationSeconds: duration, ended });
+  }
+
+  // Pula para a posição salva, uma única vez (o evento pode chegar depois do efeito acima).
+  const appliedInitialRef = useRef(false);
+  function applyInitialPosition(video: HTMLVideoElement) {
+    if (appliedInitialRef.current) return;
+    appliedInitialRef.current = true;
+    if (initialPositionSeconds > 0 && initialPositionSeconds < video.duration) {
+      video.currentTime = initialPositionSeconds;
+    }
+  }
+
+  function handleLoadedMetadata(event: SyntheticEvent<HTMLVideoElement>) {
+    applyInitialPosition(event.currentTarget);
+  }
+
+  function handleTimeUpdate(event: SyntheticEvent<HTMLVideoElement>) {
+    const moved = Math.abs(event.currentTarget.currentTime - lastReportedRef.current);
+    if (moved >= REPORT_EVERY_SECONDS) {
+      reportFrom(event.currentTarget, false);
+    }
+  }
+
+  if (playback.kind === "iframe") {
+    // Fase 3 (Panda Video): o progresso virá das mensagens do player do fornecedor.
+    return (
+      <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+        <iframe
+          src={playback.src}
+          title={title}
+          className="absolute inset-0 h-full w-full"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+          allowFullScreen
+        />
+        <Watermark text={watermarkText} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+      <video
+        ref={videoRef}
+        src={playback.src}
+        title={title}
+        className="absolute inset-0 h-full w-full"
+        controls
+        preload="metadata"
+        playsInline
+        // Dificulta baixar o arquivo pelo menu do player (não impede um usuário avançado).
+        controlsList="nodownload"
+        disablePictureInPicture
+        onContextMenu={(event) => event.preventDefault()}
+        onLoadedMetadata={handleLoadedMetadata}
+        onTimeUpdate={handleTimeUpdate}
+        onPause={(event) => {
+          // O navegador também dispara "pause" logo antes de "ended"; o "ended" cuida desse caso.
+          if (!event.currentTarget.ended) reportFrom(event.currentTarget, false);
+        }}
+        onEnded={(event) => reportFrom(event.currentTarget, true)}
+      />
+      <Watermark text={watermarkText} />
+    </div>
+  );
+}

@@ -123,8 +123,8 @@ Coupon, Affiliate, WebhookEvent (log de tudo que chega dos provedores)
 |---|---|---|
 | 0 | Decisões registradas neste arquivo | ✅ concluída |
 | 1 | Setup do projeto, banco, schema Prisma, autenticação e papéis | ✅ concluída (ver seção 10) |
-| 2 | Catálogo, área do aluno, player, progresso | ⏳ próxima |
-| 3 | Admin: CRUD de cursos, upload de vídeos (Panda) e PDFs (R2) | — |
+| 2 | Catálogo, área do aluno, player, progresso | ✅ concluída (ver seção 10) |
+| 3 | Admin: CRUD de cursos, upload de vídeos (Panda) e PDFs (R2) | ⏳ próxima |
 | 4 | Checkout (Asaas), webhooks, matrículas, assinaturas, reembolso, NFS-e | — |
 | 5 | Banco de questões, simulados, mapa de incidência por banca | — |
 | 6 | Landing pages por edital, SEO, blog, cupons e afiliados | — |
@@ -161,6 +161,21 @@ atualizado.
 | 2026-09-28 | Quem se cadastra pelo link mágico ganha um nome provisório tirado do e-mail (`maria.silva@...` → "Maria Silva") | O link mágico não pede nome; sem isso a conta ficava com nome vazio |
 | 2026-09-28 | Mantida a proteção do Better Auth: entrar pelo link mágico numa conta com e-mail **não confirmado** apaga a senha antiga e desloga os outros dispositivos. A área do aluno avisa "Sua conta não tem senha" e "Esqueci minha senha" cria uma nova | Impede o golpe de alguém se cadastrar antes com o e-mail de outra pessoa. Efeito colateral aceito de não exigir confirmação de e-mail |
 | 2026-09-28 | Em produção com Resend, `EMAIL_FROM` com `@resend.dev` impede o app de iniciar | Esse remetente de teste só entrega para o dono da conta do Resend; os alunos não receberiam nada |
+| 2026-09-28 | **Fase 2:** catálogo em 3 níveis (Curso → Módulo → Aula); a aula guarda também o `courseId`, e o `slug` é único dentro do curso. URLs: `/cursos/<curso>/aulas/<aula>` | Endereços legíveis e estáveis para o aluno e para o SEO |
+| 2026-09-28 | Toda decisão de acesso passa por **uma função só**: `checkLessonAccess` (`src/modules/enrollment/access.ts`). Ordem: professor/admin → rascunho bloqueado → matrícula ativa → aula grátis → bloqueado | Cumpre a regra "quem libera o conteúdo é só a matrícula" e fica fácil de testar (é o código mais sensível) |
+| 2026-09-28 | Aula grátis exige **login** (conta gratuita) | Captura o contato do interessado antes de mostrar conteúdo |
+| 2026-09-28 | Aula bloqueada mostra o **motivo** (sem matrícula, acesso vencido, cancelado) e o caminho; rascunho para aluno dá 404 | O aluno entende o que fazer; rascunhos não vazam |
+| 2026-09-28 | Matrícula: **uma por aluno e curso**; revogar marca `revokedAt` (não apaga); origem `MANUAL`, `PURCHASE` ou `SUBSCRIPTION`. **Renovar nunca tira dias**: com a matrícula ativa, os dias novos são somados ao que faltava; vencida/revogada recomeça agora; a origem é mantida (`computeEnrollmentRenewal`, reutilizada na Fase 4) | Histórico preservado e pronto para os webhooks da Fase 4 ("gera/renova um Enrollment") |
+| 2026-09-28 | Até a Fase 4, matrícula só pelo script `npm run enroll`; até a Fase 3, conteúdo só pelo seed de exemplo (`npm run db:seed`) | Cada coisa na sua fase; o seed é só para desenvolvimento |
+| 2026-09-28 | Vídeo atrás da interface de provedor (`src/modules/video`). Hoje só o provedor **DEV** (vídeo de exemplo), **bloqueado em qualquer execução de produção** (exceto os previews da Vercel); se o vídeo falhar, a aula mostra "vídeo indisponível" em vez de derrubar a página. O Panda entra na Fase 3 | Princípio de troca de fornecedor; nunca ir ao ar sem link assinado |
+| 2026-09-28 | O endereço do vídeo só é gerado **depois** de conferir o acesso; a página bloqueada não contém vídeo nenhum | Regra "vídeos só depois de checar o Enrollment" |
+| 2026-09-28 | Marca d'água nossa, com o e-mail do aluno, mudando de lugar a cada 20 s, por cima de qualquer player | Antipirataria desde já; soma com a do Panda na Fase 3 |
+| 2026-09-28 | Progresso salvo a cada 10 s de vídeo, ao pausar, ao sair da aba, ao sair da página da aula e ao terminar. Conclui ao chegar a **90%** (pela posição) ou ao terminar; um salvamento comum nunca apaga a conclusão — só o botão desmarca | Simples e robusto; perder no máximo 10 s se a aba fechar |
+| 2026-09-28 | "Continuar": última aula assistida se não concluída; senão, a próxima pendente | Comportamento esperado por quem estuda em sequência |
+| 2026-09-28 | O banco garante que a aula pertence ao mesmo curso do seu módulo (chave estrangeira composta `(module_id, course_id)`) | A checagem de acesso usa o curso da aula; dados inconsistentes nunca podem liberar ou bloquear errado |
+| 2026-09-28 | Quem teve acesso e perdeu (vencido/cancelado) vê na página do curso o motivo e que o progresso continua guardado | Evita a mensagem genérica "matrículas abrem em breve" para ex-alunos |
+| 2026-09-28 | Trilhas por concurso/banca (Fase B do conteúdo) e reaproveitamento de aulas entre cursos ficam para depois (tabela de ligação quando for preciso); PDFs das aulas entram com o R2 na Fase 3 | Não criar tabelas sem uso |
+| 2026-09-28 | No celular, o cabeçalho esconde o botão "Criar conta" (continua na página inicial, no login e nos cursos) | Os 3 botões não cabiam em telas de 360 px |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -204,3 +219,25 @@ explicando o erro do Google para contas não confirmadas.
 - Exclusão de conta pelo próprio aluno (LGPD) → Fase 7.
 - Deploys de preview da Vercel: `BETTER_AUTH_URL` aponta para um endereço fixo; login em previews exigirá ajuste → Fase 7.
 - `npm audit` aponta alertas em dependências internas do CLI do Prisma (usado só em desenvolvimento, não vai para o site). Acompanhar atualizações do Prisma.
+
+### Fase 2 — Catálogo, área do aluno, player e progresso (2026-09-28)
+
+**Entregue:**
+- Banco: `courses`, `modules`, `lessons`, `enrollments` e `lesson_progress` (migração `catalog_enrollments_progress`).
+- Catálogo público (`/cursos`) e página do curso (`/cursos/<curso>`) com a grade, duração, aulas grátis e cadeados.
+- Página da aula com player, marca d'água com o e-mail, "continuar de onde parou", concluir/desmarcar, anterior/próxima e grade lateral com ✓.
+- Regra de acesso única (`checkLessonAccess`): matrícula ativa, vencida, revogada, aula grátis, rascunho, professor/admin.
+- Área do aluno: "Meus cursos" com % concluído e botão "Continuar".
+- Seed de exemplo (`npm run db:seed`: Curso Base com 16 aulas + 1 curso em rascunho) e script de matrícula (`npm run enroll`).
+- Provedor de vídeo de desenvolvimento, atrás da interface que receberá o Panda.
+- Testes: 92 unitários + 19 de integração; 36 cenários no navegador (incluindo celular de 360 px), além dos 39 da Fase 1.
+- Revisão de código antes do PR: 12 achados (2 meus + 10 da revisão formal), todos corrigidos e cobertos por testes.
+
+**Como testar:** [README.md → "Como testar a Fase 2"](./README.md#3-como-testar-a-fase-2-passo-a-passo).
+
+**Pendências conhecidas (não bloqueiam a Fase 3):**
+- A conclusão olha a **posição** no vídeo, não o tempo realmente assistido (pular para o fim conclui). Rever se virar problema.
+- Progresso do player do Panda (dentro de um `<iframe>`) depende das mensagens do player deles → Fase 3.
+- Vitrine pública (`/cursos`) é montada a cada acesso; cache e SEO próprios na Fase 6.
+- A nossa marca d'água fica por cima do player e **não aparece em tela cheia**; a proteção principal será a do Panda (dentro do vídeo), na Fase 3.
+- `npm run build && npm start` na sua máquina bloqueia o vídeo de exemplo (é "produção"); para testar, use `npm run dev`.

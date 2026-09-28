@@ -22,3 +22,9 @@
 - Sessão: Server Components só LEEM a sessão (`getCurrentSession` usa `disableRefresh`); quem renova o login
   é o `SessionRefresher`. Toda nova área logada precisa de um `layout.tsx` que inclua o `SessionRefresher`.
 - Todo PR segue o guia `docs/COMO-REVISAR.md` (descrição com "como testar" e "por onde revisar").
+- Acesso a aulas: decidir SEMPRE com `checkLessonAccess` (`src/modules/enrollment/access.ts`), nunca com
+  um `if` solto em página/ação. O vídeo (`getLessonPlayback`) só é pedido DEPOIS do acesso liberado.
+- Server Actions que mexem em aula/progresso conferem login + acesso (ver `src/modules/progress/actions.ts`).
+- Página que consulta o banco sem ler cookies/headers precisa de `await connection()` (de `next/server`);
+  senão o `next build` tenta consultar o banco (e o CI não tem banco no build).
+- Conteúdo de exemplo: `npm run db:seed` (`prisma/seed-catalog.ts`, idempotente). Nunca no banco de produção.

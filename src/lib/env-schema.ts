@@ -43,6 +43,18 @@ const envSchema = z
       emptyToUndefined,
       z.string().default("Concurso TI <onboarding@resend.dev>"),
     ),
+
+    // Vídeo de exemplo do provedor de desenvolvimento (aulas com provedor DEV).
+    DEV_SAMPLE_VIDEO_URL: z.preprocess(
+      emptyToUndefined,
+      z
+        .url({ error: "DEV_SAMPLE_VIDEO_URL deve ser um endereço de vídeo (https://...)." })
+        .default("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"),
+    ),
+
+    // Preenchida automaticamente pela Vercel: "production" só no site oficial
+    // ("preview" nos deploys de teste). Vazia na sua máquina.
+    VERCEL_ENV: z.preprocess(emptyToUndefined, z.enum(["development", "preview", "production"]).optional()),
   })
   // Regra que envolve mais de um campo (como um `@model_validator` do pydantic):
   // não faz sentido ter só o ID do Google sem o segredo, ou vice-versa.

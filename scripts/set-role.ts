@@ -15,14 +15,8 @@
  *
  * Paralelo em Python: é como um `manage.py` command do Django.
  */
-import { PrismaPg } from "@prisma/adapter-pg";
-import { config as loadEnv } from "dotenv";
-
-import { PrismaClient } from "../src/generated/prisma/client";
 import { ROLES, isRole } from "../src/modules/auth/roles";
-
-loadEnv({ path: ".env.local", quiet: true });
-loadEnv({ path: ".env", quiet: true });
+import { createScriptPrismaClient } from "./script-db";
 
 async function main(): Promise<void> {
   // process.argv é como o sys.argv do Python: [node, script, arg1, arg2, ...]
@@ -40,13 +34,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error("DATABASE_URL não encontrada. Configure o arquivo .env.local.");
-    process.exit(1);
-  }
-
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+  const prisma = createScriptPrismaClient();
   try {
     const email = emailArg.trim().toLowerCase();
     const user = await prisma.user.findUnique({ where: { email } });
