@@ -239,13 +239,17 @@ export async function deleteCourse(courseId: string): Promise<string[]> {
     await lockRows.lessonsOfCourse(tx, courseId);
     const course = await tx.course.findUnique({
       where: { id: courseId },
-      select: { _count: { select: { enrollments: true } } },
+      select: { _count: { select: { enrollments: true, orderItems: true } } },
     });
     if (!course) throw new UserFacingError("Curso não encontrado.");
     if (course._count.enrollments > 0) {
       throw new UserFacingError(
         "Este curso tem matrículas (mesmo vencidas ou canceladas). Para tirá-lo do ar, despublique em vez de apagar.",
       );
+    }
+    // Pedidos (mesmo não pagos) são histórico financeiro: o curso fica guardado.
+    if (course._count.orderItems > 0) {
+      throw new UserFacingError("Este curso aparece em pedidos de compra. Para tirá-lo do ar, despublique em vez de apagar.");
     }
     const watched = await tx.lessonProgress.count({ where: { lesson: { courseId }, ...studentProgressIn(courseId) } });
     if (watched > 0) {

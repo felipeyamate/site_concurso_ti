@@ -15,8 +15,9 @@
 // Fase 1: tabelas de contas/autenticação.
 // Fase 2: catálogo (Course, Module, Lesson), matrículas (Enrollment) e progresso (LessonProgress).
 // Fase 3: materiais das aulas em PDF (LessonAttachment) e o link do player do Panda na aula.
-// As demais tabelas (pagamentos, questões etc. — seção 6 do PROJECT.md) entram nas fases em que
-// forem usadas.
+// Fase 4: vendas — produtos (Product), planos de assinatura (Plan), pedidos (Order), assinaturas
+// (Subscription), cobranças (Payment), avisos do provedor (WebhookEvent) e notas fiscais (FiscalInvoice).
+// As demais tabelas (questões etc. — seção 6 do PROJECT.md) entram nas fases em que forem usadas.
 // =============================================================================
 
 generator client {
@@ -45,19 +46,24 @@ enum Role {
 
 // Uma pessoa cadastrada (aluno, professor ou administrador).
 model User {
-  id            String    @id
-  name          String
-  email         String    @unique
-  emailVerified Boolean   @default(false) @map("email_verified")
-  image         String?
+  id             String           @id
+  name           String
+  email          String           @unique
+  emailVerified  Boolean          @default(false) @map("email_verified")
+  image          String?
   // Perfil do usuário. Todo cadastro novo nasce como STUDENT; só um script/admin promove.
-  role          Role      @default(STUDENT)
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  sessions      Session[]
-  accounts      Account[]
-  enrollments   Enrollment[]
-  progress      LessonProgress[]
+  role           Role             @default(STUDENT)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  sessions       Session[]
+  accounts       Account[]
+  enrollments    Enrollment[]
+  progress       LessonProgress[]
+  // Fase 4 (vendas). Pedidos e assinaturas NÃO são apagados junto com o usuário (histórico
+  // financeiro/fiscal): apagar uma conta com compras é tratado na Fase 7 (LGPD).
+  billingProfile BillingProfile?
+  orders         Order[]
+  subscriptions  Subscription[]
 
   @@map("users")
 }
@@ -134,22 +140,27 @@ model RateLimit {
 
 // Um curso (ex.: "Informática e TI para Concursos — do zero").
 model Course {
-  id          String       @id @default(cuid())
+  id                     String          @id @default(cuid())
   // Identificador usado na URL: /cursos/<slug>. Só letras minúsculas, números e hífens.
-  slug        String       @unique
-  title       String
+  slug                   String          @unique
+  title                  String
   // Frase curta que aparece no catálogo, embaixo do título.
-  subtitle    String?
-  description String
+  subtitle               String?
+  description            String
   // Só cursos publicados aparecem para os alunos. Rascunhos: só TEACHER/ADMIN veem.
-  isPublished Boolean      @default(false) @map("is_published")
+  isPublished            Boolean         @default(false) @map("is_published")
   // Ordem no catálogo (menor primeiro).
-  position    Int          @default(0)
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
-  modules     Module[]
-  lessons     Lesson[]
-  enrollments Enrollment[]
+  position               Int             @default(0)
+  // Fase 4: o curso faz parte da assinatura? Quem tem assinatura paga assiste a TODOS os cursos
+  // marcados aqui (PROJECT.md, seção 6: "Plan → libera todos os cursos inclusos na assinatura").
+  includedInSubscription Boolean         @default(false) @map("included_in_subscription")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+  modules                Module[]
+  lessons                Lesson[]
+  enrollments            Enrollment[]
+  products               ProductCourse[]
+  orderItems             OrderCourse[]
 
   @@map("courses")
 }
@@ -184,31 +195,31 @@ enum VideoProvider {
 // A ligação com o módulo usa (moduleId, courseId) juntos: assim o BANCO recusa uma aula cujo
 // curso seja diferente do curso do seu módulo (a checagem de acesso usa o `courseId` da aula).
 model Lesson {
-  id              String           @id @default(cuid())
-  courseId        String           @map("course_id")
-  course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  moduleId        String           @map("module_id")
-  module          Module           @relation(fields: [moduleId, courseId], references: [id, courseId], onDelete: Cascade)
+  id              String             @id @default(cuid())
+  courseId        String             @map("course_id")
+  course          Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  moduleId        String             @map("module_id")
+  module          Module             @relation(fields: [moduleId, courseId], references: [id, courseId], onDelete: Cascade)
   slug            String
   title           String
   // Resumo em linguagem simples, mostrado embaixo do vídeo.
-  description     String           @default("")
+  description     String             @default("")
   // Ordem dentro do módulo (menor primeiro).
   position        Int
   // Duração aproximada, para mostrar no catálogo (o player informa a duração real).
-  durationSeconds Int              @default(0) @map("duration_seconds")
+  durationSeconds Int                @default(0) @map("duration_seconds")
   // Aula grátis: qualquer pessoa LOGADA assiste, mesmo sem matrícula (ajuda a vender o curso).
-  isFreePreview   Boolean          @default(false) @map("is_free_preview")
-  isPublished     Boolean          @default(true) @map("is_published")
-  videoProvider   VideoProvider    @default(DEV) @map("video_provider")
+  isFreePreview   Boolean            @default(false) @map("is_free_preview")
+  isPublished     Boolean            @default(true) @map("is_published")
+  videoProvider   VideoProvider      @default(DEV) @map("video_provider")
   // Identificador do vídeo no fornecedor (ex.: o ID do vídeo no Panda). Vazio = aula sem vídeo.
-  videoId         String?          @map("video_id")
+  videoId         String?            @map("video_id")
   // Panda: endereço do player ("embed") do vídeo, ex.: https://player-vz-xxxx.tv.pandavideo.com.br/embed/?v=<id>.
   // Cada conta do Panda tem o seu endereço de player; por isso guardamos o link inteiro, já conferido
   // (só aceitamos endereços do Panda — ver `src/modules/video/panda/embed.ts`).
-  videoEmbedUrl   String?          @map("video_embed_url")
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  videoEmbedUrl   String?            @map("video_embed_url")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
   progress        LessonProgress[]
   attachments     LessonAttachment[]
 
@@ -242,8 +253,13 @@ model LessonAttachment {
 // -----------------------------------------------------------------------------
 // Matrículas (Fase 2): quem pode ver qual curso e até quando.
 // REGRA QUE NÃO MUDA: quem decide se o aluno vê uma aula é SÓ a matrícula (PROJECT.md, seção 6).
-// Na Fase 4, pagamento confirmado por webhook cria/renova a matrícula; hoje ela é criada à mão,
-// pelo painel (/admin/usuarios, só ADMIN) ou pelo script `npm run enroll`.
+//
+// Fase 4: uma matrícula por aluno, curso e ORIGEM. Cada origem cuida da sua linha:
+//  - MANUAL: criada/renovada/revogada à mão (painel e `npm run enroll`, via `grant.ts`);
+//  - PURCHASE e SUBSCRIPTION: RECALCULADAS a partir dos pagamentos confirmados (webhook do
+//    provedor), em `src/modules/payments/access-sync.server.ts`. Um reembolso refaz a conta sem
+//    aquele pagamento — nunca "apaga" o que veio de outra origem.
+// O acesso vale se QUALQUER linha do aluno naquele curso estiver ativa (`mergeEnrollments`).
 // -----------------------------------------------------------------------------
 
 enum EnrollmentSource {
@@ -251,7 +267,7 @@ enum EnrollmentSource {
   MANUAL
   // Compra avulsa confirmada (Fase 4).
   PURCHASE
-  // Assinatura ativa (Fase 4).
+  // Assinatura paga (Fase 4).
   SUBSCRIPTION
 }
 
@@ -270,8 +286,9 @@ model Enrollment {
   createdAt DateTime         @default(now()) @map("created_at")
   updatedAt DateTime         @updatedAt @map("updated_at")
 
-  // Uma matrícula por aluno e curso: renovar = estender a mesma linha.
-  @@unique([userId, courseId])
+  // Uma matrícula por aluno, curso e origem: renovar = estender a mesma linha.
+  @@unique([userId, courseId, source])
+  @@index([courseId])
   @@map("enrollments")
 }
 
@@ -298,4 +315,289 @@ model LessonProgress {
   @@unique([userId, lessonId])
   @@index([userId, lastWatchedAt])
   @@map("lesson_progress")
+}
+
+// -----------------------------------------------------------------------------
+// Vendas (Fase 4): o que se vende, quem comprou e o que o provedor de pagamento avisou.
+//
+// REGRAS QUE NÃO MUDAM (PROJECT.md, seção 6):
+//  - Pagamento nunca libera acesso direto: pagamento confirmado → recalcula a matrícula.
+//  - Acesso só é liberado pelo AVISO do provedor (webhook), nunca pela página de "sucesso".
+//  - Avisos repetidos não duplicam nada (WebhookEvent com o ID do evento como chave única).
+//  - Reembolso/estorno revoga o acesso daquela compra automaticamente.
+// Valores em dinheiro ficam em CENTAVOS (Int): R$ 97,90 = 9790. Assim não há erro de
+// arredondamento (como usar `Decimal` em vez de `float` no Python).
+// -----------------------------------------------------------------------------
+
+// Quem cobra. ASAAS = de verdade; FAKE = simulado (só desenvolvimento, sem conta no Asaas).
+enum PaymentProviderKind {
+  ASAAS
+  FAKE
+}
+
+// Forma de pagamento escolhida pelo aluno.
+enum PaymentMethod {
+  PIX
+  BOLETO
+  CREDIT_CARD
+}
+
+// Produto à venda: um curso avulso ou um pacote de cursos, com acesso por N dias.
+model Product {
+  id              String          @id @default(cuid())
+  // Endereço da página de compra: /comprar/<slug>.
+  slug            String          @unique
+  title           String
+  description     String          @default("")
+  priceCents      Int             @map("price_cents")
+  // Dias de acesso a partir do pagamento (ex.: 365). Vazio = sem data de fim.
+  accessDays      Int?            @map("access_days")
+  // Máximo de parcelas no cartão (1 = só à vista).
+  maxInstallments Int             @default(1) @map("max_installments")
+  // Só produtos ativos aparecem para os alunos.
+  isActive        Boolean         @default(false) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  courses         ProductCourse[]
+  orders          Order[]
+
+  @@map("products")
+}
+
+// Quais cursos um produto libera (um produto pode liberar vários; um curso pode estar em vários).
+model ProductCourse {
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  courseId  String  @map("course_id")
+  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([productId, courseId])
+  @@map("product_courses")
+}
+
+enum PlanCycle {
+  MONTHLY
+  YEARLY
+}
+
+// Plano de assinatura (ex.: mensal, anual). Libera todos os cursos com `includedInSubscription`.
+model Plan {
+  id            String         @id @default(cuid())
+  // Endereço da página de assinatura: /assinar/<slug>.
+  slug          String         @unique
+  title         String
+  description   String         @default("")
+  priceCents    Int            @map("price_cents")
+  cycle         PlanCycle
+  isActive      Boolean        @default(false) @map("is_active")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// Dados de cobrança do aluno (o Asaas exige CPF para gerar cobranças e notas fiscais).
+// O CPF fica gravado depois da primeira compra (trocar = falar com o suporte).
+model BillingProfile {
+  userId             String               @id @map("user_id")
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Só os 11 dígitos, sem pontos e traço.
+  cpf                String
+  // Celular com DDD, só dígitos (opcional; o Asaas usa para avisos).
+  phone              String?
+  // Cliente correspondente no provedor (ex.: cus_000005219613) e qual provedor o criou.
+  providerKind       PaymentProviderKind? @map("provider_kind")
+  providerCustomerId String?              @map("provider_customer_id")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  @@map("billing_profiles")
+}
+
+// Situação de um pedido (compra avulsa). Calculada a partir das cobranças (ver `payments/rules.ts`).
+enum OrderStatus {
+  PENDING // aguardando pagamento
+  OVERDUE // venceu sem pagamento (ainda pode ser pago, conforme o meio)
+  PAID // pago: libera o acesso
+  REFUND_REQUESTED // reembolso pedido (o acesso já foi retirado)
+  REFUNDED // reembolsado
+  CHARGEBACK // contestação no cartão (o acesso é retirado)
+  CANCELED // cobrança cancelada/removida
+}
+
+// Uma compra avulsa. Guarda uma "foto" do que foi comprado (título, preço, dias e cursos):
+// mudar o produto depois não altera compras já feitas.
+model Order {
+  id                    String              @id @default(cuid())
+  userId                String              @map("user_id")
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  productId             String              @map("product_id")
+  product               Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productTitle          String              @map("product_title")
+  priceCents            Int                 @map("price_cents")
+  accessDays            Int?                @map("access_days")
+  method                PaymentMethod
+  installments          Int                 @default(1)
+  status                OrderStatus         @default(PENDING)
+  provider              PaymentProviderKind
+  // Cobrança no provedor (numa compra parcelada: o "parcelamento" e a 1ª parcela).
+  providerPaymentId     String?             @unique @map("provider_payment_id")
+  providerInstallmentId String?             @unique @map("provider_installment_id")
+  // Quando o pagamento foi confirmado pela 1ª vez (início do acesso).
+  paidAt                DateTime?           @map("paid_at")
+  // Quem pediu reembolso e quando (informativo). O acesso sai porque as cobranças passam a
+  // REFUND_REQUESTED na hora do pedido; a situação do pedido vem sempre das cobranças.
+  refundRequestedAt     DateTime?           @map("refund_requested_at")
+  refundRequestedBy     String?             @map("refund_requested_by")
+  // Mensagem do provedor quando a cobrança não pôde ser criada (para o suporte).
+  failureReason         String?             @map("failure_reason")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+  courses               OrderCourse[]
+  payments              Payment[]
+
+  @@index([userId, createdAt])
+  @@map("orders")
+}
+
+// Cursos liberados por um pedido ("foto" do produto no momento da compra).
+// `Restrict`: um curso com pedidos não pode ser apagado (histórico financeiro).
+model OrderCourse {
+  orderId  String @map("order_id")
+  order    Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courseId String @map("course_id")
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
+
+  @@id([orderId, courseId])
+  @@map("order_courses")
+}
+
+enum SubscriptionStatus {
+  PENDING // criada, aguardando o 1º pagamento
+  ACTIVE // renovando normalmente
+  CANCELED // cancelada: não gera novas cobranças; o período já pago continua valendo
+}
+
+// Uma assinatura de um aluno. Cada ciclo pago (Payment) libera os cursos da assinatura até o
+// fim daquele ciclo (+ alguns dias de tolerância para o pagamento seguinte ser confirmado).
+model Subscription {
+  id                     String              @id @default(cuid())
+  userId                 String              @map("user_id")
+  user                   User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  planId                 String              @map("plan_id")
+  plan                   Plan                @relation(fields: [planId], references: [id], onDelete: Restrict)
+  planTitle              String              @map("plan_title")
+  priceCents             Int                 @map("price_cents")
+  cycle                  PlanCycle
+  method                 PaymentMethod
+  status                 SubscriptionStatus  @default(PENDING)
+  provider               PaymentProviderKind
+  providerSubscriptionId String?             @unique @map("provider_subscription_id")
+  canceledAt             DateTime?           @map("canceled_at")
+  failureReason          String?             @map("failure_reason")
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+  payments               Payment[]
+
+  @@index([userId, createdAt])
+  @@map("subscriptions")
+}
+
+// Situação de uma cobrança (versão simplificada dos status do provedor — ver `asaas/status.ts`).
+enum PaymentStatus {
+  PENDING // aguardando pagamento
+  OVERDUE // vencida
+  CONFIRMED // paga (cartão aprovado; o dinheiro cai depois) — já libera o acesso
+  RECEIVED // paga e recebida — libera o acesso
+  REFUND_REQUESTED // estorno em andamento — acesso retirado
+  REFUNDED // estornada — acesso retirado
+  CHARGEBACK // contestação no cartão — acesso retirado
+  CANCELED // removida/cancelada
+}
+
+// Uma cobrança no provedor: a de uma compra (ou uma parcela dela) ou um ciclo da assinatura.
+model Payment {
+  id                String              @id @default(cuid())
+  provider          PaymentProviderKind
+  providerPaymentId String              @unique @map("provider_payment_id")
+  orderId           String?             @map("order_id")
+  order             Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  subscriptionId    String?             @map("subscription_id")
+  subscription      Subscription?       @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  method            PaymentMethod
+  status            PaymentStatus       @default(PENDING)
+  // Status original do provedor (ex.: "RECEIVED_IN_CASH"), para conferência.
+  providerStatus    String              @map("provider_status")
+  valueCents        Int                 @map("value_cents")
+  // Vencimento (dia). Na assinatura, é o início do ciclo que esta cobrança paga.
+  dueDate           DateTime            @map("due_date") @db.Date
+  installmentNumber Int?                @map("installment_number")
+  paidAt            DateTime?           @map("paid_at")
+  // Página de pagamento do provedor (cartão) e boleto em PDF.
+  invoiceUrl        String?             @map("invoice_url")
+  bankSlipUrl       String?             @map("bank_slip_url")
+  // Pix "copia e cola" e a imagem do QR Code (PNG em base64), guardados na 1ª consulta.
+  pixPayload        String?             @map("pix_payload")
+  pixImage          String?             @map("pix_image")
+  // Data do último aviso aplicado (texto do provedor, ex.: "2026-09-29 10:00:00"): um aviso mais
+  // antigo que chegue atrasado não desfaz um mais novo.
+  lastEventAt       String?             @map("last_event_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  fiscalInvoice     FiscalInvoice?
+
+  @@index([orderId])
+  @@index([subscriptionId])
+  @@map("payments")
+}
+
+// Todo aviso (webhook) recebido do provedor, do jeito que chegou. Serve para:
+//  - não processar o mesmo aviso duas vezes (`provider` + `eventId` únicos);
+//  - investigar problemas e reprocessar um aviso que deu erro (painel → Vendas → Avisos).
+model WebhookEvent {
+  id          String              @id @default(cuid())
+  provider    PaymentProviderKind
+  eventId     String              @map("event_id")
+  type        String
+  payload     Json
+  receivedAt  DateTime            @default(now()) @map("received_at")
+  processedAt DateTime?           @map("processed_at")
+  // Observação do processamento (ex.: "cobrança de fora do site: ignorada").
+  note        String?
+  // Erro do último processamento (vazio = deu certo).
+  error       String?
+  attempts    Int                 @default(0)
+
+  @@unique([provider, eventId])
+  @@index([receivedAt])
+  @@map("webhook_events")
+}
+
+// Situação da nota fiscal de serviço (NFS-e) no provedor.
+enum FiscalInvoiceStatus {
+  PENDING // ainda não pedimos ao provedor (ou o pedido falhou — ver `error`)
+  SCHEDULED // agendada no provedor
+  AUTHORIZED // emitida pela prefeitura
+  PROCESSING_CANCELLATION // cancelamento em andamento
+  CANCELED // cancelada
+  CANCELLATION_DENIED // a prefeitura recusou o cancelamento
+  ERROR // a prefeitura recusou a emissão
+}
+
+// Nota fiscal de uma cobrança paga (Fase 4, opcional: liga com as variáveis NFSE_*).
+model FiscalInvoice {
+  id                String              @id @default(cuid())
+  paymentId         String              @unique @map("payment_id")
+  payment           Payment             @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  providerInvoiceId String?             @unique @map("provider_invoice_id")
+  status            FiscalInvoiceStatus @default(PENDING)
+  number            String?
+  pdfUrl            String?             @map("pdf_url")
+  xmlUrl            String?             @map("xml_url")
+  error             String?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  @@map("fiscal_invoices")
 }

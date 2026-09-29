@@ -2,8 +2,9 @@
  * page.tsx — Um usuário no painel: /admin/usuarios/[id]  (exige perfil ADMIN)
  *
  * Quem chama: o Next.js (botão "Gerenciar" na lista de usuários).
- * Mostra: dados da conta, o perfil (com as travas de segurança) e as matrículas — com o
- * formulário para matricular/renovar e o botão para revogar o acesso.
+ * Mostra: dados da conta, o perfil (com as travas de segurança), as matrículas — com o
+ * formulário para matricular/renovar e o botão para revogar o acesso manual — e as compras
+ * (pedidos e assinaturas, com link para o painel de vendas).
  */
 import "server-only";
 
@@ -21,6 +22,9 @@ import { requireRole } from "@/modules/auth/session";
 import { getEnrollmentStatus, type EnrollmentStatus } from "@/modules/enrollment/access";
 import { revokeEnrollmentAction } from "@/modules/enrollment/admin-actions";
 import { GrantEnrollmentForm } from "@/modules/enrollment/components/grant-enrollment-form";
+import { OrderStatusBadge, SubscriptionStatusBadge } from "@/modules/payments/components/status-badge";
+import { PLAN_CYCLE_PERIOD } from "@/modules/payments/labels";
+import { formatBRL } from "@/modules/payments/money";
 
 export const metadata: Metadata = {
   title: "Usuário · Painel admin",
@@ -71,7 +75,8 @@ export default async function AdminUserPage({ params }: PageProps<"/admin/usuari
         <CardHeader>
           <CardTitle>Matrículas</CardTitle>
           <CardDescription>
-            Quem libera as aulas é a matrícula. Revogar não apaga nada: o histórico e o progresso ficam guardados.
+            Quem libera as aulas é a matrícula (uma por origem: manual, compra ou assinatura — basta uma ativa).
+            Aqui você cuida das manuais; revogar não apaga nada. Acesso comprado sai pelo reembolso do pedido.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-6">
@@ -111,7 +116,8 @@ export default async function AdminUserPage({ params }: PageProps<"/admin/usuari
                               : "sem data de fim"}
                         </td>
                         <td className="p-3 text-right">
-                          {!enrollment.revokedAt ? (
+                          {/* Só a matrícula manual é revogada aqui; o acesso pago sai pelo reembolso. */}
+                          {enrollment.source === "MANUAL" && !enrollment.revokedAt ? (
                             <ActionButton
                               action={revokeEnrollmentAction}
                               fields={{ userId: user.id, courseId: enrollment.courseId }}
@@ -135,6 +141,40 @@ export default async function AdminUserPage({ params }: PageProps<"/admin/usuari
             <h2 className="text-sm font-semibold">Matricular / renovar</h2>
             <GrantEnrollmentForm userId={user.id} courses={courses} />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Compras</CardTitle>
+          <CardDescription>Pedidos e assinaturas. Reembolso e detalhes no painel de vendas.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 text-sm">
+          {user.orders.length === 0 && user.subscriptions.length === 0 ? (
+            <p className="text-muted-foreground">Nenhuma compra.</p>
+          ) : null}
+          {user.subscriptions.map((subscription) => (
+            <div key={subscription.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2">
+              <Link href={`/admin/vendas/assinaturas/${subscription.id}`} className="underline">
+                Assinatura: {subscription.planTitle} ({formatBRL(subscription.priceCents)} {PLAN_CYCLE_PERIOD[subscription.cycle]})
+              </Link>
+              <span className="flex items-center gap-2">
+                <span className="text-muted-foreground text-xs">{formatDate(subscription.createdAt)}</span>
+                <SubscriptionStatusBadge status={subscription.status} />
+              </span>
+            </div>
+          ))}
+          {user.orders.map((order) => (
+            <div key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2">
+              <Link href={`/admin/vendas/pedidos/${order.id}`} className="underline">
+                {order.productTitle} ({formatBRL(order.priceCents)})
+              </Link>
+              <span className="flex items-center gap-2">
+                <span className="text-muted-foreground text-xs">{formatDate(order.createdAt)}</span>
+                <OrderStatusBadge status={order.status} />
+              </span>
+            </div>
+          ))}
         </CardContent>
       </Card>
     </div>

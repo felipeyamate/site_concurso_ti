@@ -9,6 +9,7 @@ import {
   checkLessonAccess,
   getEnrollmentStatus,
   isEnrollmentActive,
+  mergeEnrollments,
   type LessonAccessInput,
 } from "./access";
 
@@ -127,5 +128,47 @@ describe("canViewCourse", () => {
     expect(canViewCourse(undefined, true)).toBe(true);
     expect(canViewCourse("STUDENT", false)).toBe(false);
     expect(canViewCourse("TEACHER", false)).toBe(true);
+  });
+});
+
+describe("mergeEnrollments (uma matrícula por origem: manual, compra, assinatura)", () => {
+  const LAST_WEEK = new Date("2026-09-21T12:00:00Z");
+  const NEXT_WEEK = new Date("2026-10-05T12:00:00Z");
+  const NEXT_MONTH = new Date("2026-10-28T12:00:00Z");
+
+  it("sem nenhuma: null", () => {
+    expect(mergeEnrollments([], NOW)).toBeNull();
+  });
+
+  it("basta UMA ativa: vale a que dura mais (sem data de fim ganha)", () => {
+    const expired = { startsAt: LAST_WEEK, expiresAt: YESTERDAY, revokedAt: null };
+    const shortOne = { startsAt: LAST_WEEK, expiresAt: NEXT_WEEK, revokedAt: null };
+    const longOne = { startsAt: LAST_WEEK, expiresAt: NEXT_MONTH, revokedAt: null };
+    expect(mergeEnrollments([expired, shortOne, longOne], NOW)).toBe(longOne);
+    expect(mergeEnrollments([longOne, activeEnrollment, shortOne], NOW)).toBe(activeEnrollment);
+  });
+
+  it("um reembolso (revogada) não apaga o acesso que veio de outra origem", () => {
+    const refundedPurchase = { startsAt: LAST_WEEK, expiresAt: NEXT_MONTH, revokedAt: YESTERDAY };
+    const subscription = { startsAt: LAST_WEEK, expiresAt: NEXT_WEEK, revokedAt: null };
+    const merged = mergeEnrollments([refundedPurchase, subscription], NOW);
+    expect(merged).toBe(subscription);
+    expect(isEnrollmentActive(merged, NOW)).toBe(true);
+  });
+
+  it("nenhuma ativa: prefere a que ainda vai começar (a mais próxima)", () => {
+    const expired = { startsAt: LAST_WEEK, expiresAt: YESTERDAY, revokedAt: null };
+    const later = { startsAt: NEXT_MONTH, expiresAt: null, revokedAt: null };
+    const sooner = { startsAt: NEXT_WEEK, expiresAt: null, revokedAt: null };
+    expect(mergeEnrollments([expired, later, sooner], NOW)).toBe(sooner);
+  });
+
+  it("todas encerradas: fica a que terminou por último (explica o motivo ao aluno)", () => {
+    const expiredLong = { startsAt: LAST_WEEK, expiresAt: LAST_WEEK, revokedAt: null };
+    const revokedYesterday = { startsAt: LAST_WEEK, expiresAt: NEXT_MONTH, revokedAt: YESTERDAY };
+    expect(getEnrollmentStatus(mergeEnrollments([expiredLong, revokedYesterday], NOW), NOW)).toBe("REVOKED");
+    const expiredYesterday = { startsAt: LAST_WEEK, expiresAt: YESTERDAY, revokedAt: null };
+    const revokedLong = { startsAt: LAST_WEEK, expiresAt: null, revokedAt: LAST_WEEK };
+    expect(getEnrollmentStatus(mergeEnrollments([revokedLong, expiredYesterday], NOW), NOW)).toBe("EXPIRED");
   });
 });

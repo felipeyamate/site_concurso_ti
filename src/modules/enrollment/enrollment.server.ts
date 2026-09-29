@@ -3,29 +3,56 @@
  *
  * Quem chama: páginas do curso/aula, área do aluno e as ações que salvam progresso.
  * A DECISÃO de acesso fica em `access.ts` (regra pura); aqui só buscamos os dados para ela.
+ *
+ * Fase 4: um aluno pode ter até uma matrícula por ORIGEM no mesmo curso (manual, compra,
+ * assinatura). Aqui elas são juntadas numa só com `mergeEnrollments` — o resto do app continua
+ * vendo "a matrícula do aluno no curso".
  */
 import "server-only";
 
 import { prisma } from "@/lib/db";
 
-import { checkLessonAccess, type EnrollmentSnapshot, type LessonAccess } from "./access";
+import { checkLessonAccess, mergeEnrollments, type EnrollmentSnapshot, type LessonAccess } from "./access";
 
 const enrollmentSnapshotSelect = { startsAt: true, expiresAt: true, revokedAt: true } as const;
 
-/** A matrícula da pessoa no curso (ativa ou não), ou `null`. */
-export async function getEnrollment(userId: string, courseId: string): Promise<EnrollmentSnapshot | null> {
-  return prisma.enrollment.findUnique({
-    where: { userId_courseId: { userId, courseId } },
+/** A matrícula que vale para a pessoa no curso (ativa ou não), ou `null`. */
+export async function getEnrollment(
+  userId: string,
+  courseId: string,
+  now: Date = new Date(),
+): Promise<EnrollmentSnapshot | null> {
+  const rows = await prisma.enrollment.findMany({
+    where: { userId, courseId },
     select: enrollmentSnapshotSelect,
   });
+  return mergeEnrollments(rows, now);
 }
 
-/** Todas as matrículas da pessoa, com o ID do curso (a área do aluno filtra as ativas). */
-export async function listEnrollments(userId: string) {
-  return prisma.enrollment.findMany({
+/**
+ * Todas as matrículas da pessoa, uma por curso (já juntando as origens), com o ID do curso.
+ * A área do aluno usa para listar "Meus cursos".
+ */
+export async function listEnrollments(
+  userId: string,
+  now: Date = new Date(),
+): Promise<Array<EnrollmentSnapshot & { courseId: string }>> {
+  const rows = await prisma.enrollment.findMany({
     where: { userId },
     select: { courseId: true, ...enrollmentSnapshotSelect },
   });
+
+  // Agrupa por curso (como um `defaultdict(list)` do Python) e junta cada grupo.
+  const byCourse = new Map<string, EnrollmentSnapshot[]>();
+  for (const { courseId, ...snapshot } of rows) {
+    byCourse.set(courseId, [...(byCourse.get(courseId) ?? []), snapshot]);
+  }
+  const merged: Array<EnrollmentSnapshot & { courseId: string }> = [];
+  for (const [courseId, group] of byCourse) {
+    const enrollment = mergeEnrollments(group, now);
+    if (enrollment) merged.push({ courseId, ...enrollment });
+  }
+  return merged;
 }
 
 export type LessonAccessResult = {
@@ -44,6 +71,7 @@ export async function getLessonAccessForUser(params: {
   lessonId: string;
   now?: Date;
 }): Promise<LessonAccessResult> {
+  const now = params.now ?? new Date();
   const lesson = await prisma.lesson.findUnique({
     where: { id: params.lessonId },
     select: {
@@ -57,14 +85,14 @@ export async function getLessonAccessForUser(params: {
   });
   if (!lesson) return null;
 
-  const enrollment = await getEnrollment(params.userId, lesson.courseId);
+  const enrollment = await getEnrollment(params.userId, lesson.courseId, now);
   const access = checkLessonAccess({
     role: params.role,
     isCoursePublished: lesson.course.isPublished,
     isLessonPublished: lesson.isPublished,
     isFreePreview: lesson.isFreePreview,
     enrollment,
-    now: params.now ?? new Date(),
+    now,
   });
 
   return {

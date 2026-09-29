@@ -44,7 +44,7 @@ export async function listUsersForAdmin(params: { search: string; page: number }
   return { users, total, page, pageCount: Math.max(1, Math.ceil(total / USERS_PAGE_SIZE)) };
 }
 
-/** Um usuário com as matrículas (e o curso de cada uma). */
+/** Um usuário com as matrículas (e o curso de cada uma) e as compras (Fase 4, para o suporte). */
 export async function getUserForAdmin(userId: string) {
   return prisma.user.findUnique({
     where: { id: userId },
@@ -66,6 +66,16 @@ export async function getUserForAdmin(userId: string) {
           revokedAt: true,
           course: { select: { title: true, slug: true } },
         },
+      },
+      orders: {
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: { id: true, productTitle: true, priceCents: true, status: true, createdAt: true },
+      },
+      subscriptions: {
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: { id: true, planTitle: true, priceCents: true, cycle: true, status: true, createdAt: true },
       },
       // Só logins ainda válidos ("dispositivos conectados"); sessões vencidas não contam.
       _count: { select: { sessions: { where: { expiresAt: { gt: new Date() } } } } },

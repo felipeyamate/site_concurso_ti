@@ -4,8 +4,8 @@
  * Quem chama: o Next.js. `[courseSlug]` na pasta = parte variável da URL (o slug do curso).
  *
  * Mostra a descrição e a grade de aulas. Para quem está logado, mostra também o progresso e o
- * botão "Continuar". Para quem não tem matrícula, oferece a aula grátis (as matrículas pagas
- * chegam na Fase 4).
+ * botão "Continuar". Para quem não tem acesso: a aula grátis e as OFERTAS (Fase 4) — os produtos
+ * à venda que incluem o curso e, se ele faz parte da assinatura, os planos.
  */
 import "server-only";
 
@@ -21,6 +21,8 @@ import { getCurrentSession } from "@/modules/auth/session";
 import { getCourseCurriculum } from "@/modules/catalog/catalog.server";
 import { CurriculumList } from "@/modules/catalog/components/curriculum-list";
 import { totalDurationSeconds } from "@/modules/catalog/curriculum";
+import { CourseOffers } from "@/modules/payments/components/course-offers";
+import { getOffersForCourse } from "@/modules/payments/storefront.server";
 import type { CourseView } from "@/modules/progress/course-view";
 import { getCourseView } from "@/modules/progress/course-view.server";
 
@@ -28,7 +30,7 @@ import { getCourseView } from "@/modules/progress/course-view.server";
  * Texto do quadro de quem NÃO tem acesso ao curso, conforme a situação da matrícula.
  * Quem já teve acesso precisa saber o que aconteceu (e que o progresso continua guardado).
  */
-function accessMessage(view: CourseView, isLoggedIn: boolean): string {
+function accessMessage(view: CourseView, isLoggedIn: boolean, hasOffers: boolean): string {
   // Só sugere a aula grátis quando o curso tem uma (senão o aluno procuraria algo que não existe).
   const freeLessonHint = view.firstFreeLesson
     ? ` Enquanto isso, assista à aula grátis${isLoggedIn ? "" : " (é só criar uma conta)"}.`
@@ -45,7 +47,9 @@ function accessMessage(view: CourseView, isLoggedIn: boolean): string {
       return `Sua matrícula começa${startsOn}.${freeLessonHint}`;
     }
     default:
-      return `As matrículas abrem em breve.${freeLessonHint}`;
+      return hasOffers
+        ? `Escolha abaixo como ter acesso ao curso completo.${freeLessonHint}`
+        : `As matrículas abrem em breve.${freeLessonHint}`;
   }
 }
 
@@ -69,6 +73,10 @@ export default async function CoursePage({ params }: PageProps<"/cursos/[courseS
 
   const { curriculum, orderedLessons, summary } = view;
   const lessonHref = (slug: string) => `/cursos/${curriculum.slug}/aulas/${slug}`;
+  // Ofertas só para quem ainda não tem acesso (e só de curso publicado).
+  const offers =
+    !view.hasCourseAccess && curriculum.isPublished ? await getOffersForCourse(curriculum.id) : { products: [], plans: [] };
+  const hasOffers = offers.products.length > 0 || offers.plans.length > 0;
 
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-8 px-4 py-10">
@@ -105,13 +113,16 @@ export default async function CoursePage({ params }: PageProps<"/cursos/[courseS
             ) : null}
           </div>
         ) : (
-          <div className="grid max-w-md gap-3 rounded-lg border p-4">
-            <p className="text-sm">{accessMessage(view, Boolean(session))}</p>
-            {view.firstFreeLesson ? (
-              <Button asChild className="w-fit">
-                <Link href={lessonHref(view.firstFreeLesson.slug)}>Assistir aula grátis</Link>
-              </Button>
-            ) : null}
+          <div className="grid max-w-md gap-3">
+            <div className="grid gap-3 rounded-lg border p-4">
+              <p className="text-sm">{accessMessage(view, Boolean(session), hasOffers)}</p>
+              {view.firstFreeLesson ? (
+                <Button asChild variant={hasOffers ? "outline" : "default"} className="w-fit">
+                  <Link href={lessonHref(view.firstFreeLesson.slug)}>Assistir aula grátis</Link>
+                </Button>
+              ) : null}
+            </div>
+            <CourseOffers products={offers.products} plans={offers.plans} />
           </div>
         )}
       </section>

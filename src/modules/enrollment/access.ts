@@ -56,6 +56,39 @@ export function getEnrollmentStatus(enrollment: EnrollmentSnapshot | null, now: 
 }
 
 /**
+ * Junta as matrículas de UM aluno em UM curso (uma por origem: manual, compra, assinatura — Fase 4)
+ * numa só, a que vale para a regra de acesso e para as telas.
+ *
+ * Passos:
+ *  1. Alguma ativa? Fica a que dura mais (sem data de fim ganha de qualquer data).
+ *  2. Senão, alguma que ainda vai começar? Fica a que começa primeiro.
+ *  3. Senão (todas vencidas/revogadas), fica a que terminou por último — é ela que explica ao
+ *     aluno o que aconteceu ("terminou em ..." ou "foi cancelado").
+ * Paralelo em Python: um `max(rows, key=...)` com a regra de desempate de cada caso.
+ */
+export function mergeEnrollments(rows: EnrollmentSnapshot[], now: Date): EnrollmentSnapshot | null {
+  if (rows.length === 0) return null;
+
+  const active = rows.filter((row) => getEnrollmentStatus(row, now) === "ACTIVE");
+  if (active.length > 0) {
+    return active.reduce((best, row) => {
+      if (best.expiresAt === null) return best;
+      if (row.expiresAt === null) return row;
+      return row.expiresAt > best.expiresAt ? row : best;
+    });
+  }
+
+  const upcoming = rows.filter((row) => getEnrollmentStatus(row, now) === "NOT_STARTED");
+  if (upcoming.length > 0) {
+    return upcoming.reduce((best, row) => (row.startsAt < best.startsAt ? row : best));
+  }
+
+  // Quando cada uma terminou: a data da revogação, ou a data de fim.
+  const endedAt = (row: EnrollmentSnapshot) => (row.revokedAt ?? row.expiresAt ?? now).getTime();
+  return rows.reduce((best, row) => (endedAt(row) > endedAt(best) ? row : best));
+}
+
+/**
  * A matrícula vale AGORA?
  * Vale se: não foi revogada, já começou e (não tem data de fim OU a data de fim ainda não chegou).
  */

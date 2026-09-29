@@ -125,8 +125,8 @@ Coupon, Affiliate, WebhookEvent (log de tudo que chega dos provedores)
 | 1 | Setup do projeto, banco, schema Prisma, autenticação e papéis | ✅ concluída (ver seção 10) |
 | 2 | Catálogo, área do aluno, player, progresso | ✅ concluída (ver seção 10) |
 | 3 | Admin: CRUD de cursos, upload de vídeos (Panda) e PDFs (R2) | ✅ concluída (ver seção 10) |
-| 4 | Checkout (Asaas), webhooks, matrículas, assinaturas, reembolso, NFS-e | ⏳ próxima |
-| 5 | Banco de questões, simulados, mapa de incidência por banca | — |
+| 4 | Checkout (Asaas), webhooks, matrículas, assinaturas, reembolso, NFS-e | ✅ concluída (ver seção 10) |
+| 5 | Banco de questões, simulados, mapa de incidência por banca | ⏳ próxima |
 | 6 | Landing pages por edital, SEO, blog, cupons e afiliados | — |
 | 7 | Testes E2E, Sentry, LGPD, deploy de produção | — |
 
@@ -165,7 +165,7 @@ atualizado.
 | 2026-09-28 | Toda decisão de acesso passa por **uma função só**: `checkLessonAccess` (`src/modules/enrollment/access.ts`). Ordem: professor/admin → rascunho bloqueado → matrícula ativa → aula grátis → bloqueado | Cumpre a regra "quem libera o conteúdo é só a matrícula" e fica fácil de testar (é o código mais sensível) |
 | 2026-09-28 | Aula grátis exige **login** (conta gratuita) | Captura o contato do interessado antes de mostrar conteúdo |
 | 2026-09-28 | Aula bloqueada mostra o **motivo** (sem matrícula, acesso vencido, cancelado) e o caminho; rascunho para aluno dá 404 | O aluno entende o que fazer; rascunhos não vazam |
-| 2026-09-28 | Matrícula: **uma por aluno e curso**; revogar marca `revokedAt` (não apaga); origem `MANUAL`, `PURCHASE` ou `SUBSCRIPTION`. **Renovar nunca tira dias**: com a matrícula ativa, os dias novos são somados ao que faltava; vencida/revogada recomeça agora; a origem é mantida (`computeEnrollmentRenewal`, reutilizada na Fase 4) | Histórico preservado e pronto para os webhooks da Fase 4 ("gera/renova um Enrollment") |
+| 2026-09-28 | Matrícula: **uma por aluno e curso** (*mudou na Fase 4: uma por aluno, curso **e origem** — ver 2026-09-29*); revogar marca `revokedAt` (não apaga); origem `MANUAL`, `PURCHASE` ou `SUBSCRIPTION`. **Renovar nunca tira dias**: com a matrícula ativa, os dias novos são somados ao que faltava; vencida/revogada recomeça agora; a origem é mantida (`computeEnrollmentRenewal`, reutilizada na Fase 4) | Histórico preservado e pronto para os webhooks da Fase 4 ("gera/renova um Enrollment") |
 | 2026-09-28 | Até a Fase 4, matrícula só pelo script `npm run enroll`; até a Fase 3, conteúdo só pelo seed de exemplo (`npm run db:seed`). O seed não roda em produção e para, antes de gravar, se a sincronização fosse apagar progresso de aluno | Cada coisa na sua fase; o seed é só para desenvolvimento e nunca destrói dados de alunos |
 | 2026-09-28 | Vídeo atrás da interface de provedor (`src/modules/video`). Hoje só o provedor **DEV** (vídeo de exemplo), **bloqueado em qualquer execução de produção** (exceto os previews da Vercel); se o vídeo falhar, a aula mostra "vídeo indisponível" em vez de derrubar a página. O Panda entra na Fase 3 | Princípio de troca de fornecedor; nunca ir ao ar sem link assinado |
 | 2026-09-28 | O endereço do vídeo só é gerado **depois** de conferir o acesso; a página bloqueada não contém vídeo nenhum | Regra "vídeos só depois de checar o Enrollment" |
@@ -190,6 +190,17 @@ atualizado.
 | 2026-09-29 | "Histórico de aluno" = progresso de quem é aluno OU tem/teve matrícula no curso (aluno promovido a monitor continua protegido). Troca de perfil em transação serializável | Achados da revisão: o critério pelo perfil atual deixava apagar o histórico de um aluno promovido; dois admins rebaixando um ao outro ao mesmo tempo deixariam o site sem admin |
 | 2026-09-29 | **Travas no banco** para operações "confere e grava": apagar curso/módulo/aula trava as linhas antes de conferir o histórico (`SELECT ... FOR UPDATE`); matricular/renovar/revogar usa uma trava por aluno+curso (`pg_advisory_xact_lock`) | Segunda revisão: sem trava, duas renovações ao mesmo tempo somavam só uma (ex.: webhook da Fase 4 + painel), e um progresso gravado no meio de um "apagar aula" era apagado junto |
 | 2026-09-29 | O link de envio de PDF só aceita **aquele** arquivo: tipo e tamanho exato entram na assinatura (no R2, `signableHeaders`; o SDK deixa o tipo de fora por padrão) | Segunda revisão: o link vale 10 min e podia ser reusado depois da confirmação para trocar o PDF conferido por um arquivo maior ou de outro tipo |
+| 2026-09-29 | **Fase 4:** matrícula passa a ser **uma por aluno, curso e origem** (`MANUAL`, `PURCHASE`, `SUBSCRIPTION`). A manual continua com `grantEnrollment`/`revokeEnrollment`; as de compra e assinatura são **recalculadas** a partir dos pagamentos (`syncPaidAccess`). O aluno vê o curso se **qualquer** uma estiver ativa (`mergeEnrollments`) | Um reembolso da compra não pode derrubar uma matrícula manual (ou vice-versa); recalcular do zero é idempotente — o mesmo aviso chegando duas vezes dá o mesmo resultado |
+| 2026-09-29 | Acesso pago: compras são "reaplicadas" em ordem de pagamento com `computeEnrollmentRenewal` (recomprar soma dias); assinatura libera até o **vencimento do ciclo seguinte + 5 dias** de tolerância | Mesma regra de renovação da Fase 2; a tolerância evita cortar o aluno por um atraso de compensação |
+| 2026-09-29 | Asaas: **cartão** é digitado na página segura do Asaas (os dados do cartão nunca passam pelo nosso site); **Pix** mostra o QR code na nossa página; **boleto** é um link. Parcelamento só no cartão, até 12x sem juros, parcela mínima de R$ 5 | Sem obrigação de PCI; Pix e boleto sem sair do fluxo |
+| 2026-09-29 | Aviso do Asaas (webhook): confere o token (`asaas-access-token`), **grava antes de processar** (`webhook_events`, chave única por provedor + ID do evento), responde 200 mesmo se o processamento falhar (o erro fica registrado e dá para reprocessar pelo painel) e ignora aviso mais velho que o último aplicado | Idempotência e nenhuma perda de aviso: se respondêssemos erro, o Asaas pausaria a fila inteira de avisos |
+| 2026-09-29 | Reembolso: o **aluno** pede em até **7 dias** do pagamento (CDC); o **admin** pode a qualquer momento. O acesso sai **na hora** do pedido; boleto é estornado à mão no painel do Asaas; se o Asaas negar o estorno, o acesso volta. Na assinatura, os 7 dias valem só para o **primeiro** pagamento; cancelar mantém o período já pago | Direito de arrependimento sem brecha de "pedir reembolso e continuar assistindo" |
+| 2026-09-29 | O pedido guarda uma **"foto"** do que foi vendido (título, preço, dias, cursos); registros financeiros não se apagam (`onDelete: Restrict`); produto/plano com venda e curso com pedido não se apagam (desativar) | Mudar o preço amanhã não altera o que o aluno comprou hoje; histórico fiscal preservado |
+| 2026-09-29 | CPF obrigatório na primeira compra e **travado** depois (troca só pelo suporte); limite de **10 pedidos/assinaturas novos por dia** por aluno e **uma assinatura ativa** por vez | O Asaas exige CPF para emitir cobrança/nota; evita abuso e cobrança em dobro |
+| 2026-09-29 | Sem `ASAAS_API_KEY`, em desenvolvimento entra o provedor **FAKE** com um simulador (`/dev/pagamentos/...`) que gera avisos no formato do Asaas e passa pelo mesmo código. Em produção sem chave, ou com a chave do **sandbox**, as vendas ficam desligadas | Testar tudo sem conta no Asaas; no sandbox, cartões de teste "pagam" de mentira e liberariam acesso de graça |
+| 2026-09-29 | Nota fiscal (NFS-e) **opcional** (`NFSE_ENABLED`): agendada no Asaas quando o pagamento é confirmado e cancelada no reembolso/chargeback. Só ISS configurável | Depende do cadastro municipal e da orientação do contador; a venda não pode parar por causa da nota |
+| 2026-09-29 | Curso entra na assinatura pela marca "incluso na assinatura" (tela do plano); ao mudar a lista, o acesso de todos os assinantes é recalculado na hora | Regra do modelo de negócio (seção 2) sem precisar de um script |
+| 2026-09-29 | Dinheiro sempre em **centavos inteiros** (`priceCents`); datas de cobrança pelo **dia de Brasília** (`payments/dates.ts`); Pix e cartão vencem em 1 dia, boleto em 3 | Sem erro de arredondamento de `float`; sem cobrança "vencendo ontem" por causa do fuso |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -200,7 +211,7 @@ atualizado.
 - [ ] Resend (e-mails) — Fase 1
 - [ ] Panda Video — Fase 3
 - [ ] Cloudflare (R2) — Fase 3
-- [ ] Asaas (conta sandbox para testes) — Fase 4
+- [ ] Asaas (conta sandbox para testes; depois a de produção) — Fase 4 (código pronto, falta a conta)
 - [ ] Sentry e PostHog — Fase 7
 
 > Nunca colar senhas ou chaves de API no chat. Elas vão só no arquivo `.env.local`
@@ -288,3 +299,35 @@ explicando o erro do Google para contas não confirmadas.
 - Um PDF enviado mas não confirmado (ex.: aba fechada no meio) fica "órfão" no R2 (invisível para alunos). Limpeza automática → Fase 7.
 - Trocar o endereço (slug) de um curso/aula publicado quebra links antigos; redirecionamento automático → Fase 6 (SEO).
 - O seed de exemplo sincroniza o curso de exemplo: não use o curso do seed para conteúdo real.
+
+### Fase 4 — Vendas: checkout (Asaas), webhooks, assinaturas, reembolso e NFS-e (2026-09-29)
+
+**Entregue:**
+- Banco: `products`, `product_courses`, `plans`, `billing_profiles`, `orders`, `order_courses`, `subscriptions`, `payments`,
+  `webhook_events` e `fiscal_invoices`; matrícula com a origem na chave única (migração `sales_payments`, com travas `CHECK` nos valores).
+- Módulo `src/modules/payments`: interface `PaymentProvider` com o **Asaas** (API v3) e um provedor **FAKE** para desenvolvimento,
+  checkout (compra avulsa em Pix, boleto ou cartão parcelado) e assinatura (mensal/anual), recebimento de avisos (`/api/webhooks/asaas`),
+  recálculo do acesso pago (`syncPaidAccess`), reembolso e cancelamento, nota fiscal opcional.
+- Páginas do aluno: ofertas na página do curso, `/planos`, `/comprar/<produto>`, `/assinar/<plano>`, página do pagamento (QR Pix, boleto,
+  link do cartão, atualização automática) e "Minhas compras" (pedir reembolso em 7 dias, cancelar assinatura).
+- Painel `/admin/vendas` (só ADMIN): resumo, produtos, planos (com os cursos inclusos), pedidos, assinaturas e avisos recebidos —
+  reembolsar, cancelar, conferir no Asaas, reprocessar aviso e tentar a nota de novo. A ficha do usuário mostra as compras.
+- Simulador de pagamentos em desenvolvimento (`/dev/pagamentos/...`): pagar, vencer, estornar, negar estorno, chargeback e próximo ciclo.
+- E-mails de compra confirmada e de reembolso pedido.
+- Testes: 233 unitários + 65 de integração; 55 cenários novos no navegador (inclusive celular de 360 px) e os da Fase 2 e da Fase 3
+  repetidos sem regressão.
+
+**Como testar:** [README.md → "Como testar a Fase 4"](./README.md#5-como-testar-a-fase-4-passo-a-passo).
+
+**Pendências conhecidas (não bloqueiam a Fase 5):**
+- **Conferir com o sandbox real do Asaas** (o ambiente do Claude não acessa o Asaas): formato dos avisos, domínio do retorno do cartão
+  (precisa estar cadastrado na conta), QR code do Pix, cobrança automática da assinatura no cartão e a emissão da NFS-e. Tudo foi feito
+  pela documentação pública; ajustes ficam em `src/modules/payments/provider/asaas/`.
+- Criar a conta do Asaas (sandbox e depois produção), cadastrar o aviso (webhook) com o token e combinar a NFS-e com o contador (seção 9 e README).
+- Aviso perdido (o Asaas desistiu de enviar): hoje o admin usa "Conferir no Asaas" no pedido; conferência automática periódica → Fase 7.
+- Trocar de plano (mensal ↔ anual) não é automático: o aluno cancela e assina o outro.
+- Cupons de desconto e afiliados → Fase 6.
+- Exclusão de conta (LGPD) de quem tem compras: os registros fiscais precisam ficar (anonimizar em vez de apagar) → Fase 7.
+- Aviso do `pg` nos testes ("client.query() when the client is already executing a query") vem de dentro do adaptador do Prisma; não
+  afeta o resultado. Acompanhar atualizações do Prisma.
+- Os testes no navegador deixam pedidos simulados no banco de desenvolvimento (apague com um banco novo se incomodar).
