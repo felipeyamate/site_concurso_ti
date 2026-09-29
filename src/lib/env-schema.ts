@@ -55,6 +55,25 @@ const envSchema = z
     // Preenchida automaticamente pela Vercel: "production" só no site oficial
     // ("preview" nos deploys de teste). Vazia na sua máquina.
     VERCEL_ENV: z.preprocess(emptyToUndefined, z.enum(["development", "preview", "production"]).optional()),
+
+    // Panda Video (Fase 3). Todas opcionais: sem elas, o resto do site funciona normalmente.
+    //  - PANDA_API_KEY: só para o painel listar os vídeos da sua biblioteca do Panda.
+    //  - PANDA_DRM_GROUP_ID + PANDA_DRM_SECRET: marca d'água (DRM) com os dados do aluno dentro do
+    //    vídeo. Em produção, sem elas as aulas do Panda NÃO tocam (regra: nunca vídeo sem proteção).
+    PANDA_API_KEY: optionalString(),
+    PANDA_DRM_GROUP_ID: optionalString(),
+    PANDA_DRM_SECRET: optionalString(),
+
+    // Cloudflare R2 (Fase 3): onde ficam os PDFs das aulas. As quatro juntas ou nenhuma.
+    // Sem elas: em desenvolvimento, os PDFs vão para uma pasta local (LOCAL_STORAGE_DIR);
+    // em produção, o envio de PDFs fica desligado (com aviso no painel).
+    R2_ACCOUNT_ID: optionalString(),
+    R2_ACCESS_KEY_ID: optionalString(),
+    R2_SECRET_ACCESS_KEY: optionalString(),
+    R2_BUCKET: optionalString(),
+
+    // Pasta dos PDFs em desenvolvimento (sem R2). Padrão: .data/uploads (fora do Git).
+    LOCAL_STORAGE_DIR: z.preprocess(emptyToUndefined, z.string().default(".data/uploads")),
   })
   // Regra que envolve mais de um campo (como um `@model_validator` do pydantic):
   // não faz sentido ter só o ID do Google sem o segredo, ou vice-versa.
@@ -67,6 +86,30 @@ const envSchema = z
         path: [hasId ? "GOOGLE_CLIENT_SECRET" : "GOOGLE_CLIENT_ID"],
         message: "Para o login com Google, preencha GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET juntos.",
       });
+    }
+
+    // DRM do Panda: o grupo e o segredo andam juntos (um sem o outro não gera a marca d'água).
+    const hasDrmGroup = Boolean(values.PANDA_DRM_GROUP_ID);
+    const hasDrmSecret = Boolean(values.PANDA_DRM_SECRET);
+    if (hasDrmGroup !== hasDrmSecret) {
+      ctx.addIssue({
+        code: "custom",
+        path: [hasDrmGroup ? "PANDA_DRM_SECRET" : "PANDA_DRM_GROUP_ID"],
+        message: "Para a marca d'água do Panda, preencha PANDA_DRM_GROUP_ID e PANDA_DRM_SECRET juntos.",
+      });
+    }
+
+    // R2: as quatro variáveis juntas (faltando uma, nenhum PDF seria enviado nem baixado).
+    const r2Keys = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const;
+    const missingR2 = r2Keys.filter((key) => !values[key]);
+    if (missingR2.length > 0 && missingR2.length < r2Keys.length) {
+      for (const key of missingR2) {
+        ctx.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Para o Cloudflare R2, preencha R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY e R2_BUCKET juntos.",
+        });
+      }
     }
 
     // Em produção, com o Resend ligado, o remetente precisa ser de um domínio NOSSO verificado.

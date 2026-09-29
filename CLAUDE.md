@@ -28,3 +28,14 @@
 - Página que consulta o banco sem ler cookies/headers precisa de `await connection()` (de `next/server`);
   senão o `next build` tenta consultar o banco (e o CI não tem banco no build).
 - Conteúdo de exemplo: `npm run db:seed` (`prisma/seed-catalog.ts`, idempotente). Nunca no banco de produção.
+- Painel admin: toda Server Action começa com `getSessionWithRole` (`src/modules/auth/action-guards.ts`):
+  TEACHER para conteúdo (cursos, aulas, vídeos, PDFs), ADMIN para usuários, perfis e matrículas.
+  Formulários usam `useAdminForm` + `FormState`; erros esperados são `UserFacingError` (`src/lib/form-state.ts`).
+- Nunca apagar histórico de aluno: curso com matrícula ou aula com progresso de ALUNO não se apaga (despublicar).
+- Vídeo do Panda: link do player só passa por `parsePandaEmbedInput` (`src/modules/video/panda/embed.ts`);
+  mensagens do player só com `event.source` do nosso iframe + `isPandaPlayerOrigin`. Produção exige DRM.
+- Arquivos (PDFs): sempre via `getFileStorage()` (`src/modules/storage`); o endereço do arquivo nunca vai
+  para a página — o download passa por uma rota que confere `checkLessonAccess` e gera link temporário.
+- Matricular/renovar/revogar: sempre `grantEnrollment`/`revokeEnrollment` (`src/modules/enrollment/grant.ts`).
+- Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`
+  escapam e alargam a página no celular).

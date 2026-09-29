@@ -124,8 +124,8 @@ Coupon, Affiliate, WebhookEvent (log de tudo que chega dos provedores)
 | 0 | Decisões registradas neste arquivo | ✅ concluída |
 | 1 | Setup do projeto, banco, schema Prisma, autenticação e papéis | ✅ concluída (ver seção 10) |
 | 2 | Catálogo, área do aluno, player, progresso | ✅ concluída (ver seção 10) |
-| 3 | Admin: CRUD de cursos, upload de vídeos (Panda) e PDFs (R2) | ⏳ próxima |
-| 4 | Checkout (Asaas), webhooks, matrículas, assinaturas, reembolso, NFS-e | — |
+| 3 | Admin: CRUD de cursos, upload de vídeos (Panda) e PDFs (R2) | ✅ concluída (ver seção 10) |
+| 4 | Checkout (Asaas), webhooks, matrículas, assinaturas, reembolso, NFS-e | ⏳ próxima |
 | 5 | Banco de questões, simulados, mapa de incidência por banca | — |
 | 6 | Landing pages por edital, SEO, blog, cupons e afiliados | — |
 | 7 | Testes E2E, Sentry, LGPD, deploy de produção | — |
@@ -176,6 +176,16 @@ atualizado.
 | 2026-09-28 | Quem teve acesso e perdeu (vencido/cancelado) ou ainda vai começar vê o motivo na página do curso, na aula e em "Meus cursos" (o curso continua listado, com o progresso guardado). A aula grátis só é sugerida quando o curso tem uma | Evita mensagens erradas para ex-alunos e para quem tem matrícula futura |
 | 2026-09-28 | Trilhas por concurso/banca (Fase B do conteúdo) e reaproveitamento de aulas entre cursos ficam para depois (tabela de ligação quando for preciso); PDFs das aulas entram com o R2 na Fase 3 | Não criar tabelas sem uso |
 | 2026-09-28 | No celular, o cabeçalho esconde o botão "Criar conta" (continua na página inicial, no login e nos cursos) | Os 3 botões não cabiam em telas de 360 px |
+| 2026-09-29 | **Fase 3:** painel em `/admin` — PROFESSOR gerencia cursos, módulos, aulas, vídeos e PDFs; só ADMIN gerencia usuários, perfis e matrículas. Toda Server Action do painel confere login + perfil de novo (`getSessionWithRole`) | Separar conteúdo de dados pessoais/financeiros; uma Server Action pode ser chamada direto por HTTP |
+| 2026-09-29 | Cursos e aulas novos nascem como **rascunho**; tirar do ar = despublicar. **Não se apaga** curso com matrícula (mesmo vencida) nem aula que um ALUNO assistiu; módulo só é apagado vazio | Nunca perder histórico de aluno; o progresso de professor testando não bloqueia |
+| 2026-09-29 | Vídeo do Panda: a aula guarda o **link do player** (conferido: só https no domínio do player do Panda) + o ID. O professor cola o link ou o código `<iframe>`; com `PANDA_API_KEY`, escolhe da biblioteca | Cada conta do Panda tem seu endereço de player; nunca montar `<iframe>` com endereço de fora |
+| 2026-09-29 | Marca d'água **DRM do Panda** (nome, e-mail e ID do aluno dentro do vídeo) com token JWT que vence em 6 h. Em **produção sem DRM configurado, a aula do Panda não toca**; em desenvolvimento toca com aviso | Regra "vídeo só com link assinado e temporário"; a marca d'água aparece em tela cheia (a nossa não) |
+| 2026-09-29 | Progresso do Panda pelas mensagens do player (`panda_timeupdate`, `panda_pause`, `panda_ended`...), aceitando só mensagens do nosso `<iframe>` e do domínio do Panda; "continuar de onde parou" pede ao player para pular (`currentTime`) | Mesmas regras de progresso da Fase 2, sem confiar em mensagens de outras origens |
+| 2026-09-29 | PDFs: o navegador envia **direto** para o armazenamento (link de envio de 10 min) e o servidor confere tamanho/tipo antes de registrar. Download por uma rota nossa que confere o acesso (`checkLessonAccess`) a cada clique e redireciona para um link de 5 min. Limite de 50 MB por PDF | Sem limite de tamanho da Vercel no caminho; o endereço real do arquivo nunca aparece na página |
+| 2026-09-29 | Armazenamento atrás da interface `FileStorage`: **Cloudflare R2** (SDK S3) quando configurado; senão, **pasta local** só em desenvolvimento (com links assinados por HMAC, como o R2); em produção sem R2, envio de PDFs desligado com aviso | Testar tudo sem conta no R2, com o mesmo fluxo de produção |
+| 2026-09-29 | Matrícula manual pelo painel e pelo script usam a mesma função (`grantEnrollment`/`revokeEnrollment`), que a Fase 4 também usará | Uma regra só para "gerar/renovar um Enrollment" |
+| 2026-09-29 | Perfis pelo painel: ninguém muda o próprio perfil e o site nunca fica sem ADMIN. O script `user:set-role` continua para criar o primeiro ADMIN | Evitar perder o acesso ao painel por engano |
+| 2026-09-29 | Formulários do painel não apagam o que foi digitado quando a validação falha (`useAdminForm`) | O modo padrão do React 19 limpa o formulário a cada envio |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -242,3 +252,28 @@ explicando o erro do Google para contas não confirmadas.
 - Vitrine pública (`/cursos`) é montada a cada acesso; cache e SEO próprios na Fase 6.
 - A nossa marca d'água fica por cima do player e **não aparece em tela cheia**; a proteção principal será a do Panda (dentro do vídeo), na Fase 3.
 - `npm run build && npm start` na sua máquina bloqueia o vídeo de exemplo (é "produção"); para testar, use `npm run dev`.
+
+### Fase 3 — Painel admin, Panda Video e PDFs (2026-09-29)
+
+**Entregue:**
+- Banco: tabela `lesson_attachments` (PDFs das aulas) e coluna `video_embed_url` nas aulas (migração `lesson_attachments_panda`).
+- Painel `/admin` com menu: visão geral (situação das integrações Panda/R2, sem mostrar chaves), **Cursos** e **Usuários**.
+- Cursos (professor ou admin): criar (rascunho), editar dados/endereço, publicar, reordenar; módulos (criar, renomear, ↑↓, apagar vazio);
+  aulas (criar, editar, mover de módulo, ↑↓, grátis/publicada, apagar com proteção do histórico).
+- Vídeo da aula: Panda Video (colar link/código `<iframe>` ou escolher da biblioteca pela API), sem vídeo, ou o exemplo (só desenvolvimento).
+- Player do Panda: marca d'água DRM (JWT assinado, 6 h), progresso e "continuar de onde parou" pelas mensagens do player.
+- PDFs: envio direto para o Cloudflare R2 (ou pasta local em desenvolvimento), lista "Material da aula" para quem tem acesso e download
+  com link temporário depois de checar o acesso.
+- Usuários (só admin): busca, troca de perfil com travas, matrícula manual (criar/renovar/revogar) com a mesma regra do script.
+- Testes: 143 unitários + 40 de integração; 46 cenários novos no navegador (inclusive um player falso do Panda para testar as mensagens)
+  e os 47 da Fase 2 repetidos sem regressão.
+
+**Como testar:** [README.md → "Como testar a Fase 3"](./README.md#4-como-testar-a-fase-3-passo-a-passo).
+
+**Pendências conhecidas (não bloqueiam a Fase 4):**
+- **Conferir com uma conta real do Panda** (o ambiente do Claude não acessa o Panda): nomes exatos dos eventos do player, o comando de
+  pular (`currentTime`) e a marca d'água DRM. Tudo foi feito pela documentação pública; ajustes ficam em `src/modules/video/panda/`.
+- Criar as contas do Panda e do Cloudflare R2 e cadastrar as variáveis (seção 9 e README). Configurar no Panda os domínios permitidos.
+- Um PDF enviado mas não confirmado (ex.: aba fechada no meio) fica "órfão" no R2 (invisível para alunos). Limpeza automática → Fase 7.
+- Trocar o endereço (slug) de um curso/aula publicado quebra links antigos; redirecionamento automático → Fase 6 (SEO).
+- O seed de exemplo sincroniza o curso de exemplo: não use o curso do seed para conteúdo real.

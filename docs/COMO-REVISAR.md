@@ -52,6 +52,8 @@ Depois:
 1. Siga o roteiro **"Como testar"** do README (a tabela com "Faça isto → O esperado").
    Marque o que passou e anote o que não passou (com o número do passo).
 2. Os e-mails (confirmação, link mágico, senha) aparecem **no terminal** do `npm run dev`.
+   Serviços externos que você ainda não configurou (Panda, R2) têm substitutos de desenvolvimento
+   ou avisos claros — o README diz, em cada fase, o que dá para testar sem conta.
 3. Teste também do jeito "errado", como um aluno confuso faria: campos vazios, senha curta,
    voltar no navegador, abrir o mesmo link duas vezes, usar o celular.
 4. Rode os testes automáticos:

@@ -8,8 +8,10 @@
  *  2. Acha a aula; se não existe (ou é rascunho para aluno), "página não encontrada".
  *  3. Confere o ACESSO (matrícula ativa, aula grátis ou professor/admin).
  *     - Sem acesso: mostra o motivo e o caminho (aula grátis / página do curso). Nada de vídeo.
- *     - Com acesso: SÓ ENTÃO pede o vídeo ao provedor (link do vídeo nunca sai sem acesso).
- *  4. Mostra player (continuando de onde parou), descrição, concluir, anterior/próxima e a grade.
+ *     - Com acesso: SÓ ENTÃO pede o vídeo ao provedor (link do vídeo nunca sai sem acesso)
+ *       e lista os materiais em PDF (cada download confere o acesso de novo).
+ *  4. Mostra player (continuando de onde parou), materiais, descrição, concluir, anterior/próxima
+ *     e a grade.
  */
 import "server-only";
 
@@ -29,6 +31,8 @@ import { getCourseCurriculum, getLessonVideo } from "@/modules/catalog/catalog.s
 import { CurriculumList } from "@/modules/catalog/components/curriculum-list";
 import { findAdjacentLessons } from "@/modules/catalog/curriculum";
 import { LOCKED_LESSON_MESSAGES } from "@/modules/enrollment/access";
+import { LessonMaterials } from "@/modules/materials/components/lesson-materials";
+import { listLessonAttachments } from "@/modules/materials/materials.server";
 import { CompletionToggle } from "@/modules/progress/components/completion-toggle";
 import { LessonPlayer } from "@/modules/progress/components/lesson-player";
 import { getCourseView } from "@/modules/progress/course-view.server";
@@ -92,14 +96,14 @@ export default async function LessonPage({ params }: LessonPageProps) {
       </Alert>
     );
   } else {
-    const video = await getLessonVideo(lesson.id);
+    const [video, attachments] = await Promise.all([getLessonVideo(lesson.id), listLessonAttachments(lesson.id)]);
     // Se o fornecedor de vídeo falhar, a página continua de pé (título, grade, navegação) e
     // mostra "vídeo indisponível". O erro vai para o log do servidor (Sentry, na Fase 7).
     let playback: VideoPlayback | null = null;
     let playbackFailed = false;
     if (video) {
       try {
-        playback = await getLessonPlayback(video, { id: user.id, email: user.email });
+        playback = await getLessonPlayback(video, { id: user.id, name: user.name, email: user.email });
       } catch (error) {
         console.error(`Falha ao obter o vídeo da aula ${lesson.id}:`, error);
         playbackFailed = true;
@@ -127,6 +131,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
             watermarkText={user.email}
             initialPositionSeconds={initialPositionSeconds}
             initiallyCompleted={completed}
+            durationSeconds={lesson.durationSeconds}
           />
         ) : (
           <div className="text-muted-foreground flex aspect-video items-center justify-center rounded-lg border p-4 text-center">
@@ -143,6 +148,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
             </span>
           ) : null}
         </div>
+        <LessonMaterials courseSlug={view.curriculum.slug} lessonSlug={lesson.slug} attachments={attachments} />
       </div>
     );
   }
