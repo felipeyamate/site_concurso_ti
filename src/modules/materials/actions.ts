@@ -2,7 +2,8 @@
  * actions.ts — Server Actions dos materiais (PDFs) no painel: preparar envio, confirmar e apagar.
  *
  * Quem chama: `components/attachment-manager.tsx` (no navegador, no painel da aula).
- * O que devolve: `{ ok: true, ... }` ou `{ ok: false, error }` / um `FormState`.
+ * O que devolve: um `FormState` (como os outros formulários do painel); o passo 1 devolve também
+ * o link de envio quando dá certo.
  *
  * Toda ação: 1. confere login + perfil (professor ou admin); 2. valida a entrada (zod);
  * 3. chama as regras de `materials.server.ts`; 4. atualiza as telas.
@@ -21,7 +22,7 @@ import type { UploadTarget } from "@/modules/storage/types";
 
 import { confirmAttachmentUpload, deleteAttachment, prepareAttachmentUpload } from "./materials.server";
 
-type Result<T> = ({ ok: true } & T) | { ok: false; error: string };
+type PrepareUploadResult = { ok: true; key: string; target: UploadTarget } | { ok: false; state: FormState };
 
 const STORAGE_OFF_MESSAGE =
   "O armazenamento de arquivos não está configurado (Cloudflare R2). Veja o README, seção da Fase 3.";
@@ -45,43 +46,37 @@ function refreshScreens() {
   revalidatePath("/", "layout");
 }
 
-function messageFrom(error: unknown, context: string): string {
-  return stateFromError(error, context).message ?? "Algo deu errado.";
-}
-
 /** Passo 1: devolve o link temporário para o navegador enviar o PDF direto ao armazenamento. */
-export async function prepareAttachmentUploadAction(
-  input: unknown,
-): Promise<Result<{ key: string; target: UploadTarget }>> {
-  if (!(await getSessionWithRole("TEACHER"))) return { ok: false, error: PERMISSION_DENIED_MESSAGE };
+export async function prepareAttachmentUploadAction(input: unknown): Promise<PrepareUploadResult> {
+  if (!(await getSessionWithRole("TEACHER"))) return { ok: false, state: errorState(PERMISSION_DENIED_MESSAGE) };
   const parsed = prepareSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Dados do arquivo inválidos." };
+  if (!parsed.success) return { ok: false, state: errorState("Dados do arquivo inválidos.") };
   const storage = getFileStorage();
-  if (!storage) return { ok: false, error: STORAGE_OFF_MESSAGE };
+  if (!storage) return { ok: false, state: errorState(STORAGE_OFF_MESSAGE) };
 
   try {
     const { key, target } = await prepareAttachmentUpload({ storage, ...parsed.data });
     return { ok: true, key, target };
   } catch (error) {
-    return { ok: false, error: messageFrom(error, "preparar o envio do PDF") };
+    return { ok: false, state: stateFromError(error, "preparar o envio do PDF") };
   }
 }
 
 /** Passo 3: confere o arquivo enviado e registra o material. */
-export async function confirmAttachmentUploadAction(input: unknown): Promise<Result<Record<never, never>>> {
-  if (!(await getSessionWithRole("TEACHER"))) return { ok: false, error: PERMISSION_DENIED_MESSAGE };
+export async function confirmAttachmentUploadAction(input: unknown): Promise<FormState> {
+  if (!(await getSessionWithRole("TEACHER"))) return errorState(PERMISSION_DENIED_MESSAGE);
   const parsed = confirmSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Dados do envio inválidos." };
+  if (!parsed.success) return errorState("Dados do envio inválidos.");
   const storage = getFileStorage();
-  if (!storage) return { ok: false, error: STORAGE_OFF_MESSAGE };
+  if (!storage) return errorState(STORAGE_OFF_MESSAGE);
 
   try {
     await confirmAttachmentUpload({ storage, ...parsed.data });
   } catch (error) {
-    return { ok: false, error: messageFrom(error, "confirmar o envio do PDF") };
+    return stateFromError(error, "confirmar o envio do PDF");
   }
   refreshScreens();
-  return { ok: true };
+  return successState("Material enviado.");
 }
 
 /** Apaga um material (botão "Apagar" na lista). */

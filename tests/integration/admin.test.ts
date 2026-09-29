@@ -173,6 +173,24 @@ describe("módulos e aulas no painel", () => {
     await expect(updateLesson({ ...base, moduleId: other.moduleA.id })).rejects.toThrow(/módulo deste curso/);
   });
 
+  it("recusa endereço de aula repetido no mesmo curso, apontando o campo (e aceita o mesmo em outro curso)", async () => {
+    const { moduleA, lesson1, lesson2 } = await createSampleCourse();
+    const other = await createSampleCourse("Teste Admin Outro");
+    const base = { title: "Primeira aula", description: "", isFreePreview: false, isPublished: true };
+
+    const error = await updateLesson({ ...base, lessonId: lesson1.id, moduleId: moduleA.id, slug: lesson2.slug }).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(UserFacingError);
+    expect((error as UserFacingError).field).toBe("slug");
+
+    // Um endereço que só existe no primeiro curso pode ser usado no outro.
+    await updateLesson({ ...base, lessonId: lesson1.id, moduleId: moduleA.id, slug: "endereco-exclusivo" });
+    await expect(
+      updateLesson({ ...base, lessonId: other.lesson1.id, moduleId: other.moduleA.id, slug: "endereco-exclusivo" }),
+    ).resolves.toMatchObject({ slug: "endereco-exclusivo" });
+  });
+
   it("só apaga módulo vazio, e fecha a numeração", async () => {
     const { course, moduleA, moduleB, lesson3 } = await createSampleCourse();
     await expect(deleteModule(moduleB.id)).rejects.toThrow(/ainda tem aulas/);
@@ -192,6 +210,36 @@ describe("módulos e aulas no painel", () => {
 
     await expect(deleteLesson(lesson1.id)).rejects.toThrow(/Despublique/);
     await expect(deleteLesson(lesson2.id)).resolves.toMatchObject({ storageKeys: [] });
+  });
+
+  it("apagar a aula AO MESMO TEMPO em que um aluno salva progresso: o histórico nunca é apagado", async () => {
+    const { lesson1 } = await createSampleCourse();
+    await createUser("aluno");
+
+    // Uma transação grava o progresso do aluno e fica "aberta" (ainda sem confirmar)...
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let signalInserted!: () => void;
+    const inserted = new Promise<void>((resolve) => (signalInserted = resolve));
+    const saving = prisma.$transaction(
+      async (tx) => {
+        await tx.lessonProgress.create({ data: { userId: "aluno", lessonId: lesson1.id, positionSeconds: 30 } });
+        signalInserted();
+        await held;
+      },
+      { timeout: 15_000 },
+    );
+    await inserted;
+
+    // ...e, nesse meio tempo, alguém tenta apagar a aula. Sem a trava, a conferência não veria o
+    // progresso (ainda não confirmado) e o apagar em cascata o levaria junto.
+    const deleting = deleteLesson(lesson1.id);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    release();
+    await saving;
+
+    await expect(deleting).rejects.toThrow(/Despublique/);
+    expect(await prisma.lessonProgress.count({ where: { lessonId: lesson1.id } })).toBe(1);
   });
 
   it("aluno promovido a professor (ex.: monitor) continua protegendo o próprio histórico", async () => {
@@ -344,6 +392,28 @@ describe("matrículas manuais (mesma regra do script e dos pagamentos)", () => {
     });
     expect(row.revokedAt).toBeNull();
     expect(row.source).toBe("MANUAL");
+  });
+
+  it("dois pedidos de matrícula AO MESMO TEMPO somam os dois períodos (nenhum se perde)", async () => {
+    const { course } = await createSampleCourse();
+    await createUser("aluno");
+    const now = new Date("2026-01-01T12:00:00Z");
+
+    // Sem matrícula ainda: o primeiro cria (30 dias), o segundo espera e renova (+30).
+    await Promise.all([
+      grantEnrollment(prisma, { userId: "aluno", courseId: course.id, days: 30, now }),
+      grantEnrollment(prisma, { userId: "aluno", courseId: course.id, days: 30, now }),
+    ]);
+    // Com matrícula ativa: mais dois pedidos simultâneos de 10 dias.
+    await Promise.all([
+      grantEnrollment(prisma, { userId: "aluno", courseId: course.id, days: 10, now }),
+      grantEnrollment(prisma, { userId: "aluno", courseId: course.id, days: 10, now }),
+    ]);
+
+    const row = await prisma.enrollment.findUniqueOrThrow({
+      where: { userId_courseId: { userId: "aluno", courseId: course.id } },
+    });
+    expect(row.expiresAt?.getTime()).toBe(now.getTime() + 80 * DAY);
   });
 });
 

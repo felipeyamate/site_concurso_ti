@@ -7,7 +7,8 @@
  *  - a rota de download `/cursos/<curso>/aulas/<aula>/materiais/<id>`.
  *
  * Envio em 3 passos (o arquivo vai do navegador DIRETO para o armazenamento):
- *  1. `prepareAttachmentUpload`: valida o arquivo e devolve um link de envio temporário (10 min).
+ *  1. `prepareAttachmentUpload`: valida o arquivo e devolve um link de envio temporário (10 min),
+ *     que só aceita aquele arquivo (tipo PDF e o tamanho exato informado).
  *  2. O navegador envia o PDF para esse link.
  *  3. `confirmAttachmentUpload`: confere que o arquivo chegou (e o tamanho) e só então grava no banco.
  *
@@ -61,10 +62,11 @@ export async function prepareAttachmentUpload(params: {
   if (!lesson) throw new UserFacingError("Aula não encontrada.");
 
   const key = buildAttachmentKey(lesson.id, randomUUID());
+  // O link só aceita um arquivo com exatamente este tamanho (já conferido: até 50 MB).
   const target = await params.storage.createUploadTarget({
     key,
     contentType: PDF_CONTENT_TYPE,
-    maxBytes: MAX_PDF_BYTES,
+    sizeBytes: params.sizeBytes,
     expiresInSeconds: UPLOAD_LINK_SECONDS,
   });
   return { key, target };
@@ -136,13 +138,14 @@ export async function deleteStoredFiles(storage: FileStorage | null, keys: strin
     console.error(`[materiais] Armazenamento indisponível; arquivos não apagados: ${keys.join(", ")}`);
     return;
   }
-  for (const key of keys) {
-    try {
-      await storage.deleteObject(key);
-    } catch (error) {
-      console.error(`[materiais] Falha ao apagar o arquivo ${key}:`, error);
+  // Todos ao mesmo tempo (um curso pode ter dezenas de PDFs; um de cada vez demoraria segundos).
+  // `allSettled` espera todos, mesmo que algum falhe — como um `asyncio.gather(..., return_exceptions=True)`.
+  const results = await Promise.allSettled(keys.map((key) => storage.deleteObject(key)));
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.error(`[materiais] Falha ao apagar o arquivo ${keys[index]}:`, result.reason);
     }
-  }
+  });
 }
 
 export type AttachmentDownload =

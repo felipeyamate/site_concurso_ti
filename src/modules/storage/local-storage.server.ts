@@ -69,14 +69,14 @@ export function createLocalStorage(options: LocalStorageOptions): FileStorage {
   return {
     kind: "LOCAL",
 
-    async createUploadTarget({ key, contentType, maxBytes, expiresInSeconds }) {
+    async createUploadTarget({ key, contentType, sizeBytes, expiresInSeconds }) {
       resolveLocalPath(options.rootDir, key); // valida o caminho já aqui
       const url = buildLocalSignedUrl({
         secret: options.secret,
         operation: "upload",
         key,
         expiresAt: expiresAt(expiresInSeconds),
-        extra: { type: contentType, max: String(maxBytes) },
+        extra: { type: contentType, size: String(sizeBytes) },
       });
       return { url, method: "PUT", headers: { "Content-Type": contentType } };
     },

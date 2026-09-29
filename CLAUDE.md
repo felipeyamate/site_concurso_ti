@@ -31,7 +31,10 @@
 - Painel admin: toda Server Action começa com `getSessionWithRole` (`src/modules/auth/action-guards.ts`):
   TEACHER para conteúdo (cursos, aulas, vídeos, PDFs), ADMIN para usuários, perfis e matrículas.
   Formulários usam `useAdminForm` + `FormState`; erros esperados são `UserFacingError` (`src/lib/form-state.ts`).
+  Exceção: o envio de PDF (3 passos, `attachment-manager.tsx`) não usa o `useAdminForm`, mas usa `FormState` + `FormStatus`.
 - Nunca apagar histórico de aluno: curso com matrícula ou aula com progresso de ALUNO não se apaga (despublicar).
+  Toda operação "confere e depois grava/apaga" trava as linhas antes de conferir (ver `lockRows` em
+  `catalog-admin.server.ts` e `lockEnrollment` em `enrollment/grant.ts`); senão, um pedido simultâneo passa no meio.
 - Vídeo do Panda: link do player só passa por `parsePandaEmbedInput` (`src/modules/video/panda/embed.ts`);
   mensagens do player só com `event.source` do nosso iframe + `isPandaPlayerOrigin`. Produção exige DRM.
 - Arquivos (PDFs): sempre via `getFileStorage()` (`src/modules/storage`); o endereço do arquivo nunca vai

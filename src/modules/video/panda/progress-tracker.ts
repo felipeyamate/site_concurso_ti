@@ -22,14 +22,14 @@
  *  4. A duração só vale se vier do PLAYER (uma duração digitada errada no painel concluiria a aula
  *     antes da hora). Sem duração, a aula conclui ao terminar o vídeo ou pelo botão.
  */
+import { REPORT_EVERY_SECONDS } from "@/modules/progress/rules";
+
 import type { PandaPlayerEvent } from "./player-messages";
 
 export type TrackerProgress = { positionSeconds: number; durationSeconds: number | null; ended: boolean };
 
 export type TrackerAction = { type: "seek"; seconds: number } | { type: "report"; progress: TrackerProgress };
 
-// De quanto em quanto tempo de vídeo salvamos.
-export const REPORT_EVERY_SECONDS = 10;
 // Entre dois avisos de posição, um avanço de até 2 s é "tocando"; mais que isso é um pulo.
 const NATURAL_STEP_MAX_SECONDS = 2;
 // Diferença aceita entre a posição pedida e a real para considerar que o pulo aconteceu.

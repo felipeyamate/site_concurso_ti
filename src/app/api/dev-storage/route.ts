@@ -36,8 +36,8 @@ function verify(request: NextRequest, operation: LocalStorageOperation) {
 
 /**
  * Envio do arquivo (PUT).
- * Passos: confere o link; confere o tipo (igual ao assinado); lê o corpo respeitando o tamanho
- * máximo assinado; grava na pasta local.
+ * Passos: confere o link; confere o tipo (igual ao assinado); lê o corpo, que precisa ter
+ * EXATAMENTE o tamanho assinado (como o R2 faz com o `Content-Length` assinado); grava na pasta local.
  */
 export async function PUT(request: NextRequest): Promise<Response> {
   const params = verify(request, "upload");
@@ -47,15 +47,15 @@ export async function PUT(request: NextRequest): Promise<Response> {
   if (contentType !== params.type) {
     return new Response("Tipo de arquivo diferente do combinado.", { status: 400 });
   }
-  const maxBytes = Number(params.max);
+  const expectedBytes = Number(params.size);
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (declaredLength > maxBytes) {
-    return new Response("Arquivo grande demais.", { status: 413 });
+  if (declaredLength > expectedBytes) {
+    return new Response("Arquivo maior que o combinado.", { status: 413 });
   }
 
   const data = new Uint8Array(await request.arrayBuffer());
-  if (data.byteLength === 0 || data.byteLength > maxBytes) {
-    return new Response("Arquivo vazio ou grande demais.", { status: 413 });
+  if (data.byteLength === 0 || data.byteLength !== expectedBytes) {
+    return new Response("Arquivo diferente do combinado (tamanho).", { status: 400 });
   }
   await writeLocalObject(env.LOCAL_STORAGE_DIR, params.key, data);
   return new Response(null, { status: 200 });

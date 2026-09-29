@@ -10,14 +10,20 @@
  *  1. pede ao servidor um link de envio temporário (`prepareAttachmentUploadAction`);
  *  2. envia o arquivo para esse link (requisição PUT, como um `requests.put(url, data=arquivo)`);
  *  3. avisa o servidor, que confere o arquivo e registra o material (`confirmAttachmentUploadAction`).
+ *
+ * Por que não usa o `useAdminForm` dos outros formulários: aquele gancho envia o formulário para UMA
+ * Server Action; aqui são três passos, com o arquivo indo para outro endereço no meio. As mensagens
+ * seguem o mesmo padrão (`FormState` + `FormStatus`), e o título digitado não se perde num erro.
  */
 import { FileText, Trash2 } from "lucide-react";
 import { useRef, useState, useTransition, type FormEvent } from "react";
 
 import { ActionButton } from "@/components/admin/action-button";
+import { FormStatus } from "@/components/admin/form-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { errorState, initialFormState, type FormState } from "@/lib/form-state";
 
 import { confirmAttachmentUploadAction, deleteAttachmentAction, prepareAttachmentUploadAction } from "../actions";
 import { MAX_PDF_BYTES, formatFileSize, validatePdfUpload } from "../rules";
@@ -32,7 +38,7 @@ type AttachmentManagerProps = {
 
 export function AttachmentManager({ lessonId, attachments, storageAvailable }: AttachmentManagerProps) {
   const formRef = useRef<HTMLFormElement>(null);
-  const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+  const [state, setState] = useState<FormState>(initialFormState);
   const [isPending, startTransition] = useTransition();
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -42,17 +48,17 @@ export function AttachmentManager({ lessonId, attachments, storageAvailable }: A
     const titleInput = form.elements.namedItem("title") as HTMLInputElement | null;
     const file = fileInput?.files?.[0];
     if (!file) {
-      setMessage({ type: "error", text: "Escolha um arquivo PDF." });
+      setState(errorState("Escolha um arquivo PDF."));
       return;
     }
     // Validação rápida aqui (o servidor valida de novo).
     const problem = validatePdfUpload({ fileName: file.name, sizeBytes: file.size, contentType: file.type });
     if (problem) {
-      setMessage({ type: "error", text: problem });
+      setState(errorState(problem));
       return;
     }
 
-    setMessage(null);
+    setState(initialFormState);
     startTransition(async () => {
       // 1. Link de envio.
       const prepared = await prepareAttachmentUploadAction({
@@ -62,7 +68,7 @@ export function AttachmentManager({ lessonId, attachments, storageAvailable }: A
         contentType: file.type,
       });
       if (!prepared.ok) {
-        setMessage({ type: "error", text: prepared.error });
+        setState(prepared.state);
         return;
       }
 
@@ -75,26 +81,23 @@ export function AttachmentManager({ lessonId, attachments, storageAvailable }: A
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
       } catch {
-        setMessage({
-          type: "error",
-          text: "Não foi possível enviar o arquivo. Confira a internet e tente de novo (no R2, confira também o CORS do bucket).",
-        });
+        setState(
+          errorState(
+            "Não foi possível enviar o arquivo. Confira a internet e tente de novo (no R2, confira também o CORS do bucket).",
+          ),
+        );
         return;
       }
 
-      // 3. Confirmação e registro.
+      // 3. Confirmação e registro. Deu certo: limpa o formulário para o próximo PDF.
       const confirmed = await confirmAttachmentUploadAction({
         lessonId,
         key: prepared.key,
         title: titleInput?.value ?? "",
         fileName: file.name,
       });
-      if (!confirmed.ok) {
-        setMessage({ type: "error", text: confirmed.error });
-        return;
-      }
-      formRef.current?.reset();
-      setMessage({ type: "success", text: "Material enviado." });
+      if (confirmed.status === "success") formRef.current?.reset();
+      setState(confirmed);
     });
   }
 
@@ -141,11 +144,7 @@ export function AttachmentManager({ lessonId, attachments, storageAvailable }: A
             <Label htmlFor="attachment-file">Arquivo PDF</Label>
             <Input id="attachment-file" name="file" type="file" accept="application/pdf,.pdf" required />
           </div>
-          {message ? (
-            <p role="status" className={message.type === "error" ? "text-destructive text-sm" : "text-sm text-green-700 dark:text-green-400"}>
-              {message.text}
-            </p>
-          ) : null}
+          <FormStatus state={state} />
           <div>
             <Button type="submit" disabled={isPending}>
               {isPending ? "Enviando..." : "Enviar PDF"}

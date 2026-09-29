@@ -33,11 +33,16 @@ export type StorageKind = "R2" | "LOCAL";
 export interface FileStorage {
   readonly kind: StorageKind;
 
-  /** Link temporário para o NAVEGADOR enviar o arquivo direto para o armazenamento. */
+  /**
+   * Link temporário para o NAVEGADOR enviar o arquivo direto para o armazenamento.
+   * O tipo E o tamanho EXATO (`sizeBytes`, já validado) entram na assinatura: o link só aceita
+   * aquele arquivo. Assim, reusar o link depois da confirmação (ele vale 10 min) não consegue
+   * trocar o PDF conferido por um arquivo maior ou de outro tipo.
+   */
   createUploadTarget(params: {
     key: string;
     contentType: string;
-    maxBytes: number;
+    sizeBytes: number;
     expiresInSeconds: number;
   }): Promise<UploadTarget>;
 

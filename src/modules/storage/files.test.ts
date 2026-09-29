@@ -55,4 +55,11 @@ describe("nomes de arquivo", () => {
       `inline; filename="Seguranca da informacao.pdf"; filename*=UTF-8''Seguran%C3%A7a%20da%20informa%C3%A7%C3%A3o.pdf`,
     );
   });
+
+  it("codifica parênteses e asterisco no nome com acentos (o formato filename* não os aceita)", () => {
+    const header = buildContentDisposition("Segurança (resumo)*.pdf");
+    expect(header).toBe(
+      `inline; filename="Seguranca (resumo)*.pdf"; filename*=UTF-8''Seguran%C3%A7a%20%28resumo%29%2A.pdf`,
+    );
+  });
 });

@@ -59,11 +59,21 @@ export function createR2Storage(config: R2Config): FileStorage {
   return {
     kind: "R2",
 
-    async createUploadTarget({ key, contentType, expiresInSeconds }) {
-      // O tipo do arquivo entra na assinatura: o navegador precisa enviar exatamente esse tipo.
-      // O tamanho é conferido depois do envio (`getObjectInfo`), antes de salvar no banco.
-      const command = new PutObjectCommand({ Bucket: config.bucket, Key: key, ContentType: contentType });
-      const url = await getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+    async createUploadTarget({ key, contentType, sizeBytes, expiresInSeconds }) {
+      // O tipo e o tamanho EXATO entram na assinatura: o R2 recusa um envio com outro tipo ou
+      // outro tamanho (o navegador preenche o `Content-Length` sozinho, com o tamanho do arquivo).
+      // Atenção: por padrão o SDK deixa o `content-type` FORA da assinatura — por isso a lista
+      // `signableHeaders` abaixo é obrigatória.
+      const command = new PutObjectCommand({
+        Bucket: config.bucket,
+        Key: key,
+        ContentType: contentType,
+        ContentLength: sizeBytes,
+      });
+      const url = await getSignedUrl(client, command, {
+        expiresIn: expiresInSeconds,
+        signableHeaders: new Set(["content-type", "content-length"]),
+      });
       return { url, method: "PUT", headers: { "Content-Type": contentType } };
     },
 

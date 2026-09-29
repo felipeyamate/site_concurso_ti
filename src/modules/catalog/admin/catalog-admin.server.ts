@@ -12,6 +12,8 @@
  *  - Cursos e aulas novos nascem como RASCUNHO (só professor/admin veem até publicar).
  *  - Posições (ordem) são sempre 1, 2, 3... dentro do curso (módulos) e do módulo (aulas).
  *  - Apagar aula/curso devolve os caminhos dos PDFs, para quem chamou apagar os arquivos também.
+ *  - Antes de conferir "pode apagar?", TRAVAMOS as linhas que vão ser apagadas (ver `lockRows`):
+ *    assim nenhum progresso/matrícula novo entra entre a conferência e o apagar.
  */
 import "server-only";
 
@@ -43,6 +45,42 @@ function studentProgressIn(courseId: string): Prisma.LessonProgressWhereInput {
 
 // Transações que mexem em várias linhas: prazo maior que o padrão (5 s), para bancos distantes.
 const TRANSACTION_OPTIONS = { timeout: 15_000 } as const;
+
+// Posições são ÚNICAS dentro do curso/módulo: se duas pessoas mexem na ordem ao mesmo tempo, o
+// banco recusa a segunda gravação (UNIQUE). Não é bug — basta recarregar e tentar de novo.
+const CONCURRENT_CHANGE_MESSAGE =
+  "Outra alteração foi feita neste curso ao mesmo tempo. Recarregue a página e tente de novo.";
+
+/**
+ * Roda uma transação que mexe em posições; o conflito de posição vira a mensagem acima
+ * (em vez de "Algo deu errado").
+ */
+async function runPositionTransaction<T>(work: (tx: Tx) => Promise<T>): Promise<T> {
+  try {
+    return await prisma.$transaction(work, TRANSACTION_OPTIONS);
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new UserFacingError(CONCURRENT_CHANGE_MESSAGE);
+    throw error;
+  }
+}
+
+/**
+ * Trava linhas até o fim da transação (`SELECT ... FOR UPDATE`).
+ *
+ * Por que: apagar é "conferir se há histórico de aluno → apagar". Sem a trava, um progresso ou
+ * matrícula gravado ENTRE as duas coisas seria apagado junto (as tabelas apagam "em cascata").
+ * Com a trava, quem tenta gravar progresso/matrícula ligado a essas linhas espera o fim da nossa
+ * transação (o banco confere a chave estrangeira na linha travada) — e, se a gravação veio antes,
+ * nós é que esperamos e a conferência já a enxerga.
+ * Paralelo em Python: `select_for_update()` do Django.
+ */
+const lockRows = {
+  course: (tx: Tx, courseId: string) => tx.$executeRaw`SELECT id FROM courses WHERE id = ${courseId} FOR UPDATE`,
+  lessonsOfCourse: (tx: Tx, courseId: string) =>
+    tx.$executeRaw`SELECT id FROM lessons WHERE course_id = ${courseId} FOR UPDATE`,
+  module: (tx: Tx, moduleId: string) => tx.$executeRaw`SELECT id FROM modules WHERE id = ${moduleId} FOR UPDATE`,
+  lesson: (tx: Tx, lessonId: string) => tx.$executeRaw`SELECT id FROM lessons WHERE id = ${lessonId} FOR UPDATE`,
+};
 
 // =============================================================================================
 // Leitura (páginas do painel)
@@ -101,7 +139,11 @@ export async function getLessonForAdmin(lessonId: string) {
           modules: { orderBy: { position: "asc" }, select: { id: true, title: true, position: true } },
         },
       },
-      attachments: { orderBy: { createdAt: "asc" } },
+      // Sem `storageKey`: o caminho do arquivo no armazenamento nunca vai para a página.
+      attachments: {
+        orderBy: { createdAt: "asc" },
+        select: { id: true, title: true, fileName: true, sizeBytes: true },
+      },
     },
   });
 }
@@ -192,6 +234,9 @@ export async function moveCourse(courseId: string, direction: Direction) {
  */
 export async function deleteCourse(courseId: string): Promise<string[]> {
   return prisma.$transaction(async (tx) => {
+    // O curso trava novas matrículas (e aulas); as aulas travam novos progressos.
+    await lockRows.course(tx, courseId);
+    await lockRows.lessonsOfCourse(tx, courseId);
     const course = await tx.course.findUnique({
       where: { id: courseId },
       select: { _count: { select: { enrollments: true } } },
@@ -212,7 +257,7 @@ export async function deleteCourse(courseId: string): Promise<string[]> {
     });
     await tx.course.delete({ where: { id: courseId } });
     return attachments.map((attachment) => attachment.storageKey);
-  });
+  }, TRANSACTION_OPTIONS);
 }
 
 // =============================================================================================
@@ -243,7 +288,7 @@ async function closeModuleGap(tx: Tx, courseId: string, removed: number) {
 }
 
 export async function createModule(input: { courseId: string; title: string }) {
-  return prisma.$transaction(async (tx) => {
+  return runPositionTransaction(async (tx) => {
     const course = await tx.course.findUnique({ where: { id: input.courseId }, select: { id: true } });
     if (!course) throw new UserFacingError("Curso não encontrado.");
     const last = await tx.module.aggregate({ where: { courseId: course.id }, _max: { position: true } });
@@ -263,7 +308,7 @@ export async function renameModule(input: { moduleId: string; title: string }) {
 }
 
 export async function moveModule(moduleId: string, direction: Direction) {
-  await prisma.$transaction(async (tx) => {
+  await runPositionTransaction(async (tx) => {
     const current = await tx.module.findUnique({
       where: { id: moduleId },
       select: { id: true, courseId: true, position: true },
@@ -279,12 +324,14 @@ export async function moveModule(moduleId: string, direction: Direction) {
       select: { id: true, position: true },
     });
     if (neighbor) await swapModules(tx, current, neighbor);
-  }, TRANSACTION_OPTIONS);
+  });
 }
 
 /** Apaga um módulo VAZIO (as aulas precisam ser movidas ou apagadas antes). */
 export async function deleteModule(moduleId: string) {
-  await prisma.$transaction(async (tx) => {
+  await runPositionTransaction(async (tx) => {
+    // Trava o módulo: uma aula (com histórico) movida para ele agora não é apagada junto.
+    await lockRows.module(tx, moduleId);
     const courseModule = await tx.module.findUnique({
       where: { id: moduleId },
       select: { courseId: true, position: true, _count: { select: { lessons: true } } },
@@ -295,7 +342,7 @@ export async function deleteModule(moduleId: string) {
     }
     await tx.module.delete({ where: { id: moduleId } });
     await closeModuleGap(tx, courseModule.courseId, courseModule.position);
-  }, TRANSACTION_OPTIONS);
+  });
 }
 
 // =============================================================================================
@@ -367,47 +414,50 @@ export async function updateLesson(input: {
   isFreePreview: boolean;
   isPublished: boolean;
 }) {
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const lesson = await tx.lesson.findUnique({
-        where: { id: input.lessonId },
-        select: { courseId: true, moduleId: true, position: true },
-      });
-      if (!lesson) throw new UserFacingError("Aula não encontrada.");
+  return runPositionTransaction(async (tx) => {
+    const lesson = await tx.lesson.findUnique({
+      where: { id: input.lessonId },
+      select: { courseId: true, moduleId: true, position: true },
+    });
+    if (!lesson) throw new UserFacingError("Aula não encontrada.");
 
-      // Trocar de módulo: só para um módulo do MESMO curso; a aula vai para o fim dele.
-      let position = lesson.position;
-      if (input.moduleId !== lesson.moduleId) {
-        const target = await tx.module.findFirst({
-          where: { id: input.moduleId, courseId: lesson.courseId },
-          select: { id: true },
-        });
-        if (!target) throw new UserFacingError("Escolha um módulo deste curso.", { field: "moduleId" });
-        position = await nextLessonPosition(tx, target.id);
-      }
-
-      const updated = await tx.lesson.update({
-        where: { id: input.lessonId },
-        data: {
-          moduleId: input.moduleId,
-          position,
-          title: input.title,
-          slug: input.slug,
-          description: input.description,
-          isFreePreview: input.isFreePreview,
-          isPublished: input.isPublished,
-        },
-      });
-      // Saiu de um módulo: as aulas seguintes do módulo antigo sobem uma posição.
-      if (input.moduleId !== lesson.moduleId) await closeLessonGap(tx, lesson.moduleId, lesson.position);
-      return updated;
-    }, TRANSACTION_OPTIONS);
-  } catch (error) {
-    if (isUniqueViolation(error)) {
+    // O endereço é conferido ANTES de gravar: assim a mensagem certa aparece no campo certo
+    // (um conflito na gravação pode ser de endereço OU de posição, e aí não dá para saber qual).
+    const slugTaken = await tx.lesson.findFirst({
+      where: { courseId: lesson.courseId, slug: input.slug, id: { not: input.lessonId } },
+      select: { id: true },
+    });
+    if (slugTaken) {
       throw new UserFacingError("Já existe outra aula com este endereço neste curso.", { field: "slug" });
     }
-    throw error;
-  }
+
+    // Trocar de módulo: só para um módulo do MESMO curso; a aula vai para o fim dele.
+    let position = lesson.position;
+    if (input.moduleId !== lesson.moduleId) {
+      const target = await tx.module.findFirst({
+        where: { id: input.moduleId, courseId: lesson.courseId },
+        select: { id: true },
+      });
+      if (!target) throw new UserFacingError("Escolha um módulo deste curso.", { field: "moduleId" });
+      position = await nextLessonPosition(tx, target.id);
+    }
+
+    const updated = await tx.lesson.update({
+      where: { id: input.lessonId },
+      data: {
+        moduleId: input.moduleId,
+        position,
+        title: input.title,
+        slug: input.slug,
+        description: input.description,
+        isFreePreview: input.isFreePreview,
+        isPublished: input.isPublished,
+      },
+    });
+    // Saiu de um módulo: as aulas seguintes do módulo antigo sobem uma posição.
+    if (input.moduleId !== lesson.moduleId) await closeLessonGap(tx, lesson.moduleId, lesson.position);
+    return updated;
+  });
 }
 
 /**
@@ -454,7 +504,7 @@ export async function updateLessonVideo(input: {
 }
 
 export async function moveLesson(lessonId: string, direction: Direction) {
-  await prisma.$transaction(async (tx) => {
+  await runPositionTransaction(async (tx) => {
     const current = await tx.lesson.findUnique({
       where: { id: lessonId },
       select: { id: true, moduleId: true, position: true },
@@ -469,7 +519,7 @@ export async function moveLesson(lessonId: string, direction: Direction) {
       select: { id: true, position: true },
     });
     if (neighbor) await swapLessons(tx, current, neighbor);
-  }, TRANSACTION_OPTIONS);
+  });
 }
 
 /**
@@ -477,7 +527,9 @@ export async function moveLesson(lessonId: string, direction: Direction) {
  * Devolve o curso da aula e os caminhos dos PDFs dela (quem chamou apaga os arquivos).
  */
 export async function deleteLesson(lessonId: string): Promise<{ courseId: string; storageKeys: string[] }> {
-  return prisma.$transaction(async (tx) => {
+  return runPositionTransaction(async (tx) => {
+    // Trava a aula: um progresso de aluno gravado agora espera (e a conferência abaixo o enxerga).
+    await lockRows.lesson(tx, lessonId);
     const lesson = await tx.lesson.findUnique({
       where: { id: lessonId },
       select: {
@@ -495,5 +547,5 @@ export async function deleteLesson(lessonId: string): Promise<{ courseId: string
     await tx.lesson.delete({ where: { id: lessonId } });
     await closeLessonGap(tx, lesson.moduleId, lesson.position);
     return { courseId: lesson.courseId, storageKeys: lesson.attachments.map((item) => item.storageKey) };
-  }, TRANSACTION_OPTIONS);
+  });
 }

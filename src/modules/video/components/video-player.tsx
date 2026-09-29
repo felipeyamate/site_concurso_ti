@@ -17,6 +17,8 @@
  */
 import { useEffect, useRef, type SyntheticEvent } from "react";
 
+import { REPORT_EVERY_SECONDS } from "@/modules/progress/rules";
+
 import type { VideoPlayback } from "../types";
 import { PandaPlayer } from "./panda-player";
 import { Watermark } from "./watermark";
@@ -34,9 +36,6 @@ type VideoPlayerProps = {
   initialPositionSeconds: number;
   onProgress: (progress: PlaybackProgress) => void;
 };
-
-// De quanto em quanto tempo (de vídeo assistido) avisamos o andamento.
-const REPORT_EVERY_SECONDS = 10;
 
 /** Escolhe o player certo para o tipo de vídeo. */
 export function VideoPlayer(props: VideoPlayerProps) {

@@ -61,6 +61,18 @@ export function titleFromFileName(fileName: string): string {
 }
 
 /**
+ * Codifica o nome para o `filename*=UTF-8''...` (RFC 5987). O `encodeURIComponent` deixa passar
+ * `'`, `(`, `)` e `*`, que esse formato NÃO aceita — navegadores mais rígidos ignorariam o nome
+ * com acentos (ex.: "Segurança (resumo).pdf"). Por isso eles também viram `%xx`.
+ */
+function encodeRfc5987(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+/**
  * Cabeçalho `Content-Disposition` do download: `inline` (o navegador abre o PDF numa aba) com o
  * nome do arquivo. Nomes com acento vão no formato `filename*=UTF-8''...` (padrão RFC 6266);
  * o `filename="..."` sem acentos fica para navegadores antigos.
@@ -68,5 +80,5 @@ export function titleFromFileName(fileName: string): string {
 export function buildContentDisposition(fileName: string): string {
   const safeName = sanitizeFileName(fileName);
   const asciiFallback = safeName.normalize("NFD").replace(/[^\x20-\x7e]/g, "").replace(/[\\]/g, "") || "material.pdf";
-  return `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(safeName)}`;
+  return `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodeRfc5987(safeName)}`;
 }
