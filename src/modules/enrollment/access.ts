@@ -32,7 +32,12 @@ export type LessonAccess =
   | { allowed: true; reason: "STAFF" | "ENROLLED" | "FREE_PREVIEW" }
   | {
       allowed: false;
-      reason: "NOT_PUBLISHED" | "NOT_ENROLLED" | "ENROLLMENT_EXPIRED" | "ENROLLMENT_REVOKED";
+      reason:
+        | "NOT_PUBLISHED"
+        | "NOT_ENROLLED"
+        | "ENROLLMENT_NOT_STARTED"
+        | "ENROLLMENT_EXPIRED"
+        | "ENROLLMENT_REVOKED";
     };
 
 // Situação da matrícula, para as telas explicarem ao aluno o que está acontecendo.
@@ -88,6 +93,9 @@ export function checkLessonAccess(input: LessonAccessInput): LessonAccess {
   if (status === "EXPIRED") {
     return { allowed: false, reason: "ENROLLMENT_EXPIRED" };
   }
+  if (status === "NOT_STARTED") {
+    return { allowed: false, reason: "ENROLLMENT_NOT_STARTED" };
+  }
   return { allowed: false, reason: "NOT_ENROLLED" };
 }
 
@@ -100,6 +108,7 @@ export function canViewCourse(role: unknown, isCoursePublished: boolean): boolea
 export const LOCKED_LESSON_MESSAGES: Record<Extract<LessonAccess, { allowed: false }>["reason"], string> = {
   NOT_PUBLISHED: "Esta aula ainda não está disponível.",
   NOT_ENROLLED: "Esta aula é exclusiva para alunos matriculados no curso.",
+  ENROLLMENT_NOT_STARTED: "Sua matrícula neste curso ainda não começou. Volte na data de início.",
   ENROLLMENT_EXPIRED: "Seu acesso a este curso terminou. Renove para continuar assistindo.",
   ENROLLMENT_REVOKED: "Seu acesso a este curso foi cancelado. Em caso de dúvida, fale com o suporte.",
 };

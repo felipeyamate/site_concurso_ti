@@ -19,6 +19,12 @@ describe("shouldMarkCompleted", () => {
     expect(shouldMarkCompleted({ positionSeconds: 539, durationSeconds: 600, ended: false })).toBe(false);
   });
 
+  it("com a conclusão por posição desligada (após 'desmarcar'), só o fim do vídeo conclui", () => {
+    const at95 = { positionSeconds: 570, durationSeconds: 600 };
+    expect(shouldMarkCompleted({ ...at95, ended: false, completeByPosition: false })).toBe(false);
+    expect(shouldMarkCompleted({ ...at95, ended: true, completeByPosition: false })).toBe(true);
+  });
+
   it("sem duração conhecida, só conclui quando o vídeo termina", () => {
     expect(shouldMarkCompleted({ positionSeconds: 9999, durationSeconds: null, ended: false })).toBe(false);
     expect(shouldMarkCompleted({ positionSeconds: 9999, durationSeconds: 0, ended: false })).toBe(false);

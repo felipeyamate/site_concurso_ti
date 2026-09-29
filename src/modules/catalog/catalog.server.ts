@@ -67,16 +67,87 @@ export const getCourseCurriculum = cache(async (slug: string): Promise<CourseCur
 });
 
 /**
- * Todos os cursos com a grade, para o catálogo e a área do aluno.
- * `includeDrafts: false` traz só os publicados.
+ * Cursos com a grade completa (área do aluno).
+ * `includeDrafts: false` traz só os publicados; `courseIds` limita a alguns cursos (ex.: os do aluno),
+ * para não carregar o catálogo inteiro à toa.
  */
-export async function listCoursesWithCurriculum(options: { includeDrafts: boolean }): Promise<CourseCurriculum[]> {
+export async function listCoursesWithCurriculum(options: {
+  includeDrafts: boolean;
+  courseIds?: string[];
+}): Promise<CourseCurriculum[]> {
   const courses = await prisma.course.findMany({
-    where: options.includeDrafts ? {} : { isPublished: true },
+    where: {
+      ...(options.includeDrafts ? {} : { isPublished: true }),
+      ...(options.courseIds ? { id: { in: options.courseIds } } : {}),
+    },
     orderBy: [{ position: "asc" }, { title: "asc" }],
     include: curriculumInclude,
   });
   return courses.map(toCurriculum);
+}
+
+export type CourseSummary = {
+  id: string;
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  isPublished: boolean;
+  moduleCount: number;
+  lessonCount: number;
+  totalDurationSeconds: number;
+};
+
+/**
+ * Resumo dos cursos para a vitrine (/cursos): só os números de cada cartão.
+ *
+ * Por que uma consulta própria: a vitrine não precisa das aulas (nem das descrições); contar e
+ * somar no banco é bem mais leve do que trazer todas as aulas de todos os cursos.
+ * (Paralelo em SQL/pandas: é um COUNT/SUM com GROUP BY em vez de trazer todas as linhas.)
+ *
+ * Passos:
+ *  1. Cursos (publicados, ou todos para professor/admin) com a contagem de aulas e módulos visíveis.
+ *  2. Soma das durações por curso (GROUP BY course_id).
+ *  3. Junta tudo num formato simples.
+ */
+export async function listCatalogSummaries(options: { includeDrafts: boolean }): Promise<CourseSummary[]> {
+  // Aulas que contam: publicadas (ou todas, para professor/admin) — mesma regra de `visibleCurriculum`.
+  const visibleLessons = options.includeDrafts ? {} : { isPublished: true };
+  const courses = await prisma.course.findMany({
+    where: options.includeDrafts ? {} : { isPublished: true },
+    orderBy: [{ position: "asc" }, { title: "asc" }],
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      subtitle: true,
+      isPublished: true,
+      _count: {
+        select: {
+          lessons: { where: visibleLessons },
+          // Aluno: só módulos com alguma aula publicada. Professor/admin: todos.
+          modules: options.includeDrafts ? true : { where: { lessons: { some: visibleLessons } } },
+        },
+      },
+    },
+  });
+
+  const durations = await prisma.lesson.groupBy({
+    by: ["courseId"],
+    where: { courseId: { in: courses.map((course) => course.id) }, ...visibleLessons },
+    _sum: { durationSeconds: true },
+  });
+  const durationByCourse = new Map(durations.map((row) => [row.courseId, row._sum.durationSeconds ?? 0]));
+
+  return courses.map((course) => ({
+    id: course.id,
+    slug: course.slug,
+    title: course.title,
+    subtitle: course.subtitle,
+    isPublished: course.isPublished,
+    moduleCount: course._count.modules,
+    lessonCount: course._count.lessons,
+    totalDurationSeconds: durationByCourse.get(course.id) ?? 0,
+  }));
 }
 
 /** Os dados de vídeo de uma aula (usados só no servidor, depois de checar o acesso). */

@@ -15,18 +15,31 @@ const MIN_RESUME_SECONDS = 5;
 const END_MARGIN_SECONDS = 10;
 
 /**
+ * A posição já passou da marca de conclusão (90%)? Usada no servidor e no player.
+ */
+export function isPastCompletionThreshold(positionSeconds: number, durationSeconds: number | null): boolean {
+  if (!durationSeconds || durationSeconds <= 0) return false;
+  return positionSeconds / durationSeconds >= COMPLETION_THRESHOLD;
+}
+
+/**
  * O que o player informou deve marcar a aula como concluída?
  * Sim se o vídeo terminou (`ended`) ou se a posição passou de 90% da duração.
  * Obs.: olha a POSIÇÃO no vídeo (não o tempo realmente assistido): pular para o fim também conclui.
+ *
+ * `completeByPosition: false` desliga a regra dos 90% (só o fim do vídeo conclui). O player usa
+ * isso logo depois de o aluno clicar em "desmarcar" com o vídeo já perto do fim: senão, o próximo
+ * salvamento concluiria a aula de novo e o "desmarcar" não "pegaria".
  */
 export function shouldMarkCompleted(params: {
   positionSeconds: number;
   durationSeconds: number | null;
   ended: boolean;
+  completeByPosition?: boolean;
 }): boolean {
   if (params.ended) return true;
-  if (!params.durationSeconds || params.durationSeconds <= 0) return false;
-  return params.positionSeconds / params.durationSeconds >= COMPLETION_THRESHOLD;
+  if (params.completeByPosition === false) return false;
+  return isPastCompletionThreshold(params.positionSeconds, params.durationSeconds);
 }
 
 /**
@@ -83,8 +96,9 @@ export type ProgressEntry = {
 export function pickResumeLessonId(orderedLessonIds: string[], progress: ProgressEntry[]): string | null {
   if (orderedLessonIds.length === 0) return null;
 
-  // Só considera progresso de aulas que ainda existem no curso.
-  const known = progress.filter((entry) => orderedLessonIds.includes(entry.lessonId));
+  // Só considera progresso de aulas que ainda existem no curso (Set = consulta instantânea).
+  const lessonIdSet = new Set(orderedLessonIds);
+  const known = progress.filter((entry) => lessonIdSet.has(entry.lessonId));
   if (known.length === 0) return orderedLessonIds[0];
 
   const mostRecent = known.reduce((latest, entry) =>

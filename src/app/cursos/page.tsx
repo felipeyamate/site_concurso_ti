@@ -17,8 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { formatDuration } from "@/lib/format";
 import { hasMinimumRole } from "@/modules/auth/roles";
 import { getCurrentSession } from "@/modules/auth/session";
-import { listCoursesWithCurriculum } from "@/modules/catalog/catalog.server";
-import { flattenLessons, totalDurationSeconds, visibleCurriculum } from "@/modules/catalog/curriculum";
+import { listCatalogSummaries } from "@/modules/catalog/catalog.server";
 
 export const metadata: Metadata = {
   title: "Cursos",
@@ -30,7 +29,7 @@ export default async function CoursesPage() {
   // (e não "congelada" no build, o que tentaria acessar o banco durante o build).
   const session = await getCurrentSession();
   const isStaff = hasMinimumRole(session?.user.role, "TEACHER");
-  const courses = await listCoursesWithCurriculum({ includeDrafts: isStaff });
+  const courses = await listCatalogSummaries({ includeDrafts: isStaff });
 
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-8 px-4 py-10">
@@ -46,8 +45,6 @@ export default async function CoursesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {courses.map((course) => {
-            const visible = visibleCurriculum(course, { includeDrafts: isStaff });
-            const lessons = flattenLessons(visible);
             return (
               <Link key={course.id} href={`/cursos/${course.slug}`} className="group">
                 <Card className="group-hover:border-primary/40 h-full transition-colors">
@@ -59,7 +56,8 @@ export default async function CoursesPage() {
                     {course.subtitle ? <CardDescription>{course.subtitle}</CardDescription> : null}
                   </CardHeader>
                   <CardContent className="text-muted-foreground text-sm">
-                    {visible.modules.length} módulos · {lessons.length} aulas · {formatDuration(totalDurationSeconds(lessons))}
+                    {course.moduleCount} módulos · {course.lessonCount} aulas ·{" "}
+                    {formatDuration(course.totalDurationSeconds)}
                   </CardContent>
                 </Card>
               </Link>

@@ -11,6 +11,11 @@ import { createScriptPrismaClient } from "../scripts/script-db";
 import { seedCatalog } from "./seed-catalog";
 
 async function main(): Promise<void> {
+  // Trava de segurança: dados de exemplo nunca vão para o site de produção.
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") {
+    console.error("O seed de exemplo não roda em produção (NODE_ENV/VERCEL_ENV = production).");
+    process.exit(1);
+  }
   const prisma = createScriptPrismaClient();
   try {
     const result = await seedCatalog(prisma);

@@ -29,6 +29,8 @@ const progressInputSchema = z.object({
   positionSeconds: z.number().min(0).max(MAX_SECONDS),
   durationSeconds: z.number().positive().max(MAX_SECONDS).nullable(),
   ended: z.boolean(),
+  // `false` logo depois de "desmarcar": não concluir de novo só por estar depois dos 90%.
+  completeByPosition: z.boolean().default(true),
 });
 
 const completionInputSchema = z.object({
@@ -80,6 +82,7 @@ export async function saveLessonProgressAction(input: unknown): Promise<ActionRe
     positionSeconds: position,
     durationSeconds: duration,
     ended: parsed.data.ended,
+    completeByPosition: parsed.data.completeByPosition,
   });
   return { ok: true, completed };
 }

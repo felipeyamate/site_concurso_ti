@@ -13,6 +13,8 @@
  *
  * Também SINCRONIZA: se você reordenar, mover ou apagar aulas/módulos nos dados abaixo e rodar
  * de novo, o banco fica igual aos dados (aulas e módulos que saíram são apagados).
+ * Proteção: se alguma aula a apagar tiver PROGRESSO de aluno, o seed para ANTES de gravar
+ * qualquer coisa (apagar a aula apagaria esse progresso junto).
  */
 import type { PrismaClient } from "../src/generated/prisma/client";
 
@@ -222,8 +224,31 @@ export type SeedResult = { courses: number; modules: number; lessons: number };
  * Passos, para cada curso: 1) upsert do curso pelo slug; 2) upsert de cada módulo pela posição;
  * 3) upsert de cada aula pelo slug dentro do curso. Posições começam em 1.
  */
+/**
+ * Confere, ANTES de qualquer gravação, se a sincronização apagaria progresso de alunos.
+ * Aulas que saíram dos dados de exemplo seriam apagadas — e o banco apaga o progresso junto
+ * (ON DELETE CASCADE). Se houver progresso, para com um erro explicando o que fazer.
+ */
+async function assertNoStudentProgressWouldBeDeleted(prisma: PrismaClient): Promise<void> {
+  for (const seedCourse of SEED_COURSES) {
+    const seedSlugs = seedCourse.modules.flatMap((seedModule) => seedModule.lessons.map((lesson) => lesson.slug));
+    const lessonsWithProgress = await prisma.lesson.findMany({
+      where: { course: { slug: seedCourse.slug }, slug: { notIn: seedSlugs }, progress: { some: {} } },
+      select: { slug: true },
+    });
+    if (lessonsWithProgress.length > 0) {
+      const slugs = lessonsWithProgress.map((lesson) => lesson.slug).join(", ");
+      throw new Error(
+        `O seed apagaria aulas que têm progresso de alunos (${seedCourse.slug}: ${slugs}). ` +
+          "Nada foi gravado. Devolva essas aulas aos dados de exemplo ou use um banco de desenvolvimento limpo.",
+      );
+    }
+  }
+}
+
 export async function seedCatalog(prisma: PrismaClient): Promise<SeedResult> {
   const result: SeedResult = { courses: 0, modules: 0, lessons: 0 };
+  await assertNoStudentProgressWouldBeDeleted(prisma);
 
   for (const seedCourse of SEED_COURSES) {
     const courseData = {

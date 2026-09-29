@@ -10,15 +10,11 @@ import "server-only";
 
 import { prisma } from "@/lib/db";
 
+import type { ProgressSnapshot } from "./course-view";
 import { shouldMarkCompleted } from "./rules";
 
-export type LessonProgressRow = {
-  lessonId: string;
-  positionSeconds: number;
-  durationSeconds: number | null;
-  completedAt: Date | null;
-  lastWatchedAt: Date;
-};
+// O formato do progresso é definido UMA vez, em `course-view.ts` (as regras usam o mesmo tipo).
+export type LessonProgressRow = ProgressSnapshot;
 
 const progressSelect = {
   lessonId: true,
@@ -44,6 +40,7 @@ export async function recordLessonProgress(params: {
   positionSeconds: number;
   durationSeconds: number | null;
   ended: boolean;
+  completeByPosition?: boolean; // ver `shouldMarkCompleted`
   now?: Date;
 }): Promise<{ completed: boolean }> {
   const now = params.now ?? new Date();

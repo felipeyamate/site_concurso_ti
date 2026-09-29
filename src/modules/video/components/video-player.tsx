@@ -39,6 +39,10 @@ const REPORT_EVERY_SECONDS = 10;
 export function VideoPlayer({ playback, title, watermarkText, initialPositionSeconds, onProgress }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastReportedRef = useRef(initialPositionSeconds);
+  // O aluno apertou "play" nesta visita? Só então salvamos ao sair/trocar de aba. Sem isso,
+  // sair antes de o vídeo carregar (posição ainda 0) APAGARIA a posição salva — e no modo de
+  // desenvolvimento o React monta/desmonta o player uma vez ao abrir, o que disparava isso sempre.
+  const hasPlayedRef = useRef(false);
   // Guarda sempre a versão MAIS RECENTE de `onProgress`. O evento de "trocar de aba" é registrado
   // uma vez só; sem isto, ele continuaria chamando uma versão antiga (ex.: de outra aula).
   const onProgressRef = useRef(onProgress);
@@ -64,7 +68,7 @@ export function VideoPlayer({ playback, title, watermarkText, initialPositionSec
   useEffect(() => {
     const video = videoRef.current; // guardado agora: na "limpeza" o ref já pode estar vazio
     function handleVisibilityChange() {
-      if (document.visibilityState === "hidden" && video && video.currentTime > 0) {
+      if (document.visibilityState === "hidden" && video && hasPlayedRef.current) {
         reportFrom(video, false);
       }
     }
@@ -72,7 +76,8 @@ export function VideoPlayer({ playback, title, watermarkText, initialPositionSec
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       // "Limpeza" do efeito = o componente está saindo da tela.
-      if (video && !video.ended && Math.abs(video.currentTime - lastReportedRef.current) >= 1) {
+      const moved = video ? Math.abs(video.currentTime - lastReportedRef.current) : 0;
+      if (video && hasPlayedRef.current && !video.ended && moved >= 1) {
         reportFrom(video, false);
       }
     };
@@ -138,6 +143,9 @@ export function VideoPlayer({ playback, title, watermarkText, initialPositionSec
         disablePictureInPicture
         onContextMenu={(event) => event.preventDefault()}
         onLoadedMetadata={handleLoadedMetadata}
+        onPlay={() => {
+          hasPlayedRef.current = true;
+        }}
         onTimeUpdate={handleTimeUpdate}
         onPause={(event) => {
           // O navegador também dispara "pause" logo antes de "ended"; o "ended" cuida desse caso.

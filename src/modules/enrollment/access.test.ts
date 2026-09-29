@@ -88,6 +88,13 @@ describe("checkLessonAccess", () => {
     });
   });
 
+  it("matrícula que ainda não começou bloqueia com motivo próprio (não 'sem matrícula')", () => {
+    expect(checkLessonAccess(input({ enrollment: { ...activeEnrollment, startsAt: TOMORROW } }))).toEqual({
+      allowed: false,
+      reason: "ENROLLMENT_NOT_STARTED",
+    });
+  });
+
   it("matrícula vencida ainda assiste as aulas grátis", () => {
     const expired = { ...activeEnrollment, expiresAt: YESTERDAY };
     expect(checkLessonAccess(input({ enrollment: expired, isFreePreview: true })).allowed).toBe(true);

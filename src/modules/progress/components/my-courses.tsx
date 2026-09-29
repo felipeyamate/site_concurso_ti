@@ -11,8 +11,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { formatDate } from "@/lib/format";
 
 import type { CourseView } from "../course-view";
+
+/** Texto para um curso cuja matrícula não está ativa (o progresso continua guardado). */
+function inactiveEnrollmentMessage(view: CourseView): string {
+  const expiresAt = view.enrollment?.expiresAt;
+  const startsAt = view.enrollment?.startsAt;
+  switch (view.enrollmentStatus) {
+    case "EXPIRED":
+      return `Seu acesso terminou${expiresAt ? ` em ${formatDate(expiresAt)}` : ""}. Seu progresso fica guardado para quando renovar.`;
+    case "REVOKED":
+      return "Seu acesso a este curso foi cancelado. Em caso de dúvida, fale com o suporte.";
+    case "NOT_STARTED":
+      return `Sua matrícula começa${startsAt ? ` em ${formatDate(startsAt)}` : " em breve"}.`;
+    default:
+      return "Você não tem acesso a este curso no momento.";
+  }
+}
 
 export function MyCourses({ courses }: { courses: CourseView[] }) {
   return (
@@ -50,7 +67,10 @@ export function MyCourses({ courses }: { courses: CourseView[] }) {
                       {summary.completed} de {summary.total} aulas concluídas ({summary.percent}%)
                     </span>
                   </div>
-                  {resumeLesson ? (
+                  {view.hasCourseAccess ? null : (
+                    <p className="text-muted-foreground text-sm">{inactiveEnrollmentMessage(view)}</p>
+                  )}
+                  {view.hasCourseAccess && resumeLesson ? (
                     <Button asChild size="sm" className="h-auto min-h-9 py-2 text-left whitespace-normal w-fit">
                       <Link href={`/cursos/${curriculum.slug}/aulas/${resumeLesson.slug}`}>
                         {view.hasStarted ? `Continuar: ${resumeLesson.title}` : "Começar o curso"}

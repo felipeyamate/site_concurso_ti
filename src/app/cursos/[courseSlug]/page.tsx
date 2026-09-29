@@ -29,6 +29,10 @@ import { getCourseView } from "@/modules/progress/course-view.server";
  * Quem já teve acesso precisa saber o que aconteceu (e que o progresso continua guardado).
  */
 function accessMessage(view: CourseView, isLoggedIn: boolean): string {
+  // Só sugere a aula grátis quando o curso tem uma (senão o aluno procuraria algo que não existe).
+  const freeLessonHint = view.firstFreeLesson
+    ? ` Enquanto isso, assista à aula grátis${isLoggedIn ? "" : " (é só criar uma conta)"}.`
+    : "";
   switch (view.enrollmentStatus) {
     case "EXPIRED": {
       const endedOn = view.enrollment?.expiresAt ? ` em ${formatDate(view.enrollment.expiresAt)}` : "";
@@ -36,10 +40,12 @@ function accessMessage(view: CourseView, isLoggedIn: boolean): string {
     }
     case "REVOKED":
       return "Seu acesso a este curso foi cancelado. Em caso de dúvida, fale com o suporte.";
-    case "NOT_STARTED":
-      return "Sua matrícula ainda não começou. Enquanto isso, assista à aula grátis.";
+    case "NOT_STARTED": {
+      const startsOn = view.enrollment?.startsAt ? ` em ${formatDate(view.enrollment.startsAt)}` : " em breve";
+      return `Sua matrícula começa${startsOn}.${freeLessonHint}`;
+    }
     default:
-      return `As matrículas abrem em breve. Enquanto isso, assista à aula grátis${isLoggedIn ? "" : " (é só criar uma conta)"}.`;
+      return `As matrículas abrem em breve.${freeLessonHint}`;
   }
 }
 

@@ -8,7 +8,7 @@
 import "server-only";
 
 import { getCourseCurriculum, listCoursesWithCurriculum } from "@/modules/catalog/catalog.server";
-import { canViewCourse, isEnrollmentActive } from "@/modules/enrollment/access";
+import { canViewCourse } from "@/modules/enrollment/access";
 import { getEnrollment, listEnrollments } from "@/modules/enrollment/enrollment.server";
 import { hasMinimumRole } from "@/modules/auth/roles";
 
@@ -43,23 +43,32 @@ export async function getCourseView(slug: string, viewer: ViewerRef, now: Date =
 }
 
 /**
- * "Meus cursos" da área do aluno: cursos com matrícula ativa.
- * Professor/admin vê todos (inclusive rascunhos), já que tem acesso a todos.
+ * "Meus cursos" da área do aluno: os cursos em que a pessoa tem (ou já teve) matrícula.
+ * Matrícula vencida/cancelada também aparece — com o motivo e o progresso guardado —, para o
+ * ex-aluno não achar que "nunca foi matriculado". Professor/admin vê todos (inclusive rascunhos).
+ *
+ * Passos:
+ *  1. Busca as matrículas e o progresso da pessoa (em paralelo).
+ *  2. Busca SÓ os cursos dessas matrículas (professor/admin: todos).
+ *  3. Monta a visão de cada curso; os com acesso ativo vêm primeiro.
  */
 export async function listMyCourseViews(viewer: NonNullable<ViewerRef>, now: Date = new Date()): Promise<CourseView[]> {
   const isStaff = hasMinimumRole(viewer.role, "TEACHER");
-  const [courses, enrollments, progress] = await Promise.all([
-    listCoursesWithCurriculum({ includeDrafts: isStaff }),
+  const [enrollments, progress] = await Promise.all([
     listEnrollments(viewer.userId),
     listProgressForUser(viewer.userId),
   ]);
+  if (!isStaff && enrollments.length === 0) {
+    return [];
+  }
 
+  const courses = await listCoursesWithCurriculum({
+    includeDrafts: isStaff,
+    courseIds: isStaff ? undefined : enrollments.map((enrollment) => enrollment.courseId),
+  });
   const enrollmentByCourse = new Map(enrollments.map((enrollment) => [enrollment.courseId, enrollment]));
-  const myCourses = isStaff
-    ? courses
-    : courses.filter((course) => isEnrollmentActive(enrollmentByCourse.get(course.id) ?? null, now));
 
-  return myCourses.map((curriculum) =>
+  const views = courses.map((curriculum) =>
     buildCourseView({
       curriculum,
       role: viewer.role,
@@ -68,4 +77,6 @@ export async function listMyCourseViews(viewer: NonNullable<ViewerRef>, now: Dat
       now,
     }),
   );
+  // `sort` estável: mantém a ordem do catálogo dentro de cada grupo (ativos primeiro).
+  return views.sort((a, b) => Number(b.hasCourseAccess) - Number(a.hasCourseAccess));
 }
