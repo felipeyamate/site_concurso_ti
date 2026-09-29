@@ -4,7 +4,8 @@ Plataforma de cursos que ensina Informática/TI para candidatos de concursos que
 área de TI**. Visão, regras de negócio, stack e roteiro estão em **[PROJECT.md](./PROJECT.md)**
 (leia primeiro).
 
-**Estado atual:** Fase 1 concluída — projeto, banco, autenticação e perfis.
+**Estado atual:** Fase 2 concluída — catálogo de cursos, aulas com player, matrículas e progresso
+(a Fase 1 trouxe o projeto, o banco, o login e os perfis).
 
 ---
 
@@ -30,7 +31,10 @@ cp .env.example .env.local
 # 3. Crie as tabelas no banco
 npm run db:deploy
 
-# 4. Suba o site
+# 4. Crie o curso de EXEMPLO (dados de desenvolvimento; nunca rode no banco de produção)
+npm run db:seed
+
+# 5. Suba o site
 npm run dev
 ```
 
@@ -81,7 +85,31 @@ está em [`docs/COMO-REVISAR.md`](./docs/COMO-REVISAR.md).
 
 ---
 
-## 3. Comandos do dia a dia
+## 3. Como testar a Fase 2 (passo a passo)
+
+Pré-requisito: ter rodado `npm run db:seed` (cria o "Curso Base" de exemplo, com 16 aulas, e um
+curso em rascunho). Os vídeos são um vídeo de exemplo (desenho "Big Buck Bunny") até a integração
+com o Panda Video, na Fase 3 — e só tocam com `npm run dev` (em produção o vídeo de exemplo é
+bloqueado de propósito).
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 1 | Sem estar logado, abra http://localhost:3000/cursos | Aparece o "Informática e TI para Concursos — do zero". O curso "TI para o Banco do Brasil" (rascunho) **não** aparece |
+| 2 | Abra o curso | 7 módulos e 16 aulas; cadeado 🔒 nas aulas pagas, etiqueta "Grátis" em 2 aulas e o botão "Assistir aula grátis" |
+| 3 | Clique em "Assistir aula grátis" | Pede login. Depois de entrar (ou criar conta), você volta direto para a aula grátis, com o vídeo e o **seu e-mail** passeando por cima do vídeo (marca d'água) |
+| 4 | Assista uns 30 segundos, pause e recarregue a página (F5) | O vídeo continua de onde parou e aparece "Continuando de onde você parou" |
+| 5 | Arraste o vídeo até o fim | A aula vira "Concluída" e ganha ✓ na lista da direita |
+| 6 | Abra uma aula com cadeado | "Aula bloqueada — exclusiva para alunos matriculados", **sem vídeo** |
+| 7 | No terminal: `npm run enroll -- seu@email.com informatica-e-ti-do-zero 365` e recarregue | A aula abre (matrícula de 365 dias). Rodar de novo **soma** mais 365 dias ao que faltava |
+| 8 | Clique em "Próxima: …" e depois em "Marcar como concluída" | Vai para a aula seguinte; o botão vira "Concluída (desmarcar)" e o % do curso sobe. "Desmarcar" vale mesmo com o vídeo perto do fim |
+| 9 | Abra http://localhost:3000/area-do-aluno | "Meus cursos" mostra o curso com o % e o botão "Continuar: <próxima aula pendente>". Depois do passo 10, o curso continua na lista, explicando que o acesso foi cancelado |
+| 10 | `npm run enroll -- seu@email.com informatica-e-ti-do-zero --revogar` e abra uma aula paga | "Seu acesso a este curso foi cancelado" (também na página do curso). A aula grátis continua abrindo |
+| 11 | `npm run user:set-role -- seu@email.com TEACHER` e abra `/cursos` | Aparece também o rascunho (etiqueta "Rascunho") e todas as aulas abrem, sem matrícula |
+| 12 | Abra as páginas no celular (ou no modo celular do navegador: F12 → ícone de celular) | Nada "vaza" para os lados; o player ocupa a largura da tela |
+
+---
+
+## 4. Comandos do dia a dia
 
 | Comando | Para que serve |
 |---|---|
@@ -90,20 +118,23 @@ está em [`docs/COMO-REVISAR.md`](./docs/COMO-REVISAR.md).
 | `npm run lint` | Procura problemas comuns no código |
 | `npm run typecheck` | Checa os tipos do TypeScript (como o `mypy`) |
 | `npm test` | Testes unitários (rápidos, sem banco) |
-| `npm run test:integration` | Testes com banco de verdade (ver seção 4) |
+| `npm run test:integration` | Testes com banco de verdade (ver seção 5) |
 | `npm run db:migrate -- --name descricao` | Depois de **alterar** `prisma/schema.prisma`: cria e aplica uma nova migração |
 | `npm run db:deploy` | Aplica migrações já existentes (primeira vez, produção) |
 | `npm run db:studio` | Abre uma interface visual para ver/editar os dados do banco |
+| `npm run db:seed` | Grava o curso de exemplo (só desenvolvimento; pode rodar várias vezes) |
 | `npm run user:set-role -- email PERFIL` | Muda o perfil de um usuário (STUDENT, TEACHER, ADMIN) |
+| `npm run enroll -- email curso [dias \| --revogar]` | Matricula num curso (sem data de fim ou por N dias), renova, ou revoga o acesso |
 
 ---
 
-## 4. Testes automáticos
+## 5. Testes automáticos
 
 - **Unitários** (`npm test`): regras puras — perfis, limite de sessões, proteção de redirecionamento,
-  validação de formulários, variáveis de ambiente, e-mails.
-- **Integração** (`npm run test:integration`): cadastro, login e limite de sessões gravando num
-  PostgreSQL de verdade. **Os testes apagam os dados do banco que usam**, por isso exigem um banco
+  validação de formulários, variáveis de ambiente, e-mails, **acesso às aulas** (matrícula),
+  progresso e "continuar de onde parou".
+- **Integração** (`npm run test:integration`): cadastro, login, limite de sessões, seed do catálogo,
+  acesso às aulas e progresso gravando num PostgreSQL de verdade. **Os testes apagam os dados do banco que usam**, por isso exigem um banco
   SEPARADO na variável `TEST_DATABASE_URL`:
   1. Na Neon, crie uma branch chamada `test` (Branches → New branch).
   2. Copie a string de conexão **direta** dessa branch.
@@ -114,23 +145,29 @@ está em [`docs/COMO-REVISAR.md`](./docs/COMO-REVISAR.md).
 
 ---
 
-## 5. Onde fica cada coisa
+## 6. Onde fica cada coisa
 
 ```
 prisma/
   schema.prisma          Tabelas do banco (como os models.py do Django/SQLAlchemy)
   migrations/            Histórico de alterações do banco (SQL gerado pelo Prisma)
-scripts/set-role.ts      Script para mudar perfil de usuário
+  seed.ts, seed-catalog.ts  Curso de EXEMPLO para desenvolvimento (npm run db:seed)
+scripts/                 set-role.ts (perfil) e enroll.ts (matrícula)
 src/
   app/                   Páginas e rotas (cada pasta = um endereço do site)
     (auth)/              /entrar, /cadastro, /esqueci-senha, /redefinir-senha
-    area-do-aluno/       Área do aluno (exige login)
+    area-do-aluno/       Área do aluno: meus cursos, dispositivos (exige login)
+    cursos/              /cursos (catálogo), /cursos/[curso], /cursos/[curso]/aulas/[aula] (player)
     admin/               Painel admin (exige perfil TEACHER ou ADMIN)
     api/auth/[...all]/   API de autenticação (/api/auth/*)
   components/ui/         Componentes visuais (shadcn/ui)
   lib/                   Utilidades gerais: banco (db.ts), configurações (env.ts)
   modules/               Domínios do sistema ("monolito modular")
     auth/                Contas: login, perfis, sessões
+    catalog/             Cursos, módulos e aulas (grade, ordem, navegação)
+    enrollment/          Matrículas e a REGRA DE ACESSO às aulas (access.ts)
+    progress/            Progresso, conclusão, "continuar de onde parou", player da aula
+    video/               Fornecedores de vídeo (hoje: exemplo; Fase 3: Panda) e o player
     email/               Envio de e-mails e modelos de texto
   proxy.ts               Barreira rápida das áreas protegidas
   generated/prisma/      Cliente do banco GERADO pelo Prisma (não editar; fora do Git)
@@ -139,7 +176,7 @@ tests/integration/       Testes que usam o banco de verdade
 
 ---
 
-## 6. Publicando na Vercel (quando for a hora)
+## 7. Publicando na Vercel (quando for a hora)
 
 1. Na Vercel: **Add New → Project** e importe este repositório do GitHub.
 2. Em **Settings → Environment Variables**, cadastre as mesmas variáveis do `.env.example`,

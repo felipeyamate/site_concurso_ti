@@ -39,7 +39,7 @@ export default function HomePage() {
             <Link href="/cadastro">Criar conta grátis</Link>
           </Button>
           <Button asChild size="lg" variant="outline">
-            <Link href="/entrar">Já tenho conta</Link>
+            <Link href="/cursos">Ver os cursos</Link>
           </Button>
         </div>
       </section>

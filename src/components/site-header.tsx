@@ -18,11 +18,16 @@ export function SiteHeader() {
         <Link href="/" className="font-semibold tracking-tight">
           Concurso TI
         </Link>
-        <nav className="flex items-center gap-2">
+        <nav className="flex items-center gap-1 sm:gap-2">
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/cursos">Cursos</Link>
+          </Button>
           <Button asChild variant="ghost" size="sm">
             <Link href="/area-do-aluno">Área do aluno</Link>
           </Button>
-          <Button asChild size="sm">
+          {/* No celular, só os dois primeiros links cabem; "Criar conta" continua na página
+              inicial, no login e nas páginas dos cursos. */}
+          <Button asChild size="sm" className="hidden sm:inline-flex">
             <Link href="/cadastro">Criar conta</Link>
           </Button>
         </nav>

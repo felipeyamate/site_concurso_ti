@@ -12,8 +12,10 @@
 // - No banco, tabelas e colunas ficam em snake_case (`email_verified`) via @map/@@map,
 //   para facilitar consultas SQL diretas (ex.: no console da Neon ou em ferramentas de BI).
 //
-// Fase 1: apenas as tabelas de contas/autenticação. As tabelas de catálogo, matrículas,
-// pagamentos etc. (seção 6 do PROJECT.md) entram nas fases em que forem usadas.
+// Fase 1: tabelas de contas/autenticação.
+// Fase 2: catálogo (Course, Module, Lesson), matrículas (Enrollment) e progresso (LessonProgress).
+// As demais tabelas (pagamentos, questões etc. — seção 6 do PROJECT.md) entram nas fases em que
+// forem usadas.
 // =============================================================================
 
 generator client {
@@ -53,6 +55,8 @@ model User {
   updatedAt     DateTime  @updatedAt @map("updated_at")
   sessions      Session[]
   accounts      Account[]
+  enrollments   Enrollment[]
+  progress      LessonProgress[]
 
   @@map("users")
 }
@@ -119,4 +123,150 @@ model RateLimit {
   lastRequest BigInt @map("last_request")
 
   @@map("rate_limits")
+}
+
+// -----------------------------------------------------------------------------
+// Catálogo (Fase 2): Curso → Módulos → Aulas.
+// Hoje o conteúdo entra pelo seed (`npm run db:seed`); o cadastro pelo painel é da Fase 3.
+// -----------------------------------------------------------------------------
+
+// Um curso (ex.: "Informática e TI para Concursos — do zero").
+model Course {
+  id          String       @id @default(cuid())
+  // Identificador usado na URL: /cursos/<slug>. Só letras minúsculas, números e hífens.
+  slug        String       @unique
+  title       String
+  // Frase curta que aparece no catálogo, embaixo do título.
+  subtitle    String?
+  description String
+  // Só cursos publicados aparecem para os alunos. Rascunhos: só TEACHER/ADMIN veem.
+  isPublished Boolean      @default(false) @map("is_published")
+  // Ordem no catálogo (menor primeiro).
+  position    Int          @default(0)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  modules     Module[]
+  lessons     Lesson[]
+  enrollments Enrollment[]
+
+  @@map("courses")
+}
+
+// Um módulo agrupa aulas de um mesmo assunto dentro do curso (ex.: "Segurança da Informação").
+model Module {
+  id        String   @id @default(cuid())
+  courseId  String   @map("course_id")
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title     String
+  position  Int
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  lessons   Lesson[]
+
+  @@unique([courseId, position])
+  // Permite que a aula aponte para (módulo, curso) juntos — ver o comentário em Lesson.
+  @@unique([id, courseId])
+  @@map("modules")
+}
+
+// De onde vem o vídeo de uma aula. A escolha do fornecedor fica em `src/modules/video`.
+enum VideoProvider {
+  // Vídeo de exemplo, só para desenvolvimento (bloqueado no site de produção).
+  DEV
+  // Panda Video (integração na Fase 3).
+  PANDA
+}
+
+// Uma aula. Guarda `courseId` além do `moduleId` para garantir que o `slug` (usado na URL)
+// seja único dentro do curso inteiro: /cursos/<curso>/aulas/<aula>.
+// A ligação com o módulo usa (moduleId, courseId) juntos: assim o BANCO recusa uma aula cujo
+// curso seja diferente do curso do seu módulo (a checagem de acesso usa o `courseId` da aula).
+model Lesson {
+  id              String           @id @default(cuid())
+  courseId        String           @map("course_id")
+  course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  moduleId        String           @map("module_id")
+  module          Module           @relation(fields: [moduleId, courseId], references: [id, courseId], onDelete: Cascade)
+  slug            String
+  title           String
+  // Resumo em linguagem simples, mostrado embaixo do vídeo.
+  description     String           @default("")
+  // Ordem dentro do módulo (menor primeiro).
+  position        Int
+  // Duração aproximada, para mostrar no catálogo (o player informa a duração real).
+  durationSeconds Int              @default(0) @map("duration_seconds")
+  // Aula grátis: qualquer pessoa LOGADA assiste, mesmo sem matrícula (ajuda a vender o curso).
+  isFreePreview   Boolean          @default(false) @map("is_free_preview")
+  isPublished     Boolean          @default(true) @map("is_published")
+  videoProvider   VideoProvider    @default(DEV) @map("video_provider")
+  // Identificador do vídeo no fornecedor (ex.: o ID do vídeo no Panda).
+  videoId         String?          @map("video_id")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  progress        LessonProgress[]
+
+  @@unique([courseId, slug])
+  @@unique([moduleId, position])
+  @@map("lessons")
+}
+
+// -----------------------------------------------------------------------------
+// Matrículas (Fase 2): quem pode ver qual curso e até quando.
+// REGRA QUE NÃO MUDA: quem decide se o aluno vê uma aula é SÓ a matrícula (PROJECT.md, seção 6).
+// Na Fase 4, pagamento confirmado por webhook cria/renova a matrícula; hoje ela é criada pelo
+// script `npm run enroll`.
+// -----------------------------------------------------------------------------
+
+enum EnrollmentSource {
+  // Criada à mão (script/admin): cortesia, testes, alunos antigos.
+  MANUAL
+  // Compra avulsa confirmada (Fase 4).
+  PURCHASE
+  // Assinatura ativa (Fase 4).
+  SUBSCRIPTION
+}
+
+model Enrollment {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId  String           @map("course_id")
+  course    Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  source    EnrollmentSource @default(MANUAL)
+  startsAt  DateTime         @default(now()) @map("starts_at")
+  // Vazio = sem data de fim. Curso avulso: ex. 12 meses depois da compra.
+  expiresAt DateTime?        @map("expires_at")
+  // Preenchido quando o acesso é cancelado (ex.: reembolso). Não apagamos a linha: fica o histórico.
+  revokedAt DateTime?        @map("revoked_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  // Uma matrícula por aluno e curso: renovar = estender a mesma linha.
+  @@unique([userId, courseId])
+  @@map("enrollments")
+}
+
+// -----------------------------------------------------------------------------
+// Progresso (Fase 2): onde o aluno parou em cada aula e o que já concluiu.
+// -----------------------------------------------------------------------------
+
+model LessonProgress {
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId        String    @map("lesson_id")
+  lesson          Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  // Segundo do vídeo em que o aluno parou (para "continuar de onde parou").
+  positionSeconds Int       @default(0) @map("position_seconds")
+  // Duração real informada pelo player.
+  durationSeconds Int?      @map("duration_seconds")
+  // Preenchido quando a aula é concluída (assistiu até perto do fim ou marcou à mão).
+  completedAt     DateTime? @map("completed_at")
+  lastWatchedAt   DateTime  @default(now()) @map("last_watched_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([userId, lessonId])
+  @@index([userId, lastWatchedAt])
+  @@map("lesson_progress")
 }
