@@ -54,4 +54,27 @@ describe("parseEnv", () => {
     expect(() => parseEnv({ ...validEnv, NODE_ENV: "production" })).not.toThrow();
     expect(() => parseEnv({ ...validEnv, RESEND_API_KEY: "re_123" })).not.toThrow();
   });
+
+  it("Panda: DRM exige o grupo e o segredo juntos; a chave da API é independente", () => {
+    expect(() => parseEnv({ ...validEnv, PANDA_DRM_GROUP_ID: "grupo" })).toThrowError(/PANDA_DRM_SECRET/);
+    expect(() => parseEnv({ ...validEnv, PANDA_DRM_SECRET: "segredo" })).toThrowError(/PANDA_DRM_GROUP_ID/);
+    const env = parseEnv({ ...validEnv, PANDA_DRM_GROUP_ID: "grupo", PANDA_DRM_SECRET: "segredo", PANDA_API_KEY: "" });
+    expect(env.PANDA_DRM_GROUP_ID).toBe("grupo");
+    expect(env.PANDA_API_KEY).toBeUndefined();
+  });
+
+  it("R2: as quatro variáveis juntas ou nenhuma", () => {
+    expect(() => parseEnv({ ...validEnv, R2_BUCKET: "materiais" })).toThrowError(
+      /R2_ACCOUNT_ID[\s\S]*R2_ACCESS_KEY_ID[\s\S]*R2_SECRET_ACCESS_KEY/,
+    );
+    const env = parseEnv({
+      ...validEnv,
+      R2_ACCOUNT_ID: "conta",
+      R2_ACCESS_KEY_ID: "chave",
+      R2_SECRET_ACCESS_KEY: "segredo",
+      R2_BUCKET: "materiais",
+    });
+    expect(env.R2_BUCKET).toBe("materiais");
+    expect(parseEnv(validEnv).LOCAL_STORAGE_DIR).toBe(".data/uploads");
+  });
 });

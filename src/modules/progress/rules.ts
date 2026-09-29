@@ -9,6 +9,10 @@
 // A aula conta como concluída quando o aluno chega a 90% do vídeo (ninguém assiste os créditos).
 export const COMPLETION_THRESHOLD = 0.9;
 
+// De quanto em quanto tempo de vídeo assistido os players salvam o progresso (os DOIS players:
+// o de arquivo, `video-player.tsx`, e o do Panda, `panda/progress-tracker.ts` — uma regra só).
+export const REPORT_EVERY_SECONDS = 10;
+
 // Abaixo disto, não vale a pena "retomar": começa do zero.
 const MIN_RESUME_SECONDS = 5;
 // Perto do fim, retomar também não ajuda: recomeça.

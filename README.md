@@ -4,8 +4,9 @@ Plataforma de cursos que ensina Informática/TI para candidatos de concursos que
 área de TI**. Visão, regras de negócio, stack e roteiro estão em **[PROJECT.md](./PROJECT.md)**
 (leia primeiro).
 
-**Estado atual:** Fase 2 concluída — catálogo de cursos, aulas com player, matrículas e progresso
-(a Fase 1 trouxe o projeto, o banco, o login e os perfis).
+**Estado atual:** Fase 3 concluída — painel admin para cadastrar cursos, módulos, aulas, vídeos do
+Panda Video e PDFs (Cloudflare R2), e para gerenciar perfis e matrículas. (Fase 1: projeto, banco,
+login e perfis. Fase 2: catálogo, player, matrículas e progresso.)
 
 ---
 
@@ -71,7 +72,7 @@ Com o `npm run dev` rodando:
 | 8 | Em "Dispositivos conectados", clique em "Desconectar" no outro dispositivo | O outro navegador é deslogado |
 | 9 | Em `/entrar`, digite o e-mail e clique em "Receber link de acesso por e-mail" | O link aparece no terminal; ao abrir, você entra sem senha. Abrir o mesmo link de novo dá "link inválido ou já usado" |
 | 10 | Em `/esqueci-senha`, peça a redefinição e abra o link do terminal | Tela de nova senha. Depois de trocar, os outros dispositivos são deslogados e a senha nova funciona |
-| 11 | Rode `npm run user:set-role -- seu@email.com ADMIN` e abra `/admin` | Painel admin com a tabela de usuários |
+| 11 | Rode `npm run user:set-role -- seu@email.com ADMIN` e abra `/admin` | Painel admin; a lista de usuários fica no menu "Usuários" |
 | 12 | Tente `/entrar?voltar=https://google.com` e faça login | Você vai para `/area-do-aluno`, nunca para outro site |
 | 13 | Saia e, em `/entrar`, peça um link mágico com um e-mail **que ainda não tem conta** | Ao abrir o link, a conta é criada com um nome tirado do e-mail (ex.: `ana.lima@...` → "Ana Lima") e aparece o aviso "Sua conta não tem senha" |
 | 14 | No aviso, clique em "Criar uma senha" e siga o e-mail | Depois de criar, você entra com e-mail e senha e o aviso some |
@@ -88,9 +89,9 @@ está em [`docs/COMO-REVISAR.md`](./docs/COMO-REVISAR.md).
 ## 3. Como testar a Fase 2 (passo a passo)
 
 Pré-requisito: ter rodado `npm run db:seed` (cria o "Curso Base" de exemplo, com 16 aulas, e um
-curso em rascunho). Os vídeos são um vídeo de exemplo (desenho "Big Buck Bunny") até a integração
-com o Panda Video, na Fase 3 — e só tocam com `npm run dev` (em produção o vídeo de exemplo é
-bloqueado de propósito).
+curso em rascunho). As aulas do seed usam um vídeo de exemplo (desenho "Big Buck Bunny"), que só
+toca com `npm run dev` (em produção o vídeo de exemplo é bloqueado de propósito). Aulas de verdade
+usam o Panda Video (Fase 3).
 
 | # | Faça isto | O esperado |
 |---|---|---|
@@ -109,7 +110,74 @@ bloqueado de propósito).
 
 ---
 
-## 4. Comandos do dia a dia
+## 4. Como testar a Fase 3 (passo a passo)
+
+Pré-requisitos: uma conta ADMIN (seção 1), uma conta de aluno (cadastre-se num navegador anônimo)
+e o `npm run dev` rodando. **Não precisa de conta no Panda nem no R2 para testar**: sem o R2, os PDFs
+vão para a pasta `.data/uploads`; sem o Panda, dá para testar o cadastro com um link de exemplo
+(o player não carrega, mas todo o resto funciona). Para testar com vídeos de verdade, veja
+"Configurando o Panda Video" logo abaixo.
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 1 | Como ADMIN, abra http://localhost:3000/admin | Menu "Visão geral · Cursos · Usuários" e o quadro "Integrações" dizendo o que está configurado (Panda, PDFs) |
+| 2 | Em **Cursos**, crie o curso "Meu curso de teste" | Abre a página do curso, como **Rascunho**. Em `/cursos` (navegador anônimo) ele ainda não aparece |
+| 3 | Adicione os módulos "Módulo 1" e "Módulo 2"; no Módulo 1, adicione a aula "Primeira aula" | A aula abre para edição, como rascunho e "Sem vídeo" |
+| 4 | Na aula: marque "Publicada", salve. Em **Vídeo**, escolha "Panda Video" e cole `https://www.youtube.com/watch?v=x` | Erro: "O link precisa ser do player do Panda" |
+| 5 | Cole o link do player de um vídeo seu do Panda (ou, sem conta, `https://player-vz-teste.tv.pandavideo.com.br/embed/?v=9988aabb-ccdd-eeff-1122-334455667788`), preencha a duração e salve | "Vídeo salvo." (o código `<iframe>` inteiro do Panda também é aceito) |
+| 6 | Em **Materiais (PDF)**, tente enviar um arquivo que não é PDF; depois envie um PDF com o título "Resumo" | O primeiro é recusado; o PDF aparece na lista |
+| 7 | Volte ao curso: crie outra aula, use as setas ↑↓ e tente apagar o "Módulo 1" | A ordem muda; o módulo com aulas **não** é apagado ("O módulo ainda tem aulas") |
+| 8 | Nos dados do curso, marque "Publicado" e salve | O curso aparece em `/cursos` para o aluno |
+| 9 | Como aluno, abra a "Primeira aula" | "Aula bloqueada" (sem matrícula), sem vídeo e sem PDF |
+| 10 | Como ADMIN, em **Usuários**, busque o aluno → "Gerenciar" → Matricular no curso com 30 dias | "Matriculado em ... (até dd/mm/aaaa)" e a matrícula "Ativa" na tabela |
+| 11 | Como aluno, recarregue a aula | Player do Panda + "Material da aula" com o PDF. Clicar no PDF abre o arquivo (o link real vale só 5 minutos) |
+| 12 | Com o Panda configurado: assista um pouco, pause e recarregue | Continua de onde parou; ao terminar o vídeo, a aula fica "Concluída". Com o DRM configurado, o nome/e-mail do aluno aparecem **dentro** do vídeo (inclusive em tela cheia) |
+| 13 | Como ADMIN, clique em "Revogar" na matrícula; como aluno, clique de novo no link do PDF | Volta para a aula com "Seu acesso a este curso foi cancelado" |
+| 14 | Como ADMIN, tente apagar a aula que o aluno assistiu | O botão fica desativado: "despublique em vez de apagar" (o histórico do aluno nunca é apagado) |
+| 15 | Em **Usuários**, mude o perfil do aluno para Professor e abra o seu próprio usuário | O perfil muda; o seu próprio perfil fica travado (só outro admin muda) |
+| 16 | Como Professor, abra `/admin/usuarios` | "Página não encontrada": professor gerencia cursos, não usuários |
+
+### Configurando o Panda Video
+
+1. Crie a conta em [pandavideo.com.br](https://pandavideo.com.br) e envie um vídeo.
+2. **Link do player:** no vídeo → "Incorporar" (embed) → copie o link (ou o código `<iframe>` inteiro) e
+   cole na aula, no painel. Pronto: a aula já toca (em desenvolvimento).
+3. **Biblioteca no painel (opcional):** Panda → Configurações → API → copie a chave para
+   `PANDA_API_KEY` no `.env.local`. Na aula aparece "Buscar no Panda", que preenche o link e a duração.
+4. **Marca d'água DRM (obrigatória em produção):** Panda → Segurança → DRM → crie um grupo e, em
+   "Integrar DRM" → API, copie o ID do grupo (`PANDA_DRM_GROUP_ID`) e o segredo (`PANDA_DRM_SECRET`).
+5. **Domínios permitidos:** no Panda, restrinja a exibição dos vídeos ao domínio do site
+   (e `localhost` enquanto testa). Assim o player não toca se alguém copiar o link para outro site.
+6. Reinicie o `npm run dev` depois de mudar o `.env.local`. O quadro "Integrações" em `/admin` confirma.
+
+> A integração segue a documentação pública do Panda (player por `<iframe>`, eventos `panda_*` por
+> `postMessage`, DRM via token JWT). Como o ambiente de desenvolvimento do Claude não acessa o Panda,
+> **a primeira aula real deve ser conferida por você** (passo 12 acima): se o "continuar de onde parou"
+> ou a marca d'água não funcionarem, avise — o ajuste fica em `src/modules/video/panda/`.
+
+### Configurando o Cloudflare R2 (PDFs)
+
+1. Na Cloudflare: **R2 → Create bucket** (ex.: `concurso-ti-materiais`). Deixe o bucket **privado**.
+2. **R2 → Manage API tokens → Create API token** com permissão "Object Read & Write" só nesse bucket.
+   Copie o *Access Key ID* e o *Secret Access Key* (aparecem uma vez só) e o *Account ID*.
+3. No bucket → **Settings → CORS policy**, cole (troque pelo endereço do seu site):
+   ```json
+   [
+     {
+       "AllowedOrigins": ["http://localhost:3000", "https://SEU-DOMINIO"],
+       "AllowedMethods": ["PUT"],
+       "AllowedHeaders": ["Content-Type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+   (Sem isso, o navegador não consegue enviar o PDF: aparece "confira também o CORS do bucket".)
+4. Preencha `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` e `R2_BUCKET` no `.env.local`
+   (e na Vercel) e reinicie o site.
+
+---
+
+## 5. Comandos do dia a dia
 
 | Comando | Para que serve |
 |---|---|
@@ -118,23 +186,25 @@ bloqueado de propósito).
 | `npm run lint` | Procura problemas comuns no código |
 | `npm run typecheck` | Checa os tipos do TypeScript (como o `mypy`) |
 | `npm test` | Testes unitários (rápidos, sem banco) |
-| `npm run test:integration` | Testes com banco de verdade (ver seção 5) |
+| `npm run test:integration` | Testes com banco de verdade (ver seção 6) |
 | `npm run db:migrate -- --name descricao` | Depois de **alterar** `prisma/schema.prisma`: cria e aplica uma nova migração |
 | `npm run db:deploy` | Aplica migrações já existentes (primeira vez, produção) |
 | `npm run db:studio` | Abre uma interface visual para ver/editar os dados do banco |
 | `npm run db:seed` | Grava o curso de exemplo (só desenvolvimento; pode rodar várias vezes) |
-| `npm run user:set-role -- email PERFIL` | Muda o perfil de um usuário (STUDENT, TEACHER, ADMIN) |
-| `npm run enroll -- email curso [dias \| --revogar]` | Matricula num curso (sem data de fim ou por N dias), renova, ou revoga o acesso |
+| `npm run user:set-role -- email PERFIL` | Muda o perfil de um usuário (STUDENT, TEACHER, ADMIN). No dia a dia, use o painel (/admin/usuarios); o script serve para criar o primeiro ADMIN |
+| `npm run enroll -- email curso [dias \| --revogar]` | Matricula num curso (sem data de fim ou por N dias), renova, ou revoga o acesso — o mesmo que o painel faz |
 
 ---
 
-## 5. Testes automáticos
+## 6. Testes automáticos
 
 - **Unitários** (`npm test`): regras puras — perfis, limite de sessões, proteção de redirecionamento,
   validação de formulários, variáveis de ambiente, e-mails, **acesso às aulas** (matrícula),
-  progresso e "continuar de onde parou".
+  progresso, "continuar de onde parou", link, mensagens e regras de progresso do player do Panda,
+  token da marca d'água, links assinados dos PDFs e as travas de perfil.
 - **Integração** (`npm run test:integration`): cadastro, login, limite de sessões, seed do catálogo,
-  acesso às aulas e progresso gravando num PostgreSQL de verdade. **Os testes apagam os dados do banco que usam**, por isso exigem um banco
+  acesso às aulas, progresso, painel de cursos (criar, reordenar, apagar com proteção), envio e
+  download de PDFs, matrículas e perfis, gravando num PostgreSQL de verdade. **Os testes apagam os dados do banco que usam**, por isso exigem um banco
   SEPARADO na variável `TEST_DATABASE_URL`:
   1. Na Neon, crie uma branch chamada `test` (Branches → New branch).
   2. Copie a string de conexão **direta** dessa branch.
@@ -145,7 +215,7 @@ bloqueado de propósito).
 
 ---
 
-## 6. Onde fica cada coisa
+## 7. Onde fica cada coisa
 
 ```
 prisma/
@@ -158,16 +228,21 @@ src/
     (auth)/              /entrar, /cadastro, /esqueci-senha, /redefinir-senha
     area-do-aluno/       Área do aluno: meus cursos, dispositivos (exige login)
     cursos/              /cursos (catálogo), /cursos/[curso], /cursos/[curso]/aulas/[aula] (player)
-    admin/               Painel admin (exige perfil TEACHER ou ADMIN)
+                         e .../materiais/[id] (download do PDF, confere o acesso a cada clique)
+    admin/               Painel: visão geral, cursos/[id]/aulas/[id] (TEACHER+), usuarios/[id] (ADMIN)
     api/auth/[...all]/   API de autenticação (/api/auth/*)
+    api/dev-storage/     Envio/download de PDFs SEM o R2 (só desenvolvimento)
   components/ui/         Componentes visuais (shadcn/ui)
-  lib/                   Utilidades gerais: banco (db.ts), configurações (env.ts)
+  components/admin/      Peças comuns do painel (menu, botões de ação, mensagens dos formulários)
+  lib/                   Utilidades gerais: banco (db.ts), configurações (env.ts), formulários (form-state.ts)
   modules/               Domínios do sistema ("monolito modular")
-    auth/                Contas: login, perfis, sessões
-    catalog/             Cursos, módulos e aulas (grade, ordem, navegação)
-    enrollment/          Matrículas e a REGRA DE ACESSO às aulas (access.ts)
+    auth/                Contas: login, perfis, sessões; perfis pelo painel (admin-*)
+    catalog/             Cursos, módulos e aulas; admin/ = cadastro pelo painel
+    enrollment/          Matrículas, a REGRA DE ACESSO às aulas (access.ts) e matricular/revogar (grant.ts)
     progress/            Progresso, conclusão, "continuar de onde parou", player da aula
-    video/               Fornecedores de vídeo (hoje: exemplo; Fase 3: Panda) e o player
+    video/               Fornecedores de vídeo (exemplo e panda/) e os players
+    materials/           PDFs das aulas: envio, lista, download
+    storage/             Armazenamento de arquivos: Cloudflare R2 ou pasta local (desenvolvimento)
     email/               Envio de e-mails e modelos de texto
   proxy.ts               Barreira rápida das áreas protegidas
   generated/prisma/      Cliente do banco GERADO pelo Prisma (não editar; fora do Git)
@@ -176,12 +251,12 @@ tests/integration/       Testes que usam o banco de verdade
 
 ---
 
-## 7. Publicando na Vercel (quando for a hora)
+## 8. Publicando na Vercel (quando for a hora)
 
 1. Na Vercel: **Add New → Project** e importe este repositório do GitHub.
 2. Em **Settings → Environment Variables**, cadastre as mesmas variáveis do `.env.example`,
    com valores de produção (`BETTER_AUTH_URL` = endereço do site, `BETTER_AUTH_SECRET` novo,
-   `RESEND_API_KEY` obrigatória).
+   `RESEND_API_KEY` obrigatória, `PANDA_DRM_*` obrigatórias para os vídeos tocarem e `R2_*` para os PDFs).
 3. Antes do primeiro deploy (e sempre que houver migração nova), aplique as migrações no banco
    de produção: `DIRECT_URL="<url direta de produção>" npm run db:deploy`.
 4. Se usar Google: cadastre `https://SEU-DOMINIO/api/auth/callback/google` como URI de

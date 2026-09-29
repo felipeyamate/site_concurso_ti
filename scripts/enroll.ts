@@ -6,17 +6,18 @@
  *   npm run enroll -- aluno@exemplo.com informatica-e-ti-do-zero 365      (acesso por 365 dias)
  *   npm run enroll -- aluno@exemplo.com informatica-e-ti-do-zero --revogar (cancela o acesso)
  *
- * Por que existe: até a Fase 4 (pagamentos), é assim que liberamos cursos (cortesia, testes).
- * Depois, o pagamento confirmado cria a matrícula sozinho.
+ * Por que existe: até a Fase 4 (pagamentos), matrículas são feitas à mão (cortesia, testes).
+ * O jeito mais fácil é o painel (/admin/usuarios → aluno → "Matricular"); este script faz o mesmo
+ * pelo terminal. Depois da Fase 4, o pagamento confirmado cria a matrícula sozinho.
  *
  * Regras: uma matrícula por aluno e curso. Rodar de novo RENOVA a mesma matrícula:
  *  - se ela está ativa, os dias novos são SOMADOS ao que faltava (ninguém perde dias);
  *  - se venceu ou foi revogada, recomeça agora;
  *  - a origem (MANUAL, compra, assinatura) de uma matrícula existente é mantida.
- * A regra fica em `src/modules/enrollment/renewal.ts` (a mesma que os pagamentos usarão na Fase 4).
- * Revogar não apaga a linha: marca `revokedAt`, para ficar o histórico.
+ * As regras ficam em `src/modules/enrollment/grant.ts` e `renewal.ts` — as mesmas do painel e,
+ * na Fase 4, dos pagamentos. Revogar não apaga a linha: marca `revokedAt`, para ficar o histórico.
  */
-import { computeEnrollmentRenewal } from "../src/modules/enrollment/renewal";
+import { grantEnrollment, revokeEnrollment } from "../src/modules/enrollment/grant";
 import { createScriptPrismaClient } from "./script-db";
 
 const USAGE = "Uso: npm run enroll -- <email> <slug-do-curso> [dias | --revogar]";
@@ -52,30 +53,19 @@ async function main(): Promise<void> {
     }
 
     if (revoke) {
-      const { count } = await prisma.enrollment.updateMany({
-        where: { userId: user.id, courseId: course.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      console.info(count ? `Acesso de ${email} a "${course.title}" revogado.` : "Não havia matrícula ativa.");
+      const revoked = await revokeEnrollment(prisma, { userId: user.id, courseId: course.id, now: new Date() });
+      console.info(revoked ? `Acesso de ${email} a "${course.title}" revogado.` : "Não havia matrícula ativa.");
       return;
     }
 
-    const where = { userId_courseId: { userId: user.id, courseId: course.id } };
-    const existing = await prisma.enrollment.findUnique({
-      where,
-      select: { startsAt: true, expiresAt: true, revokedAt: true },
-    });
-    const period = computeEnrollmentRenewal(existing, { days, now: new Date() });
-
-    // upsert = cria se não existe; se existe, renova (como o `update_or_create` do Django).
-    // Na renovação, a origem (`source`) não é alterada.
-    await prisma.enrollment.upsert({
-      where,
-      create: { userId: user.id, courseId: course.id, source: "MANUAL", ...period },
-      update: { ...period, revokedAt: null },
+    const { renewed, period } = await grantEnrollment(prisma, {
+      userId: user.id,
+      courseId: course.id,
+      days,
+      now: new Date(),
     });
     const until = period.expiresAt ? `até ${period.expiresAt.toLocaleDateString("pt-BR")}` : "sem data de fim";
-    const action = existing ? "Matrícula renovada" : "Matriculado";
+    const action = renewed ? "Matrícula renovada" : "Matriculado";
     console.info(`Pronto: ${action} — ${email} em "${course.title}" (${until}).`);
   } finally {
     await prisma.$disconnect();

@@ -14,6 +14,7 @@
 //
 // Fase 1: tabelas de contas/autenticação.
 // Fase 2: catálogo (Course, Module, Lesson), matrículas (Enrollment) e progresso (LessonProgress).
+// Fase 3: materiais das aulas em PDF (LessonAttachment) e o link do player do Panda na aula.
 // As demais tabelas (pagamentos, questões etc. — seção 6 do PROJECT.md) entram nas fases em que
 // forem usadas.
 // =============================================================================
@@ -127,7 +128,8 @@ model RateLimit {
 
 // -----------------------------------------------------------------------------
 // Catálogo (Fase 2): Curso → Módulos → Aulas.
-// Hoje o conteúdo entra pelo seed (`npm run db:seed`); o cadastro pelo painel é da Fase 3.
+// O conteúdo é cadastrado no painel (/admin/cursos, Fase 3). O seed (`npm run db:seed`) cria
+// um curso de exemplo, só para desenvolvimento.
 // -----------------------------------------------------------------------------
 
 // Um curso (ex.: "Informática e TI para Concursos — do zero").
@@ -173,7 +175,7 @@ model Module {
 enum VideoProvider {
   // Vídeo de exemplo, só para desenvolvimento (bloqueado no site de produção).
   DEV
-  // Panda Video (integração na Fase 3).
+  // Panda Video (Fase 3): player do Panda num <iframe>, com a marca d'água (DRM) do aluno.
   PANDA
 }
 
@@ -199,22 +201,49 @@ model Lesson {
   isFreePreview   Boolean          @default(false) @map("is_free_preview")
   isPublished     Boolean          @default(true) @map("is_published")
   videoProvider   VideoProvider    @default(DEV) @map("video_provider")
-  // Identificador do vídeo no fornecedor (ex.: o ID do vídeo no Panda).
+  // Identificador do vídeo no fornecedor (ex.: o ID do vídeo no Panda). Vazio = aula sem vídeo.
   videoId         String?          @map("video_id")
+  // Panda: endereço do player ("embed") do vídeo, ex.: https://player-vz-xxxx.tv.pandavideo.com.br/embed/?v=<id>.
+  // Cada conta do Panda tem o seu endereço de player; por isso guardamos o link inteiro, já conferido
+  // (só aceitamos endereços do Panda — ver `src/modules/video/panda/embed.ts`).
+  videoEmbedUrl   String?          @map("video_embed_url")
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
   progress        LessonProgress[]
+  attachments     LessonAttachment[]
 
   @@unique([courseId, slug])
   @@unique([moduleId, position])
   @@map("lessons")
 }
 
+// Material de apoio de uma aula (PDF: resumo, slides, lista de exercícios). Fase 3.
+// O arquivo em si fica no armazenamento de arquivos (Cloudflare R2; em desenvolvimento, uma pasta
+// local). Aqui fica só o "endereço" dele (`storageKey`) e os dados para mostrar na tela.
+// O aluno nunca recebe o endereço fixo do arquivo: a cada clique geramos um link temporário,
+// DEPOIS de conferir o acesso à aula (mesma regra do vídeo).
+model LessonAttachment {
+  id         String   @id @default(cuid())
+  lessonId   String   @map("lesson_id")
+  lesson     Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  // Nome mostrado para o aluno (ex.: "Resumo — Segurança da Informação").
+  title      String
+  // Nome original do arquivo enviado (usado no download: "resumo.pdf").
+  fileName   String   @map("file_name")
+  // Caminho do arquivo no armazenamento, ex.: lessons/<id-da-aula>/<uuid>.pdf
+  storageKey String   @unique @map("storage_key")
+  sizeBytes  Int      @map("size_bytes")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([lessonId])
+  @@map("lesson_attachments")
+}
+
 // -----------------------------------------------------------------------------
 // Matrículas (Fase 2): quem pode ver qual curso e até quando.
 // REGRA QUE NÃO MUDA: quem decide se o aluno vê uma aula é SÓ a matrícula (PROJECT.md, seção 6).
-// Na Fase 4, pagamento confirmado por webhook cria/renova a matrícula; hoje ela é criada pelo
-// script `npm run enroll`.
+// Na Fase 4, pagamento confirmado por webhook cria/renova a matrícula; hoje ela é criada à mão,
+// pelo painel (/admin/usuarios, só ADMIN) ou pelo script `npm run enroll`.
 // -----------------------------------------------------------------------------
 
 enum EnrollmentSource {

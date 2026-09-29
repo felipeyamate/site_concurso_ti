@@ -154,6 +154,6 @@ export async function listCatalogSummaries(options: { includeDrafts: boolean }):
 export async function getLessonVideo(lessonId: string) {
   return prisma.lesson.findUnique({
     where: { id: lessonId },
-    select: { videoProvider: true, videoId: true },
+    select: { videoProvider: true, videoId: true, videoEmbedUrl: true },
   });
 }

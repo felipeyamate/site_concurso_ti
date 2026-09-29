@@ -43,3 +43,6 @@ next-env.d.ts
 
 # prisma (cliente gerado automaticamente por `prisma generate`)
 /src/generated/
+
+# PDFs enviados em desenvolvimento (armazenamento local, sem R2)
+/.data/

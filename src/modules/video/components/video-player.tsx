@@ -5,7 +5,8 @@
  *
  * Quem chama: `src/modules/progress/components/lesson-player.tsx`.
  * O que faz:
- *  - toca o vídeo (arquivo direto pelo navegador, ou o player do fornecedor num <iframe>);
+ *  - toca o vídeo (arquivo direto pelo navegador, ou o player do Panda num <iframe> — este fica
+ *    em `panda-player.tsx`, com as mesmas regras);
  *  - começa de onde o aluno parou (`initialPositionSeconds`);
  *  - avisa quem chamou sobre o andamento (`onProgress`) a cada 10 s, ao pausar, ao sair da aba
  *    e ao terminar — quem chamou decide o que fazer (salvar no banco);
@@ -16,7 +17,10 @@
  */
 import { useEffect, useRef, type SyntheticEvent } from "react";
 
+import { REPORT_EVERY_SECONDS } from "@/modules/progress/rules";
+
 import type { VideoPlayback } from "../types";
+import { PandaPlayer } from "./panda-player";
 import { Watermark } from "./watermark";
 
 export type PlaybackProgress = {
@@ -33,10 +37,42 @@ type VideoPlayerProps = {
   onProgress: (progress: PlaybackProgress) => void;
 };
 
-// De quanto em quanto tempo (de vídeo assistido) avisamos o andamento.
-const REPORT_EVERY_SECONDS = 10;
+/** Escolhe o player certo para o tipo de vídeo. */
+export function VideoPlayer(props: VideoPlayerProps) {
+  const { playback } = props;
+  if (playback.kind === "panda") {
+    return (
+      <PandaPlayer
+        src={playback.src}
+        videoId={playback.videoId}
+        title={props.title}
+        watermarkText={props.watermarkText}
+        initialPositionSeconds={props.initialPositionSeconds}
+        onProgress={props.onProgress}
+      />
+    );
+  }
+  return (
+    <Html5Player
+      src={playback.src}
+      title={props.title}
+      watermarkText={props.watermarkText}
+      initialPositionSeconds={props.initialPositionSeconds}
+      onProgress={props.onProgress}
+    />
+  );
+}
 
-export function VideoPlayer({ playback, title, watermarkText, initialPositionSeconds, onProgress }: VideoPlayerProps) {
+type Html5PlayerProps = {
+  src: string;
+  title: string;
+  watermarkText: string;
+  initialPositionSeconds: number;
+  onProgress: (progress: PlaybackProgress) => void;
+};
+
+/** Player de arquivo de vídeo, tocado pelo próprio navegador (tag <video>). */
+function Html5Player({ src, title, watermarkText, initialPositionSeconds, onProgress }: Html5PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastReportedRef = useRef(initialPositionSeconds);
   // O aluno apertou "play" nesta visita? Só então salvamos ao sair/trocar de aba. Sem isso,
@@ -112,27 +148,11 @@ export function VideoPlayer({ playback, title, watermarkText, initialPositionSec
     }
   }
 
-  if (playback.kind === "iframe") {
-    // Fase 3 (Panda Video): o progresso virá das mensagens do player do fornecedor.
-    return (
-      <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
-        <iframe
-          src={playback.src}
-          title={title}
-          className="absolute inset-0 h-full w-full"
-          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-          allowFullScreen
-        />
-        <Watermark text={watermarkText} />
-      </div>
-    );
-  }
-
   return (
     <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
       <video
         ref={videoRef}
-        src={playback.src}
+        src={src}
         title={title}
         className="absolute inset-0 h-full w-full"
         controls

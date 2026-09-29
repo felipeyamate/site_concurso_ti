@@ -12,11 +12,13 @@ import "server-only";
 import type { VideoProvider as VideoProviderName } from "@/generated/prisma/enums";
 
 import { getDevPlayback } from "./dev-provider";
+import { getPandaPlayback } from "./panda/panda-provider";
 import type { VideoPlayback, Viewer } from "./types";
 
 type LessonVideo = {
   videoProvider: VideoProviderName;
   videoId: string | null;
+  videoEmbedUrl: string | null;
 };
 
 export async function getLessonPlayback(lesson: LessonVideo, viewer: Viewer): Promise<VideoPlayback | null> {
@@ -27,8 +29,6 @@ export async function getLessonPlayback(lesson: LessonVideo, viewer: Viewer): Pr
     case "DEV":
       return getDevPlayback();
     case "PANDA":
-      // Fase 3: gerar o link assinado e temporário do Panda, com a marca d'água do `viewer`.
-      void viewer;
-      throw new Error("Vídeos do Panda Video serão integrados na Fase 3.");
+      return getPandaPlayback(lesson, viewer);
   }
 }
