@@ -14,6 +14,8 @@
  * Paralelo em Python: é o `jwt.encode(payload, segredo, algorithm="HS256")` da biblioteca PyJWT.
  * Fizemos à mão (com o `crypto` do Node) porque são poucas linhas e evita mais uma dependência.
  */
+import "server-only";
+
 import { createHmac } from "node:crypto";
 
 export type WatermarkViewer = { id: string; name: string; email: string };

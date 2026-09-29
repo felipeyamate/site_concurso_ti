@@ -12,12 +12,12 @@
 import "server-only";
 
 import { env } from "@/lib/env";
+import { isProductionSite } from "@/lib/runtime";
 
 import type { VideoPlayback } from "./types";
 
 export function getDevPlayback(): VideoPlayback {
-  const isProductionSite = env.NODE_ENV === "production" && env.VERCEL_ENV !== "preview";
-  if (isProductionSite) {
+  if (isProductionSite()) {
     throw new Error(
       "Aula com vídeo de exemplo (provedor DEV) no site de produção. Cadastre o vídeo no Panda Video.",
     );

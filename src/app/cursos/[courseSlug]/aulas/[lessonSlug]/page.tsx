@@ -131,7 +131,6 @@ export default async function LessonPage({ params }: LessonPageProps) {
             watermarkText={user.email}
             initialPositionSeconds={initialPositionSeconds}
             initiallyCompleted={completed}
-            durationSeconds={lesson.durationSeconds}
           />
         ) : (
           <div className="text-muted-foreground flex aspect-video items-center justify-center rounded-lg border p-4 text-center">

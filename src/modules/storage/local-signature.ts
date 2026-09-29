@@ -10,6 +10,8 @@
  *
  * Paralelo em Python: é o `hmac.new(chave, mensagem, hashlib.sha256)` — como o `signing` do Django.
  */
+import "server-only";
+
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 export type LocalStorageOperation = "upload" | "download";

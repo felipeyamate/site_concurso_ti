@@ -19,6 +19,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { env } from "@/lib/env";
+import { isProductionSite } from "@/lib/runtime";
 import {
   errorState,
   formDataToObject,
@@ -234,7 +235,8 @@ export async function updateLessonVideoAction(_previous: FormState, formData: Fo
   if (!parsed.success) return invalidState(parsed.error);
 
   try {
-    await updateLessonVideo({ ...parsed.data, isProduction: env.NODE_ENV === "production" });
+    // Mesma regra do provedor do vídeo de exemplo: recusado só no site de produção de verdade.
+    await updateLessonVideo({ ...parsed.data, isProduction: isProductionSite() });
   } catch (error) {
     return stateFromError(error, "salvar vídeo da aula");
   }

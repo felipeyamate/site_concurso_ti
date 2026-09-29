@@ -20,9 +20,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { env } from "@/lib/env";
+import { isProductionSite } from "@/lib/runtime";
 import { requireRole } from "@/modules/auth/session";
 import { deleteLessonAction } from "@/modules/catalog/admin/actions";
-import { getLessonForAdmin } from "@/modules/catalog/admin/catalog-admin.server";
+import { countStudentProgress, getLessonForAdmin } from "@/modules/catalog/admin/catalog-admin.server";
 import { LessonDetailsForm } from "@/modules/catalog/admin/components/lesson-forms";
 import { LessonVideoForm } from "@/modules/catalog/admin/components/lesson-video-form";
 import type { VideoSource } from "@/modules/catalog/admin/schemas";
@@ -44,7 +45,7 @@ export default async function AdminLessonPage({ params }: AdminLessonPageProps) 
   if (!lesson || lesson.courseId !== courseId) notFound();
 
   const videoSource: VideoSource = !lesson.videoId ? "NONE" : lesson.videoProvider;
-  const studentsWatched = lesson._count.progress;
+  const studentsWatched = await countStudentProgress(lesson.id, lesson.courseId);
 
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-10">
@@ -92,7 +93,7 @@ export default async function AdminLessonPage({ params }: AdminLessonPageProps) 
             initialPandaEmbed={lesson.videoEmbedUrl ?? ""}
             initialDurationSeconds={lesson.durationSeconds}
             pandaLibraryEnabled={Boolean(env.PANDA_API_KEY)}
-            devVideoAllowed={env.NODE_ENV !== "production"}
+            devVideoAllowed={!isProductionSite()}
           />
         </CardContent>
       </Card>

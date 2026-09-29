@@ -186,6 +186,8 @@ atualizado.
 | 2026-09-29 | Matrícula manual pelo painel e pelo script usam a mesma função (`grantEnrollment`/`revokeEnrollment`), que a Fase 4 também usará | Uma regra só para "gerar/renovar um Enrollment" |
 | 2026-09-29 | Perfis pelo painel: ninguém muda o próprio perfil e o site nunca fica sem ADMIN. O script `user:set-role` continua para criar o primeiro ADMIN | Evitar perder o acesso ao painel por engano |
 | 2026-09-29 | Formulários do painel não apagam o que foi digitado quando a validação falha (`useAdminForm`) | O modo padrão do React 19 limpa o formulário a cada envio |
+| 2026-09-29 | Regras de progresso do Panda numa máquina de estados testável (`panda/progress-tracker.ts`): só salva depois de o vídeo avançar de verdade; insiste no "continuar de onde parou" por até 5 s após o play; a **duração só vale se vier do player** (sem ela, conclui ao terminar o vídeo ou pelo botão) | Achados da revisão: um pulo nosso com o vídeo parado contava como "assistiu"; um pulo perdido apagava a posição salva; uma duração digitada errada concluía a aula cedo |
+| 2026-09-29 | "Histórico de aluno" = progresso de quem é aluno OU tem/teve matrícula no curso (aluno promovido a monitor continua protegido). Troca de perfil em transação serializável | Achados da revisão: o critério pelo perfil atual deixava apagar o histórico de um aluno promovido; dois admins rebaixando um ao outro ao mesmo tempo deixariam o site sem admin |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -265,8 +267,11 @@ explicando o erro do Google para contas não confirmadas.
 - PDFs: envio direto para o Cloudflare R2 (ou pasta local em desenvolvimento), lista "Material da aula" para quem tem acesso e download
   com link temporário depois de checar o acesso.
 - Usuários (só admin): busca, troca de perfil com travas, matrícula manual (criar/renovar/revogar) com a mesma regra do script.
-- Testes: 143 unitários + 40 de integração; 46 cenários novos no navegador (inclusive um player falso do Panda para testar as mensagens)
+- Testes: 154 unitários + 42 de integração; 46 cenários novos no navegador (inclusive um player falso do Panda para testar as mensagens)
   e os 47 da Fase 2 repetidos sem regressão.
+- Revisão de código no PR [#3](https://github.com/felipeyamate/site_concurso_ti/pull/3): 10 achados, todos corrigidos — os principais no progresso
+  do Panda (ver decisões de 2026-09-29) — além de 3 problemas achados nos testes no navegador (player recarregando ao concluir a aula,
+  "continuar de onde parou" perdido se o player carregasse antes da página, tabelas vazando no celular).
 
 **Como testar:** [README.md → "Como testar a Fase 3"](./README.md#4-como-testar-a-fase-3-passo-a-passo).
 

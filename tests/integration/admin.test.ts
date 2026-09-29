@@ -167,7 +167,8 @@ describe("módulos e aulas no painel", () => {
 
     await updateLesson({ ...base, moduleId: moduleB.id });
     expect(await lessonOrder(moduleB.id)).toEqual(["1:Terceira aula", "2:Primeira aula"]);
-    expect(await lessonOrder(moduleA.id)).toEqual(["2:Segunda aula"]);
+    // O módulo de origem é renumerado (sem "buraco" na posição 1).
+    expect(await lessonOrder(moduleA.id)).toEqual(["1:Segunda aula"]);
 
     await expect(updateLesson({ ...base, moduleId: other.moduleA.id })).rejects.toThrow(/módulo deste curso/);
   });
@@ -191,6 +192,14 @@ describe("módulos e aulas no painel", () => {
 
     await expect(deleteLesson(lesson1.id)).rejects.toThrow(/Despublique/);
     await expect(deleteLesson(lesson2.id)).resolves.toMatchObject({ storageKeys: [] });
+  });
+
+  it("aluno promovido a professor (ex.: monitor) continua protegendo o próprio histórico", async () => {
+    const { course, lesson1 } = await createSampleCourse();
+    await createUser("monitor", "TEACHER");
+    await grantEnrollment(prisma, { userId: "monitor", courseId: course.id, days: 30, now: new Date() });
+    await prisma.lessonProgress.create({ data: { userId: "monitor", lessonId: lesson1.id, positionSeconds: 30 } });
+    await expect(deleteLesson(lesson1.id)).rejects.toThrow(/Despublique/);
   });
 
   it("vídeo: link do Panda é conferido e guardado limpo; vídeo de exemplo é recusado em produção", async () => {
@@ -353,6 +362,17 @@ describe("perfis e usuários no painel", () => {
     await expect(changeUserRole({ actorId: "outra-pessoa", userId: "unico-admin", role: "TEACHER" })).rejects.toThrow(
       /única conta de administrador/,
     );
+  });
+
+  it("dois admins rebaixando um ao outro AO MESMO TEMPO: o site nunca fica sem admin", async () => {
+    await createUser("admin-a", "ADMIN");
+    await createUser("admin-b", "ADMIN");
+    const results = await Promise.allSettled([
+      changeUserRole({ actorId: "admin-a", userId: "admin-b", role: "STUDENT" }),
+      changeUserRole({ actorId: "admin-b", userId: "admin-a", role: "STUDENT" }),
+    ]);
+    expect(results.filter((result) => result.status === "rejected").length).toBeGreaterThanOrEqual(1);
+    expect(await prisma.user.count({ where: { role: "ADMIN" } })).toBeGreaterThanOrEqual(1);
   });
 
   it("busca por nome ou e-mail, sem diferenciar maiúsculas", async () => {

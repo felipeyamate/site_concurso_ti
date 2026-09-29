@@ -6,7 +6,9 @@
  */
 import "server-only";
 
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { isTransactionConflict } from "@/lib/db-errors";
 import { UserFacingError } from "@/lib/form-state";
 
 import { checkRoleChange } from "./role-rules";
@@ -65,7 +67,8 @@ export async function getUserForAdmin(userId: string) {
           course: { select: { title: true, slug: true } },
         },
       },
-      _count: { select: { sessions: true } },
+      // Só logins ainda válidos ("dispositivos conectados"); sessões vencidas não contam.
+      _count: { select: { sessions: { where: { expiresAt: { gt: new Date() } } } } },
     },
   });
 }
@@ -83,22 +86,36 @@ export async function listCoursesForEnrollment() {
  * Passos (numa transação, para a contagem de administradores não mudar no meio):
  *  1. acha a pessoa; 2. conta os OUTROS administradores; 3. aplica as travas de `role-rules.ts`;
  *  4. grava. O novo perfil vale na próxima página que a pessoa abrir (o perfil é lido do banco).
+ *
+ * Por que "Serializable": com o nível padrão, dois admins rebaixando um ao outro AO MESMO TEMPO
+ * contariam "1 outro admin" cada um, e os dois rebaixamentos passariam — o site ficaria sem admin.
+ * No nível serializável o banco percebe o conflito e cancela uma das duas (a pessoa tenta de novo).
  */
 export async function changeUserRole(params: { actorId: string; userId: string; role: Role }) {
-  return prisma.$transaction(async (tx) => {
-    const target = await tx.user.findUnique({ where: { id: params.userId }, select: { id: true, role: true } });
-    if (!target || !isRole(target.role)) throw new UserFacingError("Usuário não encontrado.");
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        const target = await tx.user.findUnique({ where: { id: params.userId }, select: { id: true, role: true } });
+        if (!target || !isRole(target.role)) throw new UserFacingError("Usuário não encontrado.");
 
-    const otherAdminCount = await tx.user.count({ where: { role: "ADMIN", id: { not: target.id } } });
-    const problem = checkRoleChange({
-      actorId: params.actorId,
-      targetId: target.id,
-      currentRole: target.role,
-      newRole: params.role,
-      otherAdminCount,
-    });
-    if (problem) throw new UserFacingError(problem, { field: "role" });
+        const otherAdminCount = await tx.user.count({ where: { role: "ADMIN", id: { not: target.id } } });
+        const problem = checkRoleChange({
+          actorId: params.actorId,
+          targetId: target.id,
+          currentRole: target.role,
+          newRole: params.role,
+          otherAdminCount,
+        });
+        if (problem) throw new UserFacingError(problem, { field: "role" });
 
-    return tx.user.update({ where: { id: target.id }, data: { role: params.role } });
-  });
+        return tx.user.update({ where: { id: target.id }, data: { role: params.role } });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  } catch (error) {
+    if (isTransactionConflict(error)) {
+      throw new UserFacingError("Outra alteração de perfil aconteceu ao mesmo tempo. Confira a lista e tente de novo.");
+    }
+    throw error;
+  }
 }

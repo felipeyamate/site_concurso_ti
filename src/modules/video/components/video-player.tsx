@@ -32,8 +32,6 @@ type VideoPlayerProps = {
   title: string;
   watermarkText: string;
   initialPositionSeconds: number;
-  // Duração cadastrada na aula (o player do Panda usa até informar a duração real).
-  durationSeconds: number | null;
   onProgress: (progress: PlaybackProgress) => void;
 };
 
@@ -51,7 +49,6 @@ export function VideoPlayer(props: VideoPlayerProps) {
         title={props.title}
         watermarkText={props.watermarkText}
         initialPositionSeconds={props.initialPositionSeconds}
-        fallbackDurationSeconds={props.durationSeconds}
         onProgress={props.onProgress}
       />
     );

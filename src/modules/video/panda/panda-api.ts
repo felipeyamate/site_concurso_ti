@@ -12,6 +12,8 @@
  * testado sem variáveis de ambiente. O `fetch` também pode ser trocado nos testes.
  * Paralelo em Python: é um `requests.get(url, headers=..., timeout=...)` + um modelo pydantic.
  */
+import "server-only";
+
 import { z } from "zod";
 
 import { parsePandaEmbedInput } from "./embed";

@@ -7,7 +7,8 @@
  *
  * Proteção ("vídeos só com links assinados e temporários", PROJECT.md seção 6):
  *  - o link do player leva a marca d'água (DRM) do aluno, num token assinado que vence em 6 h;
- *  - em PRODUÇÃO, sem o DRM configurado, a aula NÃO toca (mostra "vídeo indisponível");
+ *  - em PRODUÇÃO, sem o DRM configurado, a aula NÃO toca (mostra "vídeo indisponível") — inclusive
+ *    nos previews da Vercel (diferente do vídeo de exemplo): o link de um preview pode circular;
  *  - em desenvolvimento, sem DRM, toca sem a marca d'água (com um aviso no terminal), para você
  *    poder testar a conta do Panda antes de configurar o DRM.
  * Configure também, no painel do Panda, os domínios autorizados a exibir os vídeos (README).

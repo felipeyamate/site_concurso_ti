@@ -32,8 +32,17 @@ type Direction = "up" | "down";
 // DEV sempre toca DEV_SAMPLE_VIDEO_URL.
 const DEV_VIDEO_ID = "exemplo";
 
-// Progresso que conta como "histórico de aluno" (o de professor/admin testando não conta).
-const studentProgress = { user: { role: "STUDENT" } } as const;
+/**
+ * Progresso que conta como "histórico de aluno": de quem é ALUNO hoje, ou de quem tem (ou teve)
+ * matrícula no curso — assim, um aluno promovido a professor (ex.: monitor) continua protegido.
+ * O progresso de professor/admin só testando as aulas não conta.
+ */
+function studentProgressIn(courseId: string): Prisma.LessonProgressWhereInput {
+  return { OR: [{ user: { role: "STUDENT" } }, { user: { enrollments: { some: { courseId } } } }] };
+}
+
+// Transações que mexem em várias linhas: prazo maior que o padrão (5 s), para bancos distantes.
+const TRANSACTION_OPTIONS = { timeout: 15_000 } as const;
 
 // =============================================================================================
 // Leitura (páginas do painel)
@@ -93,9 +102,13 @@ export async function getLessonForAdmin(lessonId: string) {
         },
       },
       attachments: { orderBy: { createdAt: "asc" } },
-      _count: { select: { progress: { where: studentProgress } } },
     },
   });
+}
+
+/** Quantos alunos têm histórico nesta aula (a página avisa que ela não pode ser apagada). */
+export async function countStudentProgress(lessonId: string, courseId: string): Promise<number> {
+  return prisma.lessonProgress.count({ where: { lessonId, ...studentProgressIn(courseId) } });
 }
 
 // =============================================================================================
@@ -170,7 +183,7 @@ export async function moveCourse(courseId: string, direction: Direction) {
     for (const [index, id] of order.entries()) {
       await tx.course.update({ where: { id }, data: { position: index + 1 } });
     }
-  });
+  }, TRANSACTION_OPTIONS);
 }
 
 /**
@@ -189,7 +202,7 @@ export async function deleteCourse(courseId: string): Promise<string[]> {
         "Este curso tem matrículas (mesmo vencidas ou canceladas). Para tirá-lo do ar, despublique em vez de apagar.",
       );
     }
-    const watched = await tx.lessonProgress.count({ where: { lesson: { courseId }, ...studentProgress } });
+    const watched = await tx.lessonProgress.count({ where: { lesson: { courseId }, ...studentProgressIn(courseId) } });
     if (watched > 0) {
       throw new UserFacingError("Alunos já assistiram aulas deste curso. Despublique em vez de apagar.");
     }
@@ -206,14 +219,26 @@ export async function deleteCourse(courseId: string): Promise<string[]> {
 // Módulos
 // =============================================================================================
 
-// Regrava as posições na ordem pedida. As posições são ÚNICAS dentro do curso, então fazemos em
-// duas etapas (primeiro negativas, depois 1, 2, 3...) para nunca haver duas iguais no meio do caminho.
-async function applyModuleOrder(tx: Tx, ids: string[]) {
-  for (const [index, id] of ids.entries()) {
-    await tx.module.update({ where: { id }, data: { position: -(index + 1) } });
-  }
-  for (const [index, id] of ids.entries()) {
-    await tx.module.update({ where: { id }, data: { position: index + 1 } });
+type Positioned = { id: string; position: number };
+
+// Troca dois módulos de lugar. As posições são ÚNICAS dentro do curso, então usamos uma posição
+// temporária (-1) — como trocar dois copos de lugar usando um terceiro: 3 comandos, sempre.
+async function swapModules(tx: Tx, a: Positioned, b: Positioned) {
+  await tx.module.update({ where: { id: a.id }, data: { position: -1 } });
+  await tx.module.update({ where: { id: b.id }, data: { position: a.position } });
+  await tx.module.update({ where: { id: a.id }, data: { position: b.position } });
+}
+
+// Fecha o "buraco" deixado na posição `removed`: os módulos seguintes sobem uma posição, do menor
+// para o maior (assim nunca há duas posições iguais no meio do caminho).
+async function closeModuleGap(tx: Tx, courseId: string, removed: number) {
+  const after = await tx.module.findMany({
+    where: { courseId, position: { gt: removed } },
+    orderBy: { position: "asc" },
+    select: { id: true, position: true },
+  });
+  for (const item of after) {
+    await tx.module.update({ where: { id: item.id }, data: { position: item.position - 1 } });
   }
 }
 
@@ -239,20 +264,22 @@ export async function renameModule(input: { moduleId: string; title: string }) {
 
 export async function moveModule(moduleId: string, direction: Direction) {
   await prisma.$transaction(async (tx) => {
-    const courseModule = await tx.module.findUnique({ where: { id: moduleId }, select: { courseId: true } });
-    if (!courseModule) throw new UserFacingError("Módulo não encontrado.");
-    const siblings = await tx.module.findMany({
-      where: { courseId: courseModule.courseId },
-      orderBy: { position: "asc" },
-      select: { id: true },
+    const current = await tx.module.findUnique({
+      where: { id: moduleId },
+      select: { id: true, courseId: true, position: true },
     });
-    const order = moveItem(
-      siblings.map((item) => item.id),
-      moduleId,
-      direction,
-    );
-    if (order) await applyModuleOrder(tx, order);
-  });
+    if (!current) throw new UserFacingError("Módulo não encontrado.");
+    // O vizinho: o módulo imediatamente acima (↑) ou abaixo (↓). Sem vizinho, nada muda.
+    const neighbor = await tx.module.findFirst({
+      where: {
+        courseId: current.courseId,
+        position: direction === "up" ? { lt: current.position } : { gt: current.position },
+      },
+      orderBy: { position: direction === "up" ? "desc" : "asc" },
+      select: { id: true, position: true },
+    });
+    if (neighbor) await swapModules(tx, current, neighbor);
+  }, TRANSACTION_OPTIONS);
 }
 
 /** Apaga um módulo VAZIO (as aulas precisam ser movidas ou apagadas antes). */
@@ -260,36 +287,36 @@ export async function deleteModule(moduleId: string) {
   await prisma.$transaction(async (tx) => {
     const courseModule = await tx.module.findUnique({
       where: { id: moduleId },
-      select: { courseId: true, _count: { select: { lessons: true } } },
+      select: { courseId: true, position: true, _count: { select: { lessons: true } } },
     });
     if (!courseModule) throw new UserFacingError("Módulo não encontrado.");
     if (courseModule._count.lessons > 0) {
       throw new UserFacingError("O módulo ainda tem aulas. Mova as aulas para outro módulo ou apague-as antes.");
     }
     await tx.module.delete({ where: { id: moduleId } });
-    // Fecha o "buraco" na numeração dos módulos que ficaram.
-    const remaining = await tx.module.findMany({
-      where: { courseId: courseModule.courseId },
-      orderBy: { position: "asc" },
-      select: { id: true },
-    });
-    await applyModuleOrder(
-      tx,
-      remaining.map((item) => item.id),
-    );
-  });
+    await closeModuleGap(tx, courseModule.courseId, courseModule.position);
+  }, TRANSACTION_OPTIONS);
 }
 
 // =============================================================================================
 // Aulas
 // =============================================================================================
 
-async function applyLessonOrder(tx: Tx, ids: string[]) {
-  for (const [index, id] of ids.entries()) {
-    await tx.lesson.update({ where: { id }, data: { position: -(index + 1) } });
-  }
-  for (const [index, id] of ids.entries()) {
-    await tx.lesson.update({ where: { id }, data: { position: index + 1 } });
+// Mesmas ideias dos módulos (ver `swapModules` e `closeModuleGap`), dentro de um módulo.
+async function swapLessons(tx: Tx, a: Positioned, b: Positioned) {
+  await tx.lesson.update({ where: { id: a.id }, data: { position: -1 } });
+  await tx.lesson.update({ where: { id: b.id }, data: { position: a.position } });
+  await tx.lesson.update({ where: { id: a.id }, data: { position: b.position } });
+}
+
+async function closeLessonGap(tx: Tx, moduleId: string, removed: number) {
+  const after = await tx.lesson.findMany({
+    where: { moduleId, position: { gt: removed } },
+    orderBy: { position: "asc" },
+    select: { id: true, position: true },
+  });
+  for (const item of after) {
+    await tx.lesson.update({ where: { id: item.id }, data: { position: item.position - 1 } });
   }
 }
 
@@ -359,7 +386,7 @@ export async function updateLesson(input: {
         position = await nextLessonPosition(tx, target.id);
       }
 
-      return tx.lesson.update({
+      const updated = await tx.lesson.update({
         where: { id: input.lessonId },
         data: {
           moduleId: input.moduleId,
@@ -371,7 +398,10 @@ export async function updateLesson(input: {
           isPublished: input.isPublished,
         },
       });
-    });
+      // Saiu de um módulo: as aulas seguintes do módulo antigo sobem uma posição.
+      if (input.moduleId !== lesson.moduleId) await closeLessonGap(tx, lesson.moduleId, lesson.position);
+      return updated;
+    }, TRANSACTION_OPTIONS);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new UserFacingError("Já existe outra aula com este endereço neste curso.", { field: "slug" });
@@ -425,20 +455,21 @@ export async function updateLessonVideo(input: {
 
 export async function moveLesson(lessonId: string, direction: Direction) {
   await prisma.$transaction(async (tx) => {
-    const lesson = await tx.lesson.findUnique({ where: { id: lessonId }, select: { moduleId: true } });
-    if (!lesson) throw new UserFacingError("Aula não encontrada.");
-    const siblings = await tx.lesson.findMany({
-      where: { moduleId: lesson.moduleId },
-      orderBy: { position: "asc" },
-      select: { id: true },
+    const current = await tx.lesson.findUnique({
+      where: { id: lessonId },
+      select: { id: true, moduleId: true, position: true },
     });
-    const order = moveItem(
-      siblings.map((item) => item.id),
-      lessonId,
-      direction,
-    );
-    if (order) await applyLessonOrder(tx, order);
-  });
+    if (!current) throw new UserFacingError("Aula não encontrada.");
+    const neighbor = await tx.lesson.findFirst({
+      where: {
+        moduleId: current.moduleId,
+        position: direction === "up" ? { lt: current.position } : { gt: current.position },
+      },
+      orderBy: { position: direction === "up" ? "desc" : "asc" },
+      select: { id: true, position: true },
+    });
+    if (neighbor) await swapLessons(tx, current, neighbor);
+  }, TRANSACTION_OPTIONS);
 }
 
 /**
@@ -452,24 +483,17 @@ export async function deleteLesson(lessonId: string): Promise<{ courseId: string
       select: {
         courseId: true,
         moduleId: true,
+        position: true,
         attachments: { select: { storageKey: true } },
-        _count: { select: { progress: { where: studentProgress } } },
       },
     });
     if (!lesson) throw new UserFacingError("Aula não encontrada.");
-    if (lesson._count.progress > 0) {
+    const watched = await tx.lessonProgress.count({ where: { lessonId, ...studentProgressIn(lesson.courseId) } });
+    if (watched > 0) {
       throw new UserFacingError("Alunos já assistiram esta aula. Despublique em vez de apagar, para não perder o histórico.");
     }
     await tx.lesson.delete({ where: { id: lessonId } });
-    const remaining = await tx.lesson.findMany({
-      where: { moduleId: lesson.moduleId },
-      orderBy: { position: "asc" },
-      select: { id: true },
-    });
-    await applyLessonOrder(
-      tx,
-      remaining.map((item) => item.id),
-    );
+    await closeLessonGap(tx, lesson.moduleId, lesson.position);
     return { courseId: lesson.courseId, storageKeys: lesson.attachments.map((item) => item.storageKey) };
-  });
+  }, TRANSACTION_OPTIONS);
 }

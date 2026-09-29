@@ -200,8 +200,8 @@ vão para a pasta `.data/uploads`; sem o Panda, dá para testar o cadastro com u
 
 - **Unitários** (`npm test`): regras puras — perfis, limite de sessões, proteção de redirecionamento,
   validação de formulários, variáveis de ambiente, e-mails, **acesso às aulas** (matrícula),
-  progresso, "continuar de onde parou", link e mensagens do player do Panda, token da marca d'água,
-  links assinados dos PDFs e as travas de perfil.
+  progresso, "continuar de onde parou", link, mensagens e regras de progresso do player do Panda,
+  token da marca d'água, links assinados dos PDFs e as travas de perfil.
 - **Integração** (`npm run test:integration`): cadastro, login, limite de sessões, seed do catálogo,
   acesso às aulas, progresso, painel de cursos (criar, reordenar, apagar com proteção), envio e
   download de PDFs, matrículas e perfis, gravando num PostgreSQL de verdade. **Os testes apagam os dados do banco que usam**, por isso exigem um banco

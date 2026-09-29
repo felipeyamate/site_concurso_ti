@@ -24,8 +24,6 @@ type LessonPlayerProps = {
   watermarkText: string;
   initialPositionSeconds: number;
   initiallyCompleted: boolean;
-  // Duração cadastrada na aula (0 = não informada).
-  durationSeconds: number;
 };
 
 export function LessonPlayer({
@@ -35,7 +33,6 @@ export function LessonPlayer({
   watermarkText,
   initialPositionSeconds,
   initiallyCompleted,
-  durationSeconds,
 }: LessonPlayerProps) {
   const router = useRouter();
   const completedRef = useRef(initiallyCompleted);
@@ -80,7 +77,6 @@ export function LessonPlayer({
       title={lessonTitle}
       watermarkText={watermarkText}
       initialPositionSeconds={initialPositionSeconds}
-      durationSeconds={durationSeconds > 0 ? durationSeconds : null}
       onProgress={handleProgress}
     />
   );
