@@ -21,6 +21,7 @@ import { redirect } from "next/navigation";
 import { errorState, formDataToObject, invalidState, stateFromError, successState, type FormState } from "@/lib/form-state";
 import { AFFILIATE_COOKIE } from "@/modules/affiliates/rules";
 import { PERMISSION_DENIED_MESSAGE, getSessionWithRole } from "@/modules/auth/action-guards";
+import { LEGAL_PENDING_PURCHASE_MESSAGE, needsLegalAcceptance } from "@/modules/legal/version";
 
 import { createOrder, startSubscription } from "./checkout.server";
 import { cancelSubscription, requestOrderRefund } from "./refunds.server";
@@ -46,6 +47,9 @@ function paymentPage(paymentId: string | null): string {
 export async function checkoutAction(_previous: FormState, formData: FormData): Promise<FormState> {
   const session = await getSessionWithRole("STUDENT");
   if (!session) return errorState(LOGIN_MESSAGE);
+  // A página de compra pede o aceite, mas a ação também pode ser chamada direto (ou de uma página
+  // aberta antes de os textos mudarem): comprar é um contrato novo, vale a versão atual.
+  if (needsLegalAcceptance(session.user.legalVersion)) return errorState(LEGAL_PENDING_PURCHASE_MESSAGE);
   const parsed = checkoutSchema.safeParse(formDataToObject(formData));
   if (!parsed.success) return invalidState(parsed.error);
 
@@ -71,6 +75,7 @@ export async function checkoutAction(_previous: FormState, formData: FormData): 
 export async function subscribeAction(_previous: FormState, formData: FormData): Promise<FormState> {
   const session = await getSessionWithRole("STUDENT");
   if (!session) return errorState(LOGIN_MESSAGE);
+  if (needsLegalAcceptance(session.user.legalVersion)) return errorState(LEGAL_PENDING_PURCHASE_MESSAGE);
   const parsed = subscribeSchema.safeParse(formDataToObject(formData));
   if (!parsed.success) return invalidState(parsed.error);
 

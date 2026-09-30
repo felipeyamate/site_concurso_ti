@@ -141,20 +141,29 @@ describe("conferência automática das cobranças (aviso perdido)", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it("vencidas: o boleto continua na fila; Pix vencido só nos primeiros dias (o abandonado não ocupa vaga)", async () => {
+  it("vencidas continuam na fila; as vencidas há mais de 7 dias (Pix abandonado) só 1 vez por dia", async () => {
     const abandoned = await setupPendingOrder("op-abandonado");
     const recent = await setupPendingOrder("op-recente");
     const boleto = await setupPendingOrder("op-boleto");
-    const day = (days: number) => new Date(Date.UTC(2026, 9, 1 + days));
+    const day = (days: number) => new Date(Date.UTC(2026, 9, 1 + days)); // coluna de data (dia de Brasília)
     await prisma.payment.update({ where: { id: abandoned.payment.id }, data: { status: "OVERDUE", dueDate: day(-10) } });
-    await prisma.payment.update({ where: { id: recent.payment.id }, data: { status: "OVERDUE", dueDate: day(-1) } });
-    await prisma.payment.update({ where: { id: boleto.payment.id }, data: { status: "OVERDUE", method: "BOLETO", dueDate: day(-30) } });
+    await prisma.payment.update({ where: { id: recent.payment.id }, data: { status: "OVERDUE", dueDate: day(-4) } });
+    await prisma.payment.update({ where: { id: boleto.payment.id }, data: { status: "OVERDUE", method: "BOLETO", dueDate: day(-2) } });
     const spy = vi.spyOn(fakeProvider(), "getCharge").mockRejectedValue(new Error("só contando as consultas"));
     vi.spyOn(console, "error").mockImplementation(() => {});
+    const askedAt = async (now: Date) => {
+      spy.mockClear();
+      await reconcileOpenPayments({ now });
+      return spy.mock.calls.map(([providerPaymentId]) => providerPaymentId).sort();
+    };
+    const all = [abandoned, recent, boleto].map((item) => item.payment.providerPaymentId).sort();
 
-    await reconcileOpenPayments({ now: at(1) });
-    const asked = spy.mock.calls.map(([providerPaymentId]) => providerPaymentId).sort();
-    expect(asked).toEqual([recent.payment.providerPaymentId, boleto.payment.providerPaymentId].sort());
+    // Primeira rodada: todas (nunca foram conferidas).
+    expect(await askedAt(at(1))).toEqual(all);
+    // 2 horas depois: as recentes de novo (inclusive o Pix vencido há 4 dias, na tolerância); a abandonada não.
+    expect(await askedAt(at(3))).toEqual([recent, boleto].map((item) => item.payment.providerPaymentId).sort());
+    // 1 dia depois: a abandonada volta.
+    expect(await askedAt(at(26))).toEqual(all);
   });
 });
 

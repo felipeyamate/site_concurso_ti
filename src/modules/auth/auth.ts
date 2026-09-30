@@ -29,6 +29,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { sendEmail } from "@/modules/email/send-email";
 import { recordAccessLog } from "@/modules/privacy/access-log.server";
+import { isDeletedAccount } from "@/modules/privacy/account-deletion.server";
 import {
   magicLinkTemplate,
   resetPasswordTemplate,
@@ -145,8 +146,20 @@ export const auth = betterAuth({
         },
       },
     },
+    // Conta excluída (LGPD) nunca volta: nem login novo, nem senha nova (ex.: por um código de
+    // "redefinir senha" pedido antes da exclusão). Devolver `false` cancela a gravação.
+    account: {
+      create: {
+        before: async (account) => {
+          if (await isDeletedAccount(account.userId)) return false;
+        },
+      },
+    },
     session: {
       create: {
+        before: async (session) => {
+          if (await isDeletedAccount(session.userId)) return false;
+        },
         // Logo após cada novo login: guarda o registro de acesso (Marco Civil: data, hora e IP por
         // 6 meses) e aplica o limite de dispositivos simultâneos.
         after: async (session) => {

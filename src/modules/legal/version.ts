@@ -24,3 +24,10 @@ export function needsLegalAcceptance(acceptedVersion: string | null | undefined)
 
 /** Tela onde a pessoa aceita a versão atual (a área logada manda para cá quem ainda não aceitou). */
 export const LEGAL_ACCEPT_PATH = "/aceitar-termos";
+
+/**
+ * Mensagem para uma COMPRA (ou assinatura) enviada por quem ainda não aceitou a versão atual — ex.:
+ * a página de compra ficou aberta enquanto os textos mudaram. Comprar é um contrato novo: vale a versão nova.
+ */
+export const LEGAL_PENDING_PURCHASE_MESSAGE =
+  "Atualizamos os Termos de uso e a Política de privacidade. Recarregue a página e aceite a versão nova para continuar.";

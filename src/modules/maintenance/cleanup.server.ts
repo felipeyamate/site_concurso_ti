@@ -8,10 +8,11 @@
  *  - contadores de tentativas de login (proteção contra força bruta) parados há mais de 1 dia;
  *  - registros de acesso (Marco Civil) com mais de 6 meses — o prazo da lei já passou, e a LGPD pede
  *    para não guardar dado pessoal além do necessário (ver `privacy/access-log.ts`);
- *  - dados de estudo (respostas, simulados, progresso) de contas EXCLUÍDAS: a exclusão apaga tudo
- *    isso, mas uma resposta ou um progresso que estava "a caminho" no mesmo instante pode ser gravado
- *    logo depois. A limpeza do dia seguinte garante que nada fica.
- * Nunca toca em dados de aluno, vendas ou avisos de pagamento.
+ *  - dados de estudo (progresso, respostas, simulados) de contas EXCLUÍDAS: a exclusão já apaga tudo
+ *    isso e trava respostas e simulados, mas o progresso de uma aula não usa trava — um salvamento
+ *    "a caminho" no mesmo instante pode ser gravado logo depois. A limpeza do dia seguinte garante
+ *    que nada fica.
+ * Nunca toca em dados de contas ativas, vendas ou avisos de pagamento.
  */
 import "server-only";
 

@@ -21,7 +21,8 @@
 - Toda página protegida chama `requireSession`/`requireRole` (`src/modules/auth/session.ts`);
   o `proxy.ts` sozinho não basta. O `requireSession` também exige o aceite da versão atual dos Termos/Privacidade
   (`LEGAL_VERSION`, `src/modules/legal/version.ts`); `allowPendingLegal` só em `/aceitar-termos`, "Minha conta", "Minhas compras"
-  e a página de um pagamento (direitos de quem já comprou não dependem do aceite novo).
+  e a página de um pagamento (direitos de quem já comprou não dependem do aceite novo). Ação que cria um contrato novo
+  (comprar, assinar) confere `needsLegalAcceptance` também na própria ação.
   Aceite só se grava com `recordLegalConsent` (`src/modules/privacy/consent.server.ts`). Mudança relevante nos textos → nova `LEGAL_VERSION`.
 - Sessão: Server Components só LEEM a sessão (`getCurrentSession` usa `disableRefresh`); quem renova o login
   é o `SessionRefresher`. Toda nova área logada precisa de um `layout.tsx` que inclua o `SessionRefresher`.
@@ -65,7 +66,10 @@
   no Asaas e a assinatura "órfã" em `charges.server.ts`). Erros do provedor para a tela: `providerErrorMessage`.
   Registros financeiros (pedido, pagamento, nota) usam `onDelete: Restrict` e nunca são apagados.
 - LGPD: usuário nunca é apagado no site. Excluir conta só por `deleteOwnAccount`/`adminDeleteAccount`
-  (`src/modules/privacy/account-deletion.server.ts`), que anonimiza e guarda o fiscal. Tabela nova com dado pessoal:
+  (`src/modules/privacy/account-deletion.server.ts`), que anonimiza e guarda o fiscal, pega as travas de tudo o que grava
+  algo da pessoa (`lockEverythingThatWritesForUser` — trava nova de escrita por aluno entra lá) e apaga os códigos de
+  "redefinir senha"; conta excluída não ganha login/senha (`isDeletedAccount` nos ganchos do `auth.ts`) nem resposta
+  (`ensureAccountNotDeleted`). Tabela nova com dado pessoal:
   decidir em `anonymizeAccount` (apagar ou guardar, com o motivo) e incluir em `buildPersonalDataExport` ("Baixar meus dados").
   Registro de acesso (Marco Civil): `access_logs`, gravado no login (`recordAccessLog`), 6 meses, apagado pela limpeza diária.
 - Sentry sem dado pessoal: tudo passa por `scrubSentryEvent` (`src/lib/observability/scrub.ts`); nada de `sendDefaultPii`,

@@ -47,14 +47,15 @@ export type DeletionCheck = {
   openSubscriptions: number;
   // Pix/boleto gerado e ainda não pago nem vencido (se fosse pago depois, o dinheiro entraria numa conta que não existe mais).
   pendingPayments: number;
-  // Boleto vencido há menos de LATE_BOLETO_DAYS: o banco ainda aceita pagar com atraso (mesmo risco do de cima).
-  lateBoletos: number;
+  // Cobrança (Pix, boleto ou cartão) vencida há menos de LATE_PAYMENT_DAYS: o site ainda mostra "Pagar" e
+  // ela ainda pode ser paga com atraso (mesmo risco do de cima).
+  latePayments: number;
   // Reembolso pedido e ainda não concluído (o de boleto é feito à mão e pode precisar do contato da pessoa).
   refundsInProgress: number;
 };
 
-/** Por quantos dias depois do vencimento um boleto ainda impede a exclusão (pode ser pago com atraso). */
-export const LATE_BOLETO_DAYS = 30;
+/** Por quantos dias (de Brasília) depois do vencimento uma cobrança ainda impede a exclusão. */
+export const LATE_PAYMENT_DAYS = 30;
 
 /**
  * O que impede excluir a conta AGORA (lista vazia = pode excluir). Cada item é uma frase para a tela.
@@ -73,9 +74,9 @@ export function deletionBlockers(check: DeletionCheck): string[] {
   if (check.pendingPayments > 0) {
     blockers.push('Você tem um pagamento aguardando (Pix ou boleto): pague ou espere vencer antes de excluir a conta. Veja em "Minhas compras".');
   }
-  if (check.lateBoletos > 0) {
+  if (check.latePayments > 0) {
     blockers.push(
-      `Você tem um boleto vencido há menos de ${LATE_BOLETO_DAYS} dias, que o banco ainda aceita pagar com atraso: espere ${LATE_BOLETO_DAYS} dias do vencimento antes de excluir a conta.`,
+      `Você tem uma cobrança vencida há menos de ${LATE_PAYMENT_DAYS} dias, que ainda pode ser paga com atraso: pague ou espere ${LATE_PAYMENT_DAYS} dias do vencimento antes de excluir a conta. Veja em "Minhas compras".`,
     );
   }
   if (check.refundsInProgress > 0) {

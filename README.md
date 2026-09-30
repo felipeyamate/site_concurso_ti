@@ -377,10 +377,10 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 |---|---|---|
 | 5 | Minha conta → troque o **nome** → Salvar | "Nome atualizado." (o topo da área do aluno muda) |
 | 6 | **Baixar meus dados** | Baixa `meus-dados-concurso-ti-AAAA-MM-DD.json`: conta, aceites, dispositivos, **registros de acesso** (cada login: data, IP e navegador — o Marco Civil manda guardar por 6 meses), matrículas, progresso, respostas, simulados, compras e afiliado. Sem senha nem tokens |
-| 7 | Com um aluno que tem **assinatura ativa**, um **Pix aguardando**, um **boleto vencido há menos de 30 dias** ou um **reembolso em andamento** | "Ainda não dá para excluir" com o motivo (cancelar a assinatura / pagar ou esperar vencer / esperar 30 dias do vencimento / esperar o reembolso). Conta de professor/admin também não se exclui por aqui |
+| 7 | Com um aluno que tem **assinatura ativa**, um **Pix aguardando**, uma **cobrança vencida há menos de 30 dias** ou um **reembolso em andamento** | "Ainda não dá para excluir" com o motivo (cancelar a assinatura / pagar ou esperar vencer / pagar ou esperar 30 dias do vencimento / esperar o reembolso). Conta de professor/admin também não se exclui por aqui |
 | 8 | Com uma conta que entrou há **mais de 15 minutos** | "Entre de novo para confirmar" (botão para sair e entrar de novo) |
 | 9 | Logo depois de entrar: digite `excluir` → Excluir minha conta | "Para confirmar, digite exatamente: EXCLUIR MINHA CONTA" |
-| 10 | Digite `EXCLUIR MINHA CONTA` → Excluir → confirme a janela | Volta para a página inicial com "Sua conta foi excluída". Entrar com o e-mail e a senha antigos: "E-mail ou senha incorretos". O **mesmo e-mail** pode criar uma conta nova |
+| 10 | Peça um "Esqueci minha senha" (o link aparece no terminal), depois digite `EXCLUIR MINHA CONTA` → Excluir → confirme a janela | Volta para a página inicial com "Sua conta foi excluída". Entrar com o e-mail e a senha antigos: "E-mail ou senha incorretos". O link de redefinir a senha pedido antes não funciona mais. O **mesmo e-mail** pode criar uma conta nova |
 | 11 | ADMIN: `/admin/usuarios/<id>` de uma conta de aluno → **Excluir conta (LGPD)**; digite um e-mail errado, depois o certo | Errado: "O e-mail digitado não é o desta conta." Certo: a ficha mostra "Conta excluída" e o selo "Excluída em ...". As compras dela continuam em Vendas (registros fiscais), sem nome nem e-mail |
 
 **Cookies e análise de uso (PostHog)**

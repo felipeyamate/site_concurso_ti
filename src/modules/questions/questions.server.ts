@@ -149,6 +149,16 @@ export type AnswerResult = {
 };
 
 /**
+ * A conta foi excluída (LGPD) enquanto este pedido estava a caminho? A exclusão usa a mesma trava
+ * (`questions:<aluno>`), então aqui dentro a resposta é definitiva: nada é gravado numa conta excluída.
+ * Também usada ao criar um simulado (`mock-exams.server.ts`).
+ */
+export async function ensureAccountNotDeleted(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  const active = await tx.user.count({ where: { id: userId, deletedAt: null } });
+  if (active === 0) throw new UserFacingError("Esta conta foi excluída.");
+}
+
+/**
  * Responde uma questão ("Resolver questões").
  *
  * Passos (com a trava do aluno — a cota grátis é "confere e grava": sem a trava, várias
@@ -172,6 +182,7 @@ export async function answerQuestion(input: {
   const now = input.now ?? new Date();
   const isStaff = hasMinimumRole(input.viewer.role, "TEACHER");
   const result = await withAdvisoryLock(prisma, `questions:${input.viewer.id}`, async (tx) => {
+    await ensureAccountNotDeleted(tx, input.viewer.id);
     await tx.$executeRaw`SELECT id FROM questions WHERE id = ${input.questionId} FOR SHARE`;
     const question = await tx.question.findUnique({
       where: { id: input.questionId },

@@ -62,15 +62,18 @@ export const SIGN_UP_CONSENT_MINUTES = 10;
 
 /**
  * O aceite marcado no formulário de cadastro, gravado logo depois de a conta nascer.
- * Só vale para uma conta criada há até 10 minutos que nunca aceitou nada: a ação pode ser chamada
- * direto por HTTP, e o registro "no cadastro" não pode aparecer para quem nunca viu a caixa do
- * cadastro (ex.: conta antiga com a versão velha — essa passa pela tela /aceitar-termos).
- * Devolve se gravou.
+ * Só vale para uma conta criada há até 10 minutos, com E-MAIL E SENHA (o único cadastro que tem a
+ * caixa "Li e aceito"), que nunca aceitou nada: a ação pode ser chamada direto por HTTP, e o registro
+ * "no cadastro" não pode aparecer para quem nunca viu a caixa. Quem entrou pelo Google, pelo link
+ * mágico ou tem uma conta antiga passa pela tela /aceitar-termos. Devolve se gravou.
  */
 export async function recordSignUpConsent(input: { userId: string; ipAddress: string | null; userAgent: string | null; now?: Date }): Promise<boolean> {
   const now = input.now ?? new Date();
-  const user = await prisma.user.findUnique({ where: { id: input.userId }, select: { createdAt: true, legalVersion: true } });
-  if (!user || user.legalVersion !== null) return false;
+  const user = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { createdAt: true, legalVersion: true, accounts: { where: { providerId: "credential" }, select: { id: true } } },
+  });
+  if (!user || user.legalVersion !== null || user.accounts.length === 0) return false;
   if (now.getTime() - user.createdAt.getTime() > SIGN_UP_CONSENT_MINUTES * 60 * 1000) return false;
   await recordLegalConsent({ ...input, source: "SIGN_UP", now });
   return true;

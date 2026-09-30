@@ -5,9 +5,12 @@
  *
  * Rodar: npm run test:integration   (exige TEST_DATABASE_URL — ver README)
  */
+import { hashPassword } from "better-auth/crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
+import { withAdvisoryLock } from "@/lib/db-locks";
+import { auth } from "@/modules/auth/auth";
 import { createCourse, createLesson, createModule } from "@/modules/catalog/admin/catalog-admin.server";
 import { LEGAL_VERSION } from "@/modules/legal/version";
 import { createOrder, startSubscription } from "@/modules/payments/checkout.server";
@@ -17,6 +20,8 @@ import { recordAccessLog } from "@/modules/privacy/access-log.server";
 import { adminDeleteAccount, deleteOwnAccount } from "@/modules/privacy/account-deletion.server";
 import { recordLegalConsent, recordSignUpConsent } from "@/modules/privacy/consent.server";
 import { buildPersonalDataExport } from "@/modules/privacy/data-export.server";
+import { anonymizedEmail } from "@/modules/privacy/rules";
+import { answerQuestion } from "@/modules/questions/questions.server";
 import { seedQuestionBank } from "../../prisma/seed-questions";
 
 const CPF = "529.982.247-25";
@@ -39,6 +44,7 @@ async function resetPrivacy() {
   await prisma.product.deleteMany({ where: { slug: { startsWith: "pv-" } } });
   await prisma.plan.deleteMany({ where: { slug: { startsWith: "pv-" } } });
   await prisma.course.deleteMany({ where: { slug: { startsWith: "teste-privacidade" } } });
+  await prisma.verification.deleteMany({ where: { identifier: { startsWith: "reset-password:pv-" } } });
 }
 
 async function createUser(id: string, role: "STUDENT" | "TEACHER" | "ADMIN" = "STUDENT") {
@@ -97,8 +103,9 @@ describe("aceite dos termos (registro de consentimento)", () => {
     expect(await prisma.legalConsent.count({ where: { userId: "pv-aluna" } })).toBe(2);
   });
 
-  it("o aceite 'no cadastro' só vale para conta recém-criada que nunca aceitou nada", async () => {
+  it("o aceite 'no cadastro' só vale para conta recém-criada, com e-mail e senha, que nunca aceitou nada", async () => {
     const user = await createUser("pv-aluna");
+    await prisma.account.create({ data: { id: "pv-conta", accountId: user.id, providerId: "credential", userId: user.id, password: "hash" } });
     const minutesAfterSignUp = (minutes: number) => new Date(user.createdAt.getTime() + minutes * 60 * 1000);
     const meta = { ipAddress: "200.1.2.3", userAgent: "Firefox" };
     // 11 minutos depois do cadastro: não conta como "no cadastro" (a tela de aceite pede de novo).
@@ -107,6 +114,10 @@ describe("aceite dos termos (registro de consentimento)", () => {
     await createUser("pv-antiga");
     await prisma.user.update({ where: { id: "pv-antiga" }, data: { legalVersion: "2020-01-01" } });
     expect(await recordSignUpConsent({ userId: "pv-antiga", ...meta, now: new Date() })).toBe(false);
+    // Conta nova que entrou pelo Google (sem a caixa "Li e aceito" do cadastro): também não.
+    const google = await createUser("pv-google");
+    await prisma.account.create({ data: { id: "pv-conta-google", accountId: "g-1", providerId: "google", userId: google.id } });
+    expect(await recordSignUpConsent({ userId: google.id, ...meta, now: new Date(google.createdAt.getTime() + 60 * 1000) })).toBe(false);
     expect(await prisma.legalConsent.count()).toBe(0);
     // Logo depois do cadastro: grava, como "no cadastro".
     expect(await recordSignUpConsent({ userId: user.id, ...meta, now: minutesAfterSignUp(1) })).toBe(true);
@@ -203,20 +214,76 @@ describe("exclusão de conta", () => {
     );
   });
 
-  it("boleto vencido há pouco (pode ser pago com atraso) e reembolso em andamento também impedem", async () => {
+  it("cobrança vencida há pouco (ainda pode ser paga) e reembolso em andamento também impedem", async () => {
     await setupCatalog();
     await createUser("pv-aluna");
     const order = await buy("pv-aluna");
-    // O boleto venceu ontem: o banco ainda aceita pagar. Não dá para excluir.
-    await prisma.payment.update({ where: { id: order.paymentId as string }, data: { status: "OVERDUE", method: "BOLETO", dueDate: minutesAfter(-24 * 60) } });
-    await expect(deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: T0, now: minutesAfter(1) })).rejects.toThrow(/boleto vencido/);
+    // O Pix venceu ontem: o site ainda mostra "Pagar". Não dá para excluir.
+    await prisma.payment.update({ where: { id: order.paymentId as string }, data: { status: "OVERDUE", dueDate: minutesAfter(-24 * 60) } });
+    await expect(deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: T0, now: minutesAfter(1) })).rejects.toThrow(/cobrança vencida/);
     // Reembolso pedido e ainda não concluído: também não.
     await prisma.payment.update({ where: { id: order.paymentId as string }, data: { status: "REFUND_REQUESTED" } });
     await expect(deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: T0, now: minutesAfter(1) })).rejects.toThrow(/reembolso em andamento/);
-    // Boleto vencido há mais de 30 dias: o banco não aceita mais; pode excluir.
+    // Vencida há mais de 30 dias: pode excluir.
     await prisma.payment.update({ where: { id: order.paymentId as string }, data: { status: "OVERDUE", dueDate: minutesAfter(-31 * 24 * 60) } });
     await deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: T0, now: minutesAfter(1) });
     expect(await prisma.user.findUniqueOrThrow({ where: { id: "pv-aluna" } })).toMatchObject({ name: "Conta excluída" });
+  });
+
+  it("um reembolso em andamento NO MESMO INSTANTE é esperado e visto (a exclusão pega a trava do pedido)", async () => {
+    await setupCatalog();
+    await createUser("pv-aluna");
+    const order = await buy("pv-aluna");
+    await simulatePaymentAction({ paymentId: order.paymentId as string, action: "PAY", now: minutesAfter(1) });
+    // Um reembolso segura a trava do pedido (como faz durante a chamada ao provedor) e marca o pagamento.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let locked!: () => void;
+    const hasLock = new Promise<void>((resolve) => (locked = resolve));
+    const refund = withAdvisoryLock(prisma, `refund:order:${order.orderId}`, async (tx) => {
+      await tx.payment.update({ where: { id: order.paymentId as string }, data: { status: "REFUND_REQUESTED" } });
+      locked();
+      await gate;
+    });
+    await hasLock;
+    const deletion = deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: minutesAfter(2), now: minutesAfter(3) });
+    await new Promise((resolve) => setTimeout(resolve, 300)); // a exclusão chega e fica esperando a trava
+    release();
+    await refund;
+    await expect(deletion).rejects.toThrow(/reembolso em andamento/);
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: "pv-aluna" } })).toMatchObject({ deletedAt: null });
+  });
+
+  it("conta excluída não volta: código de 'redefinir senha' anterior é apagado e nenhuma senha/login novo é criado", async () => {
+    await createUser("pv-aluna");
+    await prisma.account.create({
+      data: { id: "pv-conta", accountId: "pv-aluna", providerId: "credential", userId: "pv-aluna", password: await hashPassword("senhaAntiga123") },
+    });
+    const inOneHour = new Date(Date.now() + 60 * 60 * 1000);
+    await prisma.verification.create({ data: { id: "pv-v1", identifier: "reset-password:pv-antes", value: "pv-aluna", expiresAt: inOneHour } });
+
+    await deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: new Date(), now: new Date() });
+
+    // O link pedido ANTES da exclusão não vale mais.
+    await expect(auth.api.resetPassword({ body: { token: "pv-antes", newPassword: "senhaNova123" } })).rejects.toThrow();
+    // Um código que escapasse (gravado no mesmo instante): a senha nova não é criada...
+    await prisma.verification.create({ data: { id: "pv-v2", identifier: "reset-password:pv-depois", value: "pv-aluna", expiresAt: inOneHour } });
+    await auth.api.resetPassword({ body: { token: "pv-depois", newPassword: "senhaNova123" } }).catch(() => undefined);
+    expect(await prisma.account.count({ where: { userId: "pv-aluna" } })).toBe(0);
+    // ...e ninguém entra na conta excluída.
+    await expect(auth.api.signInEmail({ body: { email: anonymizedEmail("pv-aluna"), password: "senhaNova123" } })).rejects.toThrow();
+    const context = await auth.$context;
+    expect(await context.internalAdapter.createSession("pv-aluna")).toBeFalsy();
+    expect(await prisma.session.count({ where: { userId: "pv-aluna" } })).toBe(0);
+  });
+
+  it("resposta que chega depois da exclusão é recusada (nada é gravado na conta excluída)", async () => {
+    await seedQuestionBank(prisma);
+    await createUser("pv-aluna");
+    await deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: T0, now: minutesAfter(1) });
+    const question = await prisma.question.findFirstOrThrow({ where: { isPublished: true }, select: { id: true } });
+    await expect(answerQuestion({ viewer: { id: "pv-aluna", role: "STUDENT" }, questionId: question.id, answer: "A" })).rejects.toThrow(/conta foi excluída/);
+    expect(await prisma.questionAttempt.count({ where: { userId: "pv-aluna" } })).toBe(0);
   });
 
   it("sem nenhuma compra, os dados de cobrança também saem", async () => {
