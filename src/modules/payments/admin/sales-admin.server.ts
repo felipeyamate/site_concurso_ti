@@ -127,12 +127,19 @@ export async function updateProduct(input: {
 
 /** Apaga um produto que NUNCA vendeu (senão: desative). */
 export async function deleteProduct(productId: string) {
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { _count: { select: { orders: true } } } });
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { _count: { select: { orders: true, coupons: true } } } });
   if (!product) throw new UserFacingError("Produto não encontrado.");
   if (product._count.orders > 0) {
     throw new UserFacingError("Este produto já tem pedidos (histórico financeiro). Desative em vez de apagar.");
   }
-  await prisma.product.delete({ where: { id: productId } });
+  // Cupom restrito a este produto: apagar o produto o tiraria da lista do cupom — e um cupom com a
+  // lista VAZIA vale para TODOS os produtos (o desconto passaria a valer para tudo, sem aviso).
+  if (product._count.coupons > 0) {
+    throw new UserFacingError("Este produto está na lista de um cupom. Tire-o do cupom (Vendas → Cupons) antes de apagar, ou desative o produto.");
+  }
+  // Confere e apaga num comando só: um pedido ou cupom gravado no meio impede o apagar.
+  const { count } = await prisma.product.deleteMany({ where: { id: productId, orders: { none: {} }, coupons: { none: {} } } });
+  if (count === 0) throw new UserFacingError("O produto mudou enquanto você apagava (novo pedido ou cupom). Recarregue a página.");
 }
 
 // =============================================================================================
@@ -190,12 +197,17 @@ export async function updatePlan(input: {
 }
 
 export async function deletePlan(planId: string) {
-  const plan = await prisma.plan.findUnique({ where: { id: planId }, select: { _count: { select: { subscriptions: true } } } });
+  const plan = await prisma.plan.findUnique({ where: { id: planId }, select: { _count: { select: { subscriptions: true, coupons: true } } } });
   if (!plan) throw new UserFacingError("Plano não encontrado.");
   if (plan._count.subscriptions > 0) {
     throw new UserFacingError("Este plano já tem assinaturas (histórico financeiro). Desative em vez de apagar.");
   }
-  await prisma.plan.delete({ where: { id: planId } });
+  // Mesma razão do produto: cupom com a lista de planos vazia vale para TODOS os planos.
+  if (plan._count.coupons > 0) {
+    throw new UserFacingError("Este plano está na lista de um cupom. Tire-o do cupom (Vendas → Cupons) antes de apagar, ou desative o plano.");
+  }
+  const { count } = await prisma.plan.deleteMany({ where: { id: planId, subscriptions: { none: {} }, coupons: { none: {} } } });
+  if (count === 0) throw new UserFacingError("O plano mudou enquanto você apagava (nova assinatura ou cupom). Recarregue a página.");
 }
 
 /**
@@ -264,6 +276,8 @@ export async function getOrderForAdmin(orderId: string) {
       user: { select: { id: true, name: true, email: true } },
       courses: { select: { course: { select: { id: true, title: true } } } },
       payments: { orderBy: { createdAt: "asc" }, include: { fiscalInvoice: true } },
+      // Fase 6: afiliado da venda (o cupom já vem no próprio pedido: couponCode/discountCents).
+      affiliate: { select: { id: true, code: true, user: { select: { name: true } } } },
     },
   });
 }
@@ -312,6 +326,7 @@ export async function getSubscriptionForAdmin(subscriptionId: string) {
     include: {
       user: { select: { id: true, name: true, email: true } },
       payments: { orderBy: { dueDate: "asc" }, include: { fiscalInvoice: true } },
+      affiliate: { select: { id: true, code: true, user: { select: { name: true } } } },
     },
   });
 }

@@ -20,6 +20,7 @@ import { getCurrentSession } from "@/modules/auth/session";
 import { listCatalogSummaries } from "@/modules/catalog/catalog.server";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/cursos" },
   title: "Cursos",
   description: "Cursos de Informática e TI para concursos, em linguagem simples.",
 };

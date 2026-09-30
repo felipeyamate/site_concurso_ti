@@ -13,6 +13,8 @@
 
 // Menor parcela aceita no cartão (limite do Asaas: R$ 5,00).
 export const MIN_INSTALLMENT_CENTS = 500;
+// Menor valor de uma cobrança (limite do Asaas: R$ 5,00). Um cupom não pode deixar o preço abaixo disto.
+export const MIN_CHARGE_CENTS = 500;
 // Máximo de parcelas que oferecemos (o banco também garante: 1 a 12).
 export const MAX_INSTALLMENTS = 12;
 

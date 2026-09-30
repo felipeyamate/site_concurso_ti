@@ -22,6 +22,13 @@ export function SiteHeader() {
           <Button asChild variant="ghost" size="sm">
             <Link href="/cursos">Cursos</Link>
           </Button>
+          {/* Concursos e Blog só a partir de telas médias (no celular estão no rodapé). */}
+          <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
+            <Link href="/concursos">Concursos</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
+            <Link href="/blog">Blog</Link>
+          </Button>
           <Button asChild variant="ghost" size="sm">
             <Link href="/area-do-aluno">Área do aluno</Link>
           </Button>

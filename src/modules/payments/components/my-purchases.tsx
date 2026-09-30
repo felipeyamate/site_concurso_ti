@@ -60,7 +60,8 @@ export function MyPurchases({ orders, subscriptions }: Purchases) {
                 <SubscriptionStatusBadge status={subscription.status} />
               </div>
               <p className="text-muted-foreground text-sm">
-                {formatBRL(subscription.priceCents)} {PLAN_CYCLE_PERIOD[subscription.cycle]} ·{" "}
+                {formatBRL(subscription.priceCents)} {PLAN_CYCLE_PERIOD[subscription.cycle]}
+                {subscription.couponCode ? ` (cupom ${subscription.couponCode}: −${formatBRL(subscription.discountCents)})` : ""} ·{" "}
                 {PAYMENT_METHOD_LABELS[subscription.method]} · desde {formatDate(subscription.createdAt)}
               </p>
               {subscription.paidUntil ? (
@@ -115,7 +116,9 @@ export function MyPurchases({ orders, subscriptions }: Purchases) {
                 <OrderStatusBadge status={order.status} />
               </div>
               <p className="text-muted-foreground text-sm">
-                {formatBRL(order.priceCents)} · {PAYMENT_METHOD_LABELS[order.method]}
+                {formatBRL(order.priceCents)}
+                {order.couponCode ? ` (cupom ${order.couponCode}: −${formatBRL(order.discountCents)})` : ""} ·{" "}
+                {PAYMENT_METHOD_LABELS[order.method]}
                 {order.installments > 1 ? ` em ${order.installments}x` : ""} · pedido em {formatDate(order.createdAt)}
                 {order.paidAt ? ` · pago em ${formatDate(order.paidAt)}` : ""}
               </p>

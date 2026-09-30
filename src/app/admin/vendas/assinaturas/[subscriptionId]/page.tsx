@@ -16,6 +16,7 @@ import { ActionButton } from "@/components/admin/action-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
+import { formatCommissionRate } from "@/modules/affiliates/rules";
 import { requireRole } from "@/modules/auth/session";
 import { adminCancelSubscriptionAction } from "@/modules/payments/admin/actions";
 import { PaymentsTable } from "@/modules/payments/admin/components/payments-table";
@@ -55,6 +56,22 @@ export default async function AdminSubscriptionPage({ params }: PageProps<"/admi
           {subscription.canceledAt ? ` · cancelada em ${formatDateTime(subscription.canceledAt)}` : ""}
           {subscription.provider === "FAKE" ? " · SIMULADA" : ""}
         </p>
+        {subscription.couponCode || subscription.affiliate ? (
+          <p className="text-sm">
+            {subscription.couponCode
+              ? `Cupom ${subscription.couponCode}: −${formatBRL(subscription.discountCents)} por ciclo (vale em todas as renovações). `
+              : ""}
+            {subscription.affiliate ? (
+              <>
+                Afiliado:{" "}
+                <Link href={`/admin/vendas/afiliados/${subscription.affiliate.id}`} className="underline">
+                  {subscription.affiliate.user.name} ({subscription.affiliate.code})
+                </Link>{" "}
+                · comissão de {formatCommissionRate(subscription.affiliateCommissionBps ?? 0)} em cada ciclo pago
+              </>
+            ) : null}
+          </p>
+        ) : null}
         <p className="text-sm">
           {subscription.user.name} ({subscription.user.email}) ·{" "}
           <Link href={`/admin/usuarios/${subscription.user.id}`} className="underline">

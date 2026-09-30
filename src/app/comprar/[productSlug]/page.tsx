@@ -3,7 +3,8 @@
  *
  * Quem chama: o Next.js (botão "Comprar" na página do curso).
  * Mostra o resumo do produto (cursos, preço, parcelas, tempo de acesso) e o formulário de compra.
- * Depois de enviar, o aluno vai para a página "como pagar" (Pix, boleto ou cartão).
+ * Com `?cupom=CODIGO` (Fase 6): confere o cupom e mostra o preço com desconto (o checkout confere
+ * de novo ao enviar). Depois de enviar, o aluno vai para a página "como pagar" (Pix, boleto ou cartão).
  */
 import "server-only";
 
@@ -15,6 +16,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/format";
 import { requireSession } from "@/modules/auth/session";
+import { COUPON_PARAM, CouponBox } from "@/modules/coupons/components/coupon-box";
+import { previewCoupon } from "@/modules/coupons/coupons.server";
 import { getBillingDefaults } from "@/modules/payments/checkout.server";
 import { CheckoutForm } from "@/modules/payments/components/checkout-form";
 import { PAYMENT_METHOD_LABELS, accessDaysLabel } from "@/modules/payments/labels";
@@ -27,20 +30,29 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-export default async function BuyProductPage({ params }: PageProps<"/comprar/[productSlug]">) {
+export default async function BuyProductPage({ params, searchParams }: PageProps<"/comprar/[productSlug]">) {
   const { productSlug } = await params;
-  const { user } = await requireSession(`/comprar/${productSlug}`);
+  const couponParam = (await searchParams)[COUPON_PARAM];
+  const couponInput = typeof couponParam === "string" && couponParam.trim() ? couponParam : null;
+  const pagePath = `/comprar/${productSlug}`;
+  // O login volta para esta página COM o cupom (links de edital/afiliado podem trazer um).
+  const { user } = await requireSession(couponInput ? `${pagePath}?${COUPON_PARAM}=${encodeURIComponent(couponInput)}` : pagePath);
   const product = await getProductForCheckout(productSlug);
   if (!product) notFound();
+
+  const coupon = couponInput
+    ? await previewCoupon({ code: couponInput, target: { kind: "PRODUCT", id: product.id, priceCents: product.priceCents }, userId: user.id })
+    : null;
+  const priceCents = coupon?.ok ? coupon.finalPriceCents : product.priceCents;
 
   const [defaults, pendingOrders] = await Promise.all([
     getBillingDefaults(user.id),
     listPendingOrdersForProduct(user.id, product.id),
   ]);
   const setup = getPaymentsSetup();
-  const options = installmentOptions(product.priceCents, product.maxInstallments).map((option) => ({
+  const options = installmentOptions(priceCents, product.maxInstallments).map((option) => ({
     count: option.count,
-    label: option.count === 1 ? `À vista: ${formatBRL(product.priceCents)}` : `${option.count}x de ${formatBRL(option.valueCents)}`,
+    label: option.count === 1 ? `À vista: ${formatBRL(priceCents)}` : `${option.count}x de ${formatBRL(option.valueCents)}`,
   }));
 
   return (
@@ -52,7 +64,16 @@ export default async function BuyProductPage({ params }: PageProps<"/comprar/[pr
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">{formatBRL(product.priceCents)}</CardTitle>
+          <CardTitle className="text-2xl">
+            {coupon?.ok ? (
+              <>
+                <span className="text-muted-foreground mr-2 text-base font-normal line-through">{formatBRL(product.priceCents)}</span>
+                {formatBRL(priceCents)}
+              </>
+            ) : (
+              formatBRL(product.priceCents)
+            )}
+          </CardTitle>
           <CardDescription>
             Acesso {product.accessDays === null ? "" : "por "}
             {accessDaysLabel(product.accessDays)} a partir do pagamento
@@ -104,8 +125,16 @@ export default async function BuyProductPage({ params }: PageProps<"/comprar/[pr
               </CardDescription>
             ) : null}
           </CardHeader>
-          <CardContent>
-            <CheckoutForm kind="product" slug={product.slug} installmentOptions={options} defaults={defaults} submitLabel="Ir para o pagamento" />
+          <CardContent className="grid gap-6">
+            <CouponBox preview={coupon} pagePath={pagePath} />
+            <CheckoutForm
+              kind="product"
+              slug={product.slug}
+              installmentOptions={options}
+              defaults={defaults}
+              submitLabel="Ir para o pagamento"
+              couponCode={coupon?.ok ? coupon.code : null}
+            />
           </CardContent>
         </Card>
       ) : (

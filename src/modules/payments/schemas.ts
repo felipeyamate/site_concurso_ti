@@ -51,12 +51,22 @@ const phone = z
 
 const acceptTerms = checkbox.refine((value) => value, "Para continuar, aceite os termos de uso e a política de reembolso.");
 
+// Cupom (Fase 6): opcional; vazio = sem cupom. O formato de verdade é conferido pelas regras do
+// cupom (`coupons/rules.ts`); aqui só limitamos o tamanho.
+const couponCode = z
+  .string()
+  .trim()
+  .max(40, "Cupom inválido.")
+  .optional()
+  .transform((value) => (value ? value : null));
+
 // ---------------------------------------------------------------------------------------------
 // Aluno
 // ---------------------------------------------------------------------------------------------
 
 export const checkoutSchema = z.object({
   productSlug: slug,
+  couponCode,
   method,
   installments: z.coerce.number().int().min(1).max(MAX_INSTALLMENTS).catch(1),
   cpf,
@@ -66,6 +76,7 @@ export const checkoutSchema = z.object({
 
 export const subscribeSchema = z.object({
   planSlug: slug,
+  couponCode,
   method,
   cpf,
   phone,

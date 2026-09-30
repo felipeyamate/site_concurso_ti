@@ -8,10 +8,12 @@
  * cartão"; o acesso vem quando o provedor AVISA que foi pago (webhook).
  *
  * Passos de uma compra:
- *  1. Confere o produto (ativo, com cursos), as parcelas e o limite de pedidos por dia.
+ *  1. Confere o produto (ativo, com cursos), o cupom (prévia), as parcelas e o limite de pedidos
+ *     por dia.
  *  2. Garante o cliente no provedor (CPF fica guardado depois da 1ª compra).
- *  3. Com a trava do aluno: confere o limite de novo e cria o PEDIDO no nosso banco (com a
- *     "foto" do produto) — o ID dele vai na cobrança.
+ *  3. Com a trava do aluno: confere o limite e o CUPOM de novo (com a trava do cupom — Fase 6),
+ *     decide o AFILIADO da venda e cria o PEDIDO no nosso banco (com a "foto" do produto, o
+ *     desconto e o afiliado) — o ID dele vai na cobrança.
  *  4. Cria a COBRANÇA no provedor. Se falhar, o pedido fica "cancelado" com o motivo.
  *  5. Registra a cobrança no nosso banco (modo "initial" — se um aviso chegou antes, ele vale).
  */
@@ -23,6 +25,10 @@ import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import { withAdvisoryLock } from "@/lib/db-locks";
 import { UserFacingError } from "@/lib/form-state";
+
+import { resolveSaleAttribution } from "@/modules/affiliates/affiliates.server";
+import { previewCoupon, reserveCoupon } from "@/modules/coupons/coupons.server";
+import type { CouponTarget } from "@/modules/coupons/rules";
 
 import { applyChargeUpdate } from "./charges.server";
 import { formatCpf, isValidCpf, maskCpf, normalizeCpf } from "./cpf";
@@ -58,6 +64,14 @@ type Tx = Prisma.TransactionClient;
 async function withCheckoutLock<T>(userId: string, work: (tx: Tx) => Promise<T>): Promise<T> {
   // Pode incluir uma chamada ao provedor (até 15 s) e esperar a trava de outro clique.
   return withAdvisoryLock(prisma, `checkout:${userId}`, work, { maxWait: 10_000, timeout: 40_000 });
+}
+
+/** As parcelas escolhidas existem para este preço? (O preço com cupom pode ter menos opções.) */
+function checkInstallments(priceCents: number, maxInstallments: number, installments: number): void {
+  const allowed = installmentOptions(priceCents, maxInstallments).map((option) => option.count);
+  if (!allowed.includes(installments)) {
+    throw new UserFacingError("Número de parcelas indisponível para este produto.", { field: "installments" });
+  }
 }
 
 /** Limite de pedidos/assinaturas novos por aluno em 24 h. */
@@ -134,6 +148,17 @@ async function ensureCustomer(provider: PaymentProvider, buyer: Buyer, billing: 
   });
 }
 
+/**
+ * Prévia do cupom ANTES de cadastrar o aluno no provedor (um cupom inválido não deve cadastrar nem
+ * travar o CPF). Devolve o preço que será cobrado. A conferência que vale é a de `reserveCoupon`.
+ */
+async function expectedPrice(target: CouponTarget, couponCode: string | null | undefined, buyerId: string, now: Date): Promise<number> {
+  if (!couponCode) return target.priceCents;
+  const preview = await previewCoupon({ code: couponCode, target, userId: buyerId, now });
+  if (!preview.ok) throw new UserFacingError(preview.message, { field: "couponCode" });
+  return preview.finalPriceCents;
+}
+
 /** Os dados de cobrança já guardados (para preencher o formulário): CPF formatado e celular. */
 export async function getBillingDefaults(userId: string): Promise<{ cpf: string; phone: string; cpfLocked: boolean }> {
   const profile = await prisma.billingProfile.findUnique({ where: { userId }, select: { cpf: true, phone: true } });
@@ -146,13 +171,16 @@ export async function createOrder(params: {
   method: PaymentMethod;
   installments: number;
   billing: BillingInput;
+  // Fase 6: cupom digitado e código do afiliado (do cookie do link de divulgação).
+  couponCode?: string | null;
+  affiliateCode?: string | null;
   now?: Date;
 }): Promise<{ orderId: string; paymentId: string | null }> {
   const now = params.now ?? new Date();
   const provider = getPaymentProvider();
   if (!provider) throw new UserFacingError(SALES_OFF_MESSAGE);
 
-  // 1. Produto, parcelas e limite diário.
+  // 1. Produto, cupom (prévia), parcelas e limite diário.
   const product = await prisma.product.findUnique({
     where: { slug: params.productSlug },
     include: { courses: { select: { courseId: true } } },
@@ -160,11 +188,9 @@ export async function createOrder(params: {
   if (!product || !product.isActive || product.courses.length === 0) {
     throw new UserFacingError("Este produto não está à venda.");
   }
+  const target: CouponTarget = { kind: "PRODUCT", id: product.id, priceCents: product.priceCents };
   const installments = params.method === "CREDIT_CARD" ? params.installments : 1;
-  const allowed = installmentOptions(product.priceCents, product.maxInstallments).map((option) => option.count);
-  if (!allowed.includes(installments)) {
-    throw new UserFacingError("Número de parcelas indisponível para este produto.", { field: "installments" });
-  }
+  checkInstallments(await expectedPrice(target, params.couponCode, params.buyer.id, now), product.maxInstallments, installments);
   // Confere o limite diário ANTES de cadastrar o aluno no provedor (uma compra recusada não deve
   // cadastrar nem travar o CPF). É conferido de novo, com a trava, na hora de criar o pedido.
   await withCheckoutLock(params.buyer.id, (tx) => checkDailyLimit(tx, params.buyer.id, now));
@@ -172,23 +198,37 @@ export async function createOrder(params: {
   // 2. Cliente no provedor.
   const customerId = await ensureCustomer(provider, params.buyer, params.billing);
 
-  // 3. Pedido com a "foto" do produto — o limite diário é conferido e o pedido criado com a trava
-  //    do aluno (dois cliques ao mesmo tempo não passam os dois pelo limite).
+  // 3. Pedido com a "foto" do produto — o limite diário e o cupom são conferidos e o pedido criado
+  //    com a trava do aluno (dois cliques ao mesmo tempo não passam os dois pelo limite) e a do
+  //    cupom (dois alunos não levam juntos o último uso).
   const order = await withCheckoutLock(params.buyer.id, async (tx) => {
     await checkDailyLimit(tx, params.buyer.id, now);
+    const pricing = params.couponCode ? await reserveCoupon(tx, { code: params.couponCode, target, userId: params.buyer.id, now }) : null;
+    const priceCents = pricing?.finalPriceCents ?? product.priceCents;
+    checkInstallments(priceCents, product.maxInstallments, installments);
+    const attribution = await resolveSaleAttribution(tx, {
+      couponAffiliate: pricing?.coupon.affiliate ?? null,
+      affiliateCode: params.affiliateCode,
+      buyerId: params.buyer.id,
+    });
     return tx.order.create({
       data: {
         userId: params.buyer.id,
         productId: product.id,
         productTitle: product.title,
-        priceCents: product.priceCents,
+        priceCents,
+        discountCents: pricing?.discountCents ?? 0,
+        couponId: pricing?.coupon.id ?? null,
+        couponCode: pricing?.coupon.code ?? null,
+        affiliateId: attribution?.affiliateId ?? null,
+        affiliateCommissionBps: attribution?.commissionBps ?? null,
         accessDays: product.accessDays,
         method: params.method,
         installments,
         provider: provider.kind,
         courses: { create: product.courses.map(({ courseId }) => ({ courseId })) },
       },
-      select: { id: true },
+      select: { id: true, priceCents: true },
     });
   });
 
@@ -198,7 +238,8 @@ export async function createOrder(params: {
     charge = await provider.createCharge({
       customerId,
       method: params.method,
-      valueCents: product.priceCents,
+      // O valor do PEDIDO (já com o desconto do cupom), nunca o do formulário.
+      valueCents: order.priceCents,
       installments,
       dueDate: computeDueDate(params.method, now),
       description: `${product.title} — Concurso TI`,
@@ -225,6 +266,9 @@ export async function startSubscription(params: {
   planSlug: string;
   method: PaymentMethod;
   billing: BillingInput;
+  // Fase 6: cupom (o desconto vale em TODAS as renovações) e código do afiliado (cookie).
+  couponCode?: string | null;
+  affiliateCode?: string | null;
   now?: Date;
 }): Promise<{ subscriptionId: string; paymentId: string | null }> {
   const now = params.now ?? new Date();
@@ -233,6 +277,8 @@ export async function startSubscription(params: {
 
   const plan = await prisma.plan.findUnique({ where: { slug: params.planSlug } });
   if (!plan || !plan.isActive) throw new UserFacingError("Este plano não está disponível.");
+  const target: CouponTarget = { kind: "PLAN", id: plan.id, priceCents: plan.priceCents };
+  await expectedPrice(target, params.couponCode, params.buyer.id, now);
 
   // Confere ANTES de cadastrar o aluno no provedor (um pedido recusado não deve cadastrar nem
   // travar o CPF) e de novo, com a trava, na hora de criar.
@@ -244,21 +290,33 @@ export async function startSubscription(params: {
   const customerId = await ensureCustomer(provider, params.buyer, params.billing);
 
   // Confere e cria com a trava do aluno: dois cliques ao mesmo tempo não criam duas assinaturas
-  // (seriam duas cobranças recorrentes no cartão/boleto do aluno).
+  // (seriam duas cobranças recorrentes no cartão/boleto do aluno). O cupom é conferido com a trava
+  // dele, como na compra avulsa.
   const subscription = await withCheckoutLock(params.buyer.id, async (tx) => {
     await checkNoOpenSubscription(tx, params.buyer.id);
     await checkDailyLimit(tx, params.buyer.id, now);
+    const pricing = params.couponCode ? await reserveCoupon(tx, { code: params.couponCode, target, userId: params.buyer.id, now }) : null;
+    const attribution = await resolveSaleAttribution(tx, {
+      couponAffiliate: pricing?.coupon.affiliate ?? null,
+      affiliateCode: params.affiliateCode,
+      buyerId: params.buyer.id,
+    });
     return tx.subscription.create({
       data: {
         userId: params.buyer.id,
         planId: plan.id,
         planTitle: plan.title,
-        priceCents: plan.priceCents,
+        priceCents: pricing?.finalPriceCents ?? plan.priceCents,
+        discountCents: pricing?.discountCents ?? 0,
+        couponId: pricing?.coupon.id ?? null,
+        couponCode: pricing?.coupon.code ?? null,
+        affiliateId: attribution?.affiliateId ?? null,
+        affiliateCommissionBps: attribution?.commissionBps ?? null,
         cycle: plan.cycle,
         method: params.method,
         provider: provider.kind,
       },
-      select: { id: true },
+      select: { id: true, priceCents: true },
     });
   });
 
@@ -267,7 +325,8 @@ export async function startSubscription(params: {
     created = await provider.createSubscription({
       customerId,
       method: params.method,
-      valueCents: plan.priceCents,
+      // O valor da ASSINATURA (já com o desconto do cupom, que vale em todas as renovações).
+      valueCents: subscription.priceCents,
       cycle: plan.cycle,
       // A 1ª cobrança vence no mesmo prazo de uma compra avulsa (boleto: 3 dias).
       nextDueDate: computeDueDate(params.method, now),

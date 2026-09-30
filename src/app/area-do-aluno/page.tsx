@@ -39,7 +39,7 @@ export default async function StudentAreaPage() {
 
   // Busca, em paralelo (como um `asyncio.gather`): os logins ativos do aluno (só campos de
   // exibição; nunca o token), se a conta tem senha cadastrada e os cursos com o progresso.
-  const [activeSessions, passwordAccounts, myCourses] = await Promise.all([
+  const [activeSessions, passwordAccounts, myCourses, affiliate] = await Promise.all([
     prisma.session.findMany({
       where: { userId: user.id, expiresAt: { gt: new Date() } },
       select: { id: true, userAgent: true, createdAt: true },
@@ -47,6 +47,8 @@ export default async function StudentAreaPage() {
     }),
     prisma.account.count({ where: { userId: user.id, providerId: "credential" } }),
     listMyCourseViews({ userId: user.id, role: user.role }),
+    // Fase 6: a pessoa é afiliada? (mostra o atalho para a área do afiliado)
+    prisma.affiliate.findUnique({ where: { userId: user.id }, select: { id: true } }),
   ]);
   // Conta sem senha: quem só usa o link por e-mail ou o Google — ou quem teve a senha removida
   // pela proteção do Better Auth ao entrar pelo link mágico sem ter confirmado o e-mail.
@@ -133,6 +135,20 @@ export default async function StudentAreaPage() {
           </Button>
         </CardContent>
       </Card>
+
+      {affiliate ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Programa de afiliados</CardTitle>
+            <CardDescription>Seu link de divulgação, as vendas indicadas e as suas comissões.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/area-do-aluno/afiliado">Abrir a área do afiliado</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

@@ -7,16 +7,19 @@
  *
  * Toda ação: 1. confere o LOGIN (qualquer perfil pode comprar); 2. valida o formulário (zod);
  * 3. chama as regras (`checkout.server.ts`, `refunds.server.ts`); 4. atualiza as telas.
- * O preço nunca vem do formulário: o servidor busca o produto/plano no banco.
+ * O preço nunca vem do formulário: o servidor busca o produto/plano no banco (e o cupom, se houver).
+ * O afiliado vem do cookie do link de divulgação (`/r/<codigo>`), lido aqui no servidor.
  */
 "use server";
 
 import "server-only";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { errorState, formDataToObject, invalidState, stateFromError, successState, type FormState } from "@/lib/form-state";
+import { AFFILIATE_COOKIE } from "@/modules/affiliates/rules";
 import { PERMISSION_DENIED_MESSAGE, getSessionWithRole } from "@/modules/auth/action-guards";
 
 import { createOrder, startSubscription } from "./checkout.server";
@@ -28,6 +31,11 @@ const LOGIN_MESSAGE = "Entre na sua conta para continuar.";
 function refreshScreens() {
   // Compras mudam a área do aluno, as páginas dos cursos e o painel.
   revalidatePath("/", "layout");
+}
+
+/** O código do afiliado guardado pelo link de divulgação (ou null). */
+async function affiliateCodeFromCookie(): Promise<string | null> {
+  return (await cookies()).get(AFFILIATE_COOKIE)?.value ?? null;
 }
 
 /** Depois de criar a cobrança, vai para a página "como pagar" (ou para "Minhas compras"). */
@@ -49,6 +57,8 @@ export async function checkoutAction(_previous: FormState, formData: FormData): 
       method: parsed.data.method,
       installments: parsed.data.installments,
       billing: { cpf: parsed.data.cpf, phone: parsed.data.phone },
+      couponCode: parsed.data.couponCode,
+      affiliateCode: await affiliateCodeFromCookie(),
     }));
   } catch (error) {
     return stateFromError(error, "criar o pedido");
@@ -71,6 +81,8 @@ export async function subscribeAction(_previous: FormState, formData: FormData):
       planSlug: parsed.data.planSlug,
       method: parsed.data.method,
       billing: { cpf: parsed.data.cpf, phone: parsed.data.phone },
+      couponCode: parsed.data.couponCode,
+      affiliateCode: await affiliateCodeFromCookie(),
     }));
   } catch (error) {
     return stateFromError(error, "criar a assinatura");

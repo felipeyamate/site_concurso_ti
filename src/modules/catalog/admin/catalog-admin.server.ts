@@ -21,6 +21,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { isRecordNotFound, isUniqueViolation } from "@/lib/db-errors";
 import { UserFacingError } from "@/lib/form-state";
+import { recordSlugChange } from "@/modules/seo/redirects.server";
 import { parsePandaEmbedInput } from "@/modules/video/panda/embed";
 
 import { moveItem } from "./reorder";
@@ -189,15 +190,22 @@ export async function updateCourse(input: {
   isPublished: boolean;
 }) {
   try {
-    return await prisma.course.update({
-      where: { id: input.courseId },
-      data: {
-        title: input.title,
-        slug: input.slug,
-        subtitle: input.subtitle,
-        description: input.description,
-        isPublished: input.isPublished,
-      },
+    return await prisma.$transaction(async (tx) => {
+      const current = await tx.course.findUnique({ where: { id: input.courseId }, select: { slug: true } });
+      if (!current) throw new UserFacingError("Curso não encontrado.");
+      const updated = await tx.course.update({
+        where: { id: input.courseId },
+        data: {
+          title: input.title,
+          slug: input.slug,
+          subtitle: input.subtitle,
+          description: input.description,
+          isPublished: input.isPublished,
+        },
+      });
+      // Fase 6: o endereço antigo continua funcionando (redireciona para o novo).
+      await recordSlugChange(tx, { kind: "COURSE", oldSlug: current.slug, newSlug: input.slug, targetId: input.courseId });
+      return updated;
     });
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -421,7 +429,7 @@ export async function updateLesson(input: {
   return runPositionTransaction(async (tx) => {
     const lesson = await tx.lesson.findUnique({
       where: { id: input.lessonId },
-      select: { courseId: true, moduleId: true, position: true },
+      select: { courseId: true, moduleId: true, position: true, slug: true },
     });
     if (!lesson) throw new UserFacingError("Aula não encontrada.");
 
@@ -458,6 +466,8 @@ export async function updateLesson(input: {
         isPublished: input.isPublished,
       },
     });
+    // Fase 6: o endereço antigo da aula continua funcionando (o slug é único dentro do curso).
+    await recordSlugChange(tx, { kind: "LESSON", scope: lesson.courseId, oldSlug: lesson.slug, newSlug: input.slug, targetId: input.lessonId });
     // Saiu de um módulo: as aulas seguintes do módulo antigo sobem uma posição.
     if (input.moduleId !== lesson.moduleId) await closeLessonGap(tx, lesson.moduleId, lesson.position);
     return updated;

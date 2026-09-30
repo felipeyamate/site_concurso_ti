@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * sales-nav.tsx — Submenu da seção Vendas do painel (Resumo, Produtos, Planos, Pedidos...).
+ * sales-nav.tsx — Submenu da seção Vendas do painel (Resumo, Produtos, Planos, Pedidos, Cupons, Afiliados...).
  *
  * Quem chama: `src/app/admin/vendas/layout.tsx` (só para ADMIN).
  * "use client" porque destaca a página atual (`usePathname`). O menu só ESCONDE links; quem protege
@@ -18,6 +18,8 @@ const LINKS = [
   { href: "/admin/vendas/planos", label: "Planos", exact: false },
   { href: "/admin/vendas/pedidos", label: "Pedidos", exact: false },
   { href: "/admin/vendas/assinaturas", label: "Assinaturas", exact: false },
+  { href: "/admin/vendas/cupons", label: "Cupons", exact: false },
+  { href: "/admin/vendas/afiliados", label: "Afiliados", exact: false },
   { href: "/admin/vendas/avisos", label: "Avisos do provedor", exact: false },
 ];
 

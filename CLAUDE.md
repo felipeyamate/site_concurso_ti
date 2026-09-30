@@ -60,7 +60,8 @@
   Depois que algo foi CRIADO no provedor, não transformar uma falha posterior em "erro ao criar" (ver `createSubscription`
   no Asaas e a assinatura "órfã" em `charges.server.ts`). Erros do provedor para a tela: `providerErrorMessage`.
   Registros financeiros (pedido, pagamento, nota) usam `onDelete: Restrict` e nunca são apagados.
-- Teste de integração que apaga usuários precisa limpar antes os dados de venda (ver `tests/integration/payments.test.ts`);
+- Teste de integração que apaga usuários precisa limpar antes os dados de venda, cupons e afiliados (itens de repasse, repasses,
+  cupons, afiliados — ver `resetSales` em `tests/integration/payments.test.ts`);
   o que apaga questões precisa limpar antes `question_attempts` e `mock_exam_questions` (`onDelete: Restrict` na questão).
 - Banco de questões: o nível de acesso sai SEMPRE de `getQuestionBankLevelFor` + `checkAnswerPermission`
   (`src/modules/questions/`), nunca de um `if` solto. Gabarito (`correctAnswer`) e comentário (`explanation`) nunca entram
@@ -73,6 +74,25 @@
   Questão de simulado em andamento do aluno não aparece nem responde em "Resolver questões". "Quem é aluno" nas
   contas: `STUDENT_USER` (`student-history.ts`). Questão de prova: banca lida com a prova travada (`lockExamsForRead`).
   Planilha: bytes → texto só com `decodeCsvBytes` (UTF-8 ou Windows-1252 do Excel), nunca `file.text()`.
+- Cupom: preço com desconto só por `previewCoupon` (tela) e `reserveCoupon` (checkout, dentro da trava do checkout, com a
+  trava `coupon:<id>`), em `src/modules/coupons/`; regras puras em `coupons/rules.ts`. Nunca calcular desconto solto na página.
+  O que conta como uso: `redemptionWhere` (pago, mesmo reembolsado, + aguardando pagamento, inclusive a assinatura ainda sem
+  cobrança). Quem altera/ativa/apaga cupom pega a mesma trava `coupon:<id>`. O cupom da página de concurso só o ADMIN escolhe
+  (`canChooseCoupon` em `saveNotice`); renomear o cupom leva junto as páginas. Produto/plano na lista de um cupom não se apaga.
+- Afiliado: quem indicou a venda só sai de `resolveSaleAttribution` (cupom do afiliado ganha do cookie `ct_afiliado`).
+  Comissões são CALCULADAS dos pagamentos (`listAffiliateCommissions`), não gravadas; o que foi pago fica nos itens de
+  repasse (`registerAffiliatePayout`, com trava e com `expectedPaymentIds` = o que a página mostrou).
+  Caminho "do site" (link `/r/...`, links do Markdown, voltar do login): sempre `safeRedirectPath`, nunca um `startsWith` solto.
+- Texto do blog/concursos só com `<Markdown>`/`parseMarkdown` (`src/lib/markdown/`); nunca `dangerouslySetInnerHTML`
+  (única exceção: `<JsonLd>`, que escapa o conteúdo em `serializeJsonLd`).
+- Trocar o slug de curso, aula, post ou página de concurso chama `recordSlugChange` na mesma transação; a página pública
+  chama `redirectOldCatalogPathOrNotFound`/`redirectOldSlugOrNotFound` (com `canSeeDrafts`) antes de dar 404 — endereço
+  antigo de rascunho nunca redireciona para o público (o 308 revelaria o endereço novo).
+- Função de busca usada pela página E pelo `generateMetadata` leva o `cache` do React (ex.: `getPostForViewer`).
+- Endereço absoluto do site (canonical, sitemap, RSS, link de afiliado): `siteUrl()`/`absoluteUrl()` (`src/modules/seo/site.server.ts`).
+  Sitemap e RSS são montados em `seo/feeds.server.ts`; a rota só faz `await connection()` e chama (os testes chamam direto).
+- Botão com texto longo numa linha `flex-wrap`: `h-auto shrink whitespace-normal` (o `Button` tem `shrink-0` e
+  `whitespace-nowrap`; sem isso ele alarga a página no celular).
 - Componente com `"use client"` só exporta componentes: função usada também no servidor (ex.: `choicesFor`) fica num
   arquivo "puro" (senão a página quebra ao ser montada no servidor).
 - Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`

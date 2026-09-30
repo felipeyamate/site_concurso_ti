@@ -2,7 +2,8 @@
  * page.tsx — Checkout de uma assinatura: /assinar/[plano]  (exige login)
  *
  * Quem chama: o Next.js (botão "Assinar" em /planos).
- * Mostra o plano (preço por ciclo, o que inclui) e o formulário. Depois de enviar, o aluno vai
+ * Mostra o plano (preço por ciclo, o que inclui) e o formulário. Com `?cupom=CODIGO` (Fase 6),
+ * mostra o preço com desconto — que vale em TODAS as renovações. Depois de enviar, o aluno vai
  * para a página "como pagar" da 1ª cobrança. No cartão, as próximas cobranças são automáticas.
  */
 import "server-only";
@@ -14,6 +15,8 @@ import { notFound } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireSession } from "@/modules/auth/session";
+import { COUPON_PARAM, CouponBox } from "@/modules/coupons/components/coupon-box";
+import { previewCoupon } from "@/modules/coupons/coupons.server";
 import { getBillingDefaults } from "@/modules/payments/checkout.server";
 import { CheckoutForm } from "@/modules/payments/components/checkout-form";
 import { PLAN_CYCLE_LABELS, PLAN_CYCLE_PERIOD } from "@/modules/payments/labels";
@@ -26,11 +29,18 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-export default async function SubscribePage({ params }: PageProps<"/assinar/[planSlug]">) {
+export default async function SubscribePage({ params, searchParams }: PageProps<"/assinar/[planSlug]">) {
   const { planSlug } = await params;
-  const { user } = await requireSession(`/assinar/${planSlug}`);
+  const couponParam = (await searchParams)[COUPON_PARAM];
+  const couponInput = typeof couponParam === "string" && couponParam.trim() ? couponParam : null;
+  const pagePath = `/assinar/${planSlug}`;
+  const { user } = await requireSession(couponInput ? `${pagePath}?${COUPON_PARAM}=${encodeURIComponent(couponInput)}` : pagePath);
   const plan = await getPlanForCheckout(planSlug);
   if (!plan) notFound();
+
+  const coupon = couponInput
+    ? await previewCoupon({ code: couponInput, target: { kind: "PLAN", id: plan.id, priceCents: plan.priceCents }, userId: user.id })
+    : null;
 
   const defaults = await getBillingDefaults(user.id);
   const setup = getPaymentsSetup();
@@ -47,7 +57,11 @@ export default async function SubscribePage({ params }: PageProps<"/assinar/[pla
       <Card>
         <CardHeader>
           <CardTitle className="text-2xl">
-            {formatBRL(plan.priceCents)} <span className="text-muted-foreground text-base font-normal">{PLAN_CYCLE_PERIOD[plan.cycle]}</span>
+            {coupon?.ok ? (
+              <span className="text-muted-foreground mr-2 text-base font-normal line-through">{formatBRL(plan.priceCents)}</span>
+            ) : null}
+            {formatBRL(coupon?.ok ? coupon.finalPriceCents : plan.priceCents)}{" "}
+            <span className="text-muted-foreground text-base font-normal">{PLAN_CYCLE_PERIOD[plan.cycle]}</span>
           </CardTitle>
           <CardDescription>
             {PLAN_CYCLE_LABELS[plan.cycle]} · todos os cursos incluídos na assinatura · cancele quando quiser
@@ -55,6 +69,7 @@ export default async function SubscribePage({ params }: PageProps<"/assinar/[pla
         </CardHeader>
         <CardContent className="grid gap-2 text-sm">
           {plan.description ? <p className="leading-relaxed">{plan.description}</p> : null}
+          {coupon?.ok ? <p className="font-medium">Com o cupom, o desconto vale em todas as renovações da assinatura.</p> : null}
           <p className="text-muted-foreground">
             No cartão, as próximas cobranças são automáticas. No Pix e no boleto, a cobrança de cada ciclo chega por
             e-mail antes do vencimento. Cancelando, o acesso continua até o fim do período já pago.
@@ -72,8 +87,16 @@ export default async function SubscribePage({ params }: PageProps<"/assinar/[pla
               </CardDescription>
             ) : null}
           </CardHeader>
-          <CardContent>
-            <CheckoutForm kind="plan" slug={plan.slug} installmentOptions={[]} defaults={defaults} submitLabel="Assinar e ir para o pagamento" />
+          <CardContent className="grid gap-6">
+            <CouponBox preview={coupon} pagePath={pagePath} />
+            <CheckoutForm
+              kind="plan"
+              slug={plan.slug}
+              installmentOptions={[]}
+              defaults={defaults}
+              submitLabel="Assinar e ir para o pagamento"
+              couponCode={coupon?.ok ? coupon.code : null}
+            />
           </CardContent>
         </Card>
       ) : (
