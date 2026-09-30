@@ -14,7 +14,8 @@
  *  3. Grava o novo status (exceto "paga" com estorno manual pendente — ver `manualRefundRequestedAt`);
  *     recalcula a situação do pedido / ativa a assinatura.
  *  4. Recalcula o acesso do aluno (`syncPaidAccess`) — nunca "soma" nada direto.
- *  5. Devolve os efeitos (e-mail, nota fiscal) para rodar DEPOIS da transação.
+ *  5. Devolve os efeitos (e-mail, nota fiscal, cancelar assinatura órfã no provedor) para rodar
+ *     DEPOIS da transação.
  */
 import "server-only";
 
@@ -24,7 +25,7 @@ import { prisma } from "@/lib/db";
 import { advisoryLock } from "@/lib/db-locks";
 
 import { syncPaidAccess } from "./access-sync.server";
-import { dateOnlyToUtc, toSaoPauloDate } from "./dates";
+import { dateOnlyToUtc, startOfDayInSaoPaulo, toSaoPauloDate } from "./dates";
 import type { PaymentEffect } from "./effects.server";
 import { PAYMENT_STATUS_LABELS } from "./labels";
 import { eventTimeToDate } from "./provider/asaas/mapping";
@@ -43,16 +44,22 @@ export type ChargeUpdateResult = {
 
 type ChargeOwner =
   | { kind: "order"; orderId: string; userId: string; method: PaymentMethod }
-  | { kind: "subscription"; subscriptionId: string; userId: string; method: PaymentMethod };
+  // `orphan`: a assinatura existe no provedor, mas aqui a criação tinha falhado (ficou cancelada
+  // sem o ID do provedor) — ela precisa ser cancelada lá, senão continua gerando cobranças.
+  | { kind: "subscription"; subscriptionId: string; userId: string; method: PaymentMethod; orphan: boolean };
 
 /** De quem é esta cobrança do provedor? (pedido ou assinatura do nosso site) */
 async function findChargeOwner(tx: Tx, provider: PaymentProviderKind, charge: ProviderCharge): Promise<ChargeOwner | null> {
   if (charge.subscriptionId) {
     let subscription = await tx.subscription.findUnique({ where: { providerSubscriptionId: charge.subscriptionId } });
-    // A assinatura foi criada no provedor, mas o nosso registro do ID falhou: acha pela referência.
+    let orphan = false;
+    // A assinatura foi criada no provedor, mas o nosso registro do ID falhou (ex.: a resposta do
+    // provedor se perdeu): acha pela referência. Se aqui ela ficou CANCELADA (o aluno viu "não foi
+    // possível criar"), ela é uma órfã: guardamos o ID e pedimos o cancelamento no provedor.
     if (!subscription && charge.externalReference) {
       const byReference = await tx.subscription.findUnique({ where: { id: charge.externalReference } });
       if (byReference && byReference.provider === provider && !byReference.providerSubscriptionId) {
+        orphan = byReference.status === "CANCELED";
         subscription = await tx.subscription.update({
           where: { id: byReference.id },
           data: { providerSubscriptionId: charge.subscriptionId },
@@ -60,7 +67,13 @@ async function findChargeOwner(tx: Tx, provider: PaymentProviderKind, charge: Pr
       }
     }
     if (!subscription || subscription.provider !== provider) return null;
-    return { kind: "subscription", subscriptionId: subscription.id, userId: subscription.userId, method: subscription.method };
+    return {
+      kind: "subscription",
+      subscriptionId: subscription.id,
+      userId: subscription.userId,
+      method: subscription.method,
+      orphan,
+    };
   }
 
   if (charge.installmentId) {
@@ -86,6 +99,23 @@ async function findChargeOwner(tx: Tx, provider: PaymentProviderKind, charge: Pr
   return null;
 }
 
+/**
+ * Quando a cobrança foi paga pela 1ª vez:
+ *  - num aviso: a hora do aviso (o provedor avisa na hora do pagamento);
+ *  - sem aviso (ex.: "Conferir no Asaas" dias depois de um aviso perdido): o DIA do pagamento
+ *    informado pelo provedor (início do dia, em Brasília) — nunca a hora do clique, que empurraria
+ *    o prazo de 7 dias do reembolso e o início do acesso;
+ *  - sem nenhuma das duas: agora.
+ */
+function firstPaidAt(input: { mode: ChargeUpdateMode; occurredAt: string | null }, charge: ProviderCharge, now: Date): Date {
+  if (input.mode === "event" && input.occurredAt) return eventTimeToDate(input.occurredAt);
+  if (charge.paidDate) {
+    const startOfPaymentDay = startOfDayInSaoPaulo(charge.paidDate);
+    return startOfPaymentDay < now ? startOfPaymentDay : now;
+  }
+  return input.occurredAt ? eventTimeToDate(input.occurredAt) : now;
+}
+
 async function applyInTransaction(
   tx: Tx,
   input: { provider: PaymentProviderKind; charge: ProviderCharge; occurredAt: string | null; mode: ChargeUpdateMode; now: Date },
@@ -94,6 +124,7 @@ async function applyInTransaction(
   await advisoryLock(tx, `payment:${provider}:${charge.paymentId}`);
 
   let payment = await tx.payment.findUnique({ where: { providerPaymentId: charge.paymentId } });
+  let orphanSubscriptionId: string | null = null;
   let previousStatus: PaymentStatus = "PENDING";
   let previousPaidAt: Date | null = null;
 
@@ -109,6 +140,7 @@ async function applyInTransaction(
     const outdated = isOutdatedChargeUpdate({
       incomingAt: input.occurredAt,
       incomingStatus: charge.status,
+      incomingIsRefundDenial: charge.refundDenied,
       lastAppliedAt: payment.lastEventAt,
       currentStatus: payment.status,
     });
@@ -121,6 +153,9 @@ async function applyInTransaction(
     const owner = await findChargeOwner(tx, provider, charge);
     if (!owner) {
       return { paymentId: null, note: "Cobrança criada fora do site (sem pedido/assinatura): ignorada.", effects: [] };
+    }
+    if (owner.kind === "subscription" && owner.orphan && charge.subscriptionId) {
+      orphanSubscriptionId = charge.subscriptionId;
     }
     payment = await tx.payment.create({
       data: {
@@ -154,9 +189,9 @@ async function applyInTransaction(
   const keepManualRefund = payment.manualRefundRequestedAt !== null && isPaidStatus(charge.status);
   const status: PaymentStatus = keepManualRefund ? "REFUND_REQUESTED" : charge.status;
 
-  // Grava a nova situação. `paidAt` = quando ficou paga pela 1ª vez (hora do aviso, se houver).
+  // Grava a nova situação. `paidAt` = quando ficou paga pela 1ª vez (ver `firstPaidAt`).
   const nowPaid = isPaidStatus(status);
-  const paidAt = nowPaid && !payment.paidAt ? (input.occurredAt ? eventTimeToDate(input.occurredAt) : now) : payment.paidAt;
+  const paidAt = nowPaid && !payment.paidAt ? firstPaidAt(input, charge, now) : payment.paidAt;
   await tx.payment.update({
     where: { id: payment.id },
     data: {
@@ -173,6 +208,9 @@ async function applyInTransaction(
   });
 
   const effects: PaymentEffect[] = [];
+  if (orphanSubscriptionId) {
+    effects.push({ type: "CANCEL_PROVIDER_SUBSCRIPTION", provider, providerSubscriptionId: orphanSubscriptionId });
+  }
   const wasPaid = isPaidStatus(previousStatus);
   if (nowPaid && !wasPaid) effects.push({ type: "SCHEDULE_INVOICE", paymentId: payment.id });
   if (isReversedStatus(status) && !isReversedStatus(previousStatus) && (wasPaid || previousPaidAt)) {

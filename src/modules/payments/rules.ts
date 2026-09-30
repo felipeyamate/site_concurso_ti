@@ -149,14 +149,24 @@ const STATUS_PROGRESS: Record<PaymentStatus, number> = {
  * ordem do tempo. No EMPATE (mesmo segundo), vale o status mais "adiantado" na vida da cobrança:
  * "estornada" e "estorno em andamento" no mesmo segundo → fica "estornada", em qualquer ordem
  * de chegada. Sem horário (ex.: conferência pelo painel), nunca é considerado atrasado.
+ *
+ * Exceção: com a cobrança em "estorno em andamento", a RESPOSTA do provedor ao estorno (estornada,
+ * contestada ou estorno negado) sempre vale. O pedido de estorno feito pelo site é carimbado com
+ * o NOSSO relógio, e o aviso do provedor com o dele: uma diferença de segundos entre os dois não
+ * pode descartar a resposta (o aluno ficaria sem acesso com o estorno negado, ou o pedido nunca
+ * ficaria "reembolsado").
  */
 export function isOutdatedChargeUpdate(input: {
   incomingAt: string | null;
   incomingStatus: PaymentStatus;
+  incomingIsRefundDenial: boolean;
   lastAppliedAt: string | null;
   currentStatus: PaymentStatus;
 }): boolean {
   if (!input.incomingAt || !input.lastAppliedAt) return false;
+  const answersRefundRequest =
+    input.incomingStatus === "REFUNDED" || input.incomingStatus === "CHARGEBACK" || input.incomingIsRefundDenial;
+  if (input.currentStatus === "REFUND_REQUESTED" && answersRefundRequest) return false;
   if (input.incomingAt !== input.lastAppliedAt) return input.incomingAt < input.lastAppliedAt;
   return STATUS_PROGRESS[input.incomingStatus] < STATUS_PROGRESS[input.currentStatus];
 }

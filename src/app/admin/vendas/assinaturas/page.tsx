@@ -34,16 +34,20 @@ export default async function AdminSubscriptionsPage({ searchParams }: PageProps
   const search = firstParam(params.busca).slice(0, 100);
   const statusParam = firstParam(params.situacao);
   const status = STATUSES.includes(statusParam as SubscriptionStatus) ? (statusParam as SubscriptionStatus) : null;
+  // `?estorno=manual`: vem do aviso da visão geral (estornos de boleto a fazer no Asaas).
+  const manualRefundPending = firstParam(params.estorno) === "manual";
   const { subscriptions, total, page, pageCount } = await listSubscriptionsForAdmin({
     status,
     search,
     page: pageParam(params.pagina),
+    manualRefundPending,
   });
 
   const hrefFor = (target: number) => {
     const query = new URLSearchParams();
     if (search) query.set("busca", search);
     if (status) query.set("situacao", status);
+    if (manualRefundPending) query.set("estorno", "manual");
     query.set("pagina", String(target));
     return `/admin/vendas/assinaturas?${query.toString()}`;
   };
@@ -52,7 +56,9 @@ export default async function AdminSubscriptionsPage({ searchParams }: PageProps
     <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Assinaturas</h1>
-        <p className="text-muted-foreground text-sm">{total} assinatura(s).</p>
+        <p className="text-muted-foreground text-sm">
+          {total} assinatura(s){manualRefundPending ? " com estorno de boleto pendente (faça no painel do Asaas)" : ""}.
+        </p>
       </div>
 
       <form action="/admin/vendas/assinaturas" className="flex flex-wrap gap-2" role="search">
@@ -71,6 +77,7 @@ export default async function AdminSubscriptionsPage({ searchParams }: PageProps
             </option>
           ))}
         </NativeSelect>
+        {manualRefundPending ? <input type="hidden" name="estorno" value="manual" /> : null}
         <Button type="submit" variant="outline">
           Filtrar
         </Button>

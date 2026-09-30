@@ -1,5 +1,6 @@
 /**
- * effects.server.ts — O que acontece DEPOIS que um pagamento muda de situação: e-mails e notas.
+ * effects.server.ts — O que acontece DEPOIS que um pagamento muda de situação: e-mails, notas e
+ * o cancelamento de uma assinatura "órfã" no provedor.
  *
  * Quem chama: o processamento das cobranças (`charges.server.ts`) e os reembolsos, sempre DEPOIS
  * de gravar no banco (fora da transação): um e-mail que falha não pode desfazer um pagamento.
@@ -9,19 +10,23 @@
  */
 import "server-only";
 
+import type { PaymentProviderKind } from "@/generated/prisma/enums";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import { sendEmail } from "@/modules/email/send-email";
 import { purchaseConfirmedTemplate, refundRequestedTemplate } from "@/modules/email/templates";
 
 import { cancelFiscalInvoice, scheduleFiscalInvoice } from "./fiscal.server";
+import { getProviderForRecord } from "./provider/provider.server";
 
 export type PaymentEffect =
   | { type: "ORDER_PAID"; orderId: string }
   | { type: "SUBSCRIPTION_STARTED"; subscriptionId: string }
   | { type: "REFUND_REQUESTED"; userId: string; itemTitle: string; manualRefund: boolean }
   | { type: "SCHEDULE_INVOICE"; paymentId: string }
-  | { type: "CANCEL_INVOICE"; paymentId: string };
+  | { type: "CANCEL_INVOICE"; paymentId: string }
+  // Assinatura que existe no provedor, mas cuja criação falhou aqui (ver `charges.server.ts`).
+  | { type: "CANCEL_PROVIDER_SUBSCRIPTION"; provider: PaymentProviderKind; providerSubscriptionId: string };
 
 function siteUrl(path: string): string {
   return new URL(path, env.BETTER_AUTH_URL).toString();
@@ -77,6 +82,13 @@ async function runEffect(effect: PaymentEffect): Promise<void> {
     case "CANCEL_INVOICE":
       await cancelFiscalInvoice(effect.paymentId);
       return;
+    case "CANCEL_PROVIDER_SUBSCRIPTION": {
+      const provider = getProviderForRecord(effect.provider);
+      if (!provider) throw new Error(`Provedor ${effect.provider} indisponível para cancelar ${effect.providerSubscriptionId}.`);
+      await provider.cancelSubscription(effect.providerSubscriptionId);
+      console.warn(`[vendas] Assinatura órfã ${effect.providerSubscriptionId} cancelada no provedor.`);
+      return;
+    }
   }
 }
 

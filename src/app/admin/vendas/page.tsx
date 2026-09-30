@@ -51,6 +51,10 @@ export default async function SalesOverviewPage() {
       href: "/admin/vendas/pedidos?situacao=REFUND_REQUESTED",
       text: `${overview.manualRefunds} reembolso(s) de boleto para fazer no painel do Asaas`,
     },
+    overview.manualSubscriptionRefunds > 0 && {
+      href: "/admin/vendas/assinaturas?estorno=manual",
+      text: `${overview.manualSubscriptionRefunds} assinatura(s) com estorno de boleto para fazer no painel do Asaas`,
+    },
     overview.invoiceProblems > 0 && { href: "/admin/vendas/pedidos", text: `${overview.invoiceProblems} nota(s) fiscal(is) com problema` },
   ].filter((item): item is { href: string; text: string } => Boolean(item));
 

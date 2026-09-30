@@ -94,6 +94,10 @@ export const asaasPaymentSchema = z.object({
   status: optionalText,
   value: z.number().nullish(),
   dueDate: optionalText,
+  // Datas do pagamento: aprovação do cartão, dia em que o cliente pagou, dia do recebimento.
+  confirmedDate: optionalText,
+  clientPaymentDate: optionalText,
+  paymentDate: optionalText,
   invoiceUrl: optionalText,
   bankSlipUrl: optionalText,
   deleted: z.boolean().nullish(),
@@ -112,7 +116,10 @@ export const asaasInvoiceSchema = z.object({
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Cobrança do Asaas → a nossa `ProviderCharge`. */
+const dateOnlyOrNull = (value: string | null | undefined): DateOnly | null =>
+  value && DATE_ONLY.test(value) ? (value as DateOnly) : null;
+
+/** Cobrança do Asaas → a nossa `ProviderCharge`. `event` = o tipo do aviso, quando veio de um. */
 export function toProviderCharge(payment: AsaasPayment, event?: string): ProviderCharge {
   return {
     paymentId: payment.id,
@@ -123,10 +130,14 @@ export function toProviderCharge(payment: AsaasPayment, event?: string): Provide
     status: mapAsaasPaymentStatus({ status: payment.status, deleted: payment.deleted, event }),
     providerStatus: payment.deleted ? "DELETED" : (payment.status ?? "UNKNOWN"),
     valueCents: payment.value != null ? reaisToCents(payment.value) : 0,
-    dueDate: payment.dueDate && DATE_ONLY.test(payment.dueDate) ? (payment.dueDate as DateOnly) : null,
+    dueDate: dateOnlyOrNull(payment.dueDate),
     installmentNumber: payment.installmentNumber ?? null,
     invoiceUrl: payment.invoiceUrl ?? null,
     bankSlipUrl: payment.bankSlipUrl ?? null,
+    // Cartão: o dia da aprovação; Pix/boleto: o dia em que o cliente pagou (ou o do recebimento).
+    paidDate:
+      dateOnlyOrNull(payment.confirmedDate) ?? dateOnlyOrNull(payment.clientPaymentDate) ?? dateOnlyOrNull(payment.paymentDate),
+    refundDenied: event === "PAYMENT_REFUND_DENIED",
   };
 }
 

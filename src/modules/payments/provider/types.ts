@@ -50,6 +50,12 @@ export type ProviderCharge = {
   installmentNumber: number | null;
   invoiceUrl: string | null;
   bankSlipUrl: string | null;
+  // Dia em que foi paga, segundo o provedor (aprovação do cartão; dia do Pix/boleto). Usado quando
+  // descobrimos o pagamento SEM aviso (ex.: "Conferir no Asaas"), para não usar a hora do clique.
+  paidDate: DateOnly | null;
+  // O provedor NEGOU um estorno pedido (a cobrança voltou a paga). É a resposta ao NOSSO pedido
+  // de estorno, então vale mesmo que o horário do aviso empate com o do pedido (relógios diferentes).
+  refundDenied: boolean;
 };
 
 export type ProviderSubscriptionInput = {
@@ -117,8 +123,11 @@ export interface PaymentProvider {
   /** Agenda a nota fiscal (NFS-e) de uma cobrança paga. */
   scheduleInvoice(input: ProviderInvoiceInput): Promise<ProviderInvoice>;
 
-  /** Pede o cancelamento de uma nota fiscal (ex.: depois de um reembolso). */
-  cancelInvoice(invoiceId: string): Promise<void>;
+  /**
+   * Pede o cancelamento de uma nota fiscal (ex.: depois de um reembolso). Devolve a situação: já
+   * cancelada, ou "cancelamento em andamento" (a prefeitura responde depois, por aviso).
+   */
+  cancelInvoice(invoiceId: string): Promise<{ status: "CANCELED" | "PROCESSING_CANCELLATION" }>;
 }
 
 /** Erro "esperado" do provedor, com uma mensagem que pode ir para a tela. */
@@ -130,4 +139,9 @@ export class PaymentProviderError extends Error {
     this.name = "PaymentProviderError";
     this.status = status;
   }
+}
+
+/** Texto de um erro do provedor para mostrar ao usuário (erros inesperados viram uma frase genérica). */
+export function providerErrorMessage(error: unknown): string {
+  return error instanceof PaymentProviderError ? error.message : "o provedor de pagamento não respondeu.";
 }

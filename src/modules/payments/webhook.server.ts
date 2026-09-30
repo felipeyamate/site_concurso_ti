@@ -86,8 +86,13 @@ async function applyWebhook(
       });
       return { note: result.note, effects: result.effects };
     }
-    case "invoice":
-      return { note: await applyInvoiceUpdate(webhook.invoice), effects: [] };
+    case "invoice": {
+      const result = await applyInvoiceUpdate(webhook.invoice);
+      const effects: PaymentEffect[] = result.reissueForPaymentId
+        ? [{ type: "SCHEDULE_INVOICE", paymentId: result.reissueForPaymentId }]
+        : [];
+      return { note: result.note, effects };
+    }
     case "subscription": {
       if (!webhook.subscription.ended) return { note: "Assinatura atualizada no provedor.", effects: [] };
       // Removida/inativada no provedor (ex.: pelo painel do Asaas): não gera mais cobranças.
@@ -97,10 +102,16 @@ async function applyWebhook(
       const canceled = await prisma.$transaction(async (tx) => {
         const subscription = await tx.subscription.findUnique({
           where: { providerSubscriptionId },
-          select: { id: true, userId: true, provider: true, status: true },
+          select: { id: true, userId: true, provider: true },
         });
-        if (!subscription || subscription.provider !== provider || subscription.status === "CANCELED") return false;
-        await tx.subscription.update({ where: { id: subscription.id }, data: { status: "CANCELED", canceledAt: now } });
+        if (!subscription || subscription.provider !== provider) return false;
+        // "Confere e grava" num comando só (atômico): se um cancelamento pelo site estiver
+        // acontecendo ao mesmo tempo, só um dos dois marca a assinatura; o outro não faz nada.
+        const { count } = await tx.subscription.updateMany({
+          where: { id: subscription.id, status: { not: "CANCELED" } },
+          data: { status: "CANCELED", canceledAt: now },
+        });
+        if (count === 0) return false;
         await syncPaidAccess(tx, subscription.userId, now);
         return true;
       });

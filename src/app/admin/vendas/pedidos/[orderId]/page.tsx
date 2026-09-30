@@ -50,7 +50,7 @@ export default async function AdminOrderPage({ params }: PageProps<"/admin/venda
         </p>
       </div>
 
-      {order.status === "REFUND_REQUESTED" && order.method === "BOLETO" ? (
+      {order.payments.some((payment) => payment.manualRefundRequestedAt) ? (
         <Alert>
           <AlertTitle>Estorno de boleto pendente</AlertTitle>
           <AlertDescription>

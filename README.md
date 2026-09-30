@@ -211,6 +211,7 @@ CPFs de teste (válidos na conta, não pertencem a ninguém): `529.982.247-25`, 
 | 17 | Abra `/admin/vendas` e `/area-do-aluno/pagamentos/<id de outra pessoa>` com um aluno | "Página não encontrada" nos dois |
 | 18 | Compre com **Boleto**, pague no simulador e peça o reembolso em Minhas compras | "Reembolso em andamento" e a aula bloqueada. No painel, o pedido avisa "Estorno de boleto pendente" |
 | 19 | No simulador desse boleto, clique **"Pagar (aprovar)" de novo** (é o que o Asaas mostraria até alguém fazer o estorno no painel dele) | A aula **continua bloqueada** e o aviso fica registrado como "estorno manual pendente". Depois, "Concluir estorno" → pedido "Reembolsado" |
+| 20 | Assine com **Boleto**, pague no simulador e use "Cancelar e pedir reembolso" | Em `/admin/vendas`: "1 assinatura(s) com estorno de boleto para fazer no painel do Asaas". Na página da assinatura: aviso "Estorno de boleto pendente" e sem o botão "Cancelar e estornar" |
 
 ### Configurando o Asaas
 

@@ -23,7 +23,7 @@ import {
   type ProviderSubscriptionInput,
 } from "../types";
 import { createAsaasClient, type AsaasClient, type AsaasEnvironment } from "./client";
-import { asaasInvoiceSchema, asaasPaymentSchema, toProviderCharge, toProviderInvoice } from "./mapping";
+import { asaasInvoiceSchema, asaasPaymentSchema, mapAsaasInvoiceStatus, toProviderCharge, toProviderInvoice } from "./mapping";
 
 const customerResponseSchema = z.object({ id: z.string().min(1) });
 const subscriptionResponseSchema = z.object({ id: z.string().min(1) });
@@ -120,10 +120,18 @@ export function createAsaasProvider(options: {
 
       // A 1ª cobrança costuma ser gerada na hora; se ainda não estiver lá, ela chega por aviso
       // (PAYMENT_CREATED) e a página de pagamento mostra "gerando a cobrança...".
-      const list = await client.request("GET", `/subscriptions/${encodeURIComponent(subscriptionId)}/payments`);
-      const payments = parseResponse(paymentListSchema, list, "buscar a 1ª cobrança da assinatura").data;
-      const first = payments.find((payment) => !payment.deleted);
-      return { subscriptionId, firstCharge: first ? toProviderCharge(first) : null };
+      // Daqui em diante a assinatura JÁ EXISTE no Asaas: uma falha ao buscar a cobrança não pode
+      // virar "erro ao criar" (o site marcaria a assinatura como cancelada e ela continuaria
+      // cobrando lá). Sem a cobrança agora, ela chega pelo aviso.
+      try {
+        const list = await client.request("GET", `/subscriptions/${encodeURIComponent(subscriptionId)}/payments`);
+        const payments = parseResponse(paymentListSchema, list, "buscar a 1ª cobrança da assinatura").data;
+        const first = payments.find((payment) => !payment.deleted);
+        return { subscriptionId, firstCharge: first ? toProviderCharge(first) : null };
+      } catch (error) {
+        console.error(`[asaas] Assinatura ${subscriptionId} criada, mas a 1ª cobrança não veio (chega pelo aviso):`, error);
+        return { subscriptionId, firstCharge: null };
+      }
     },
 
     async cancelSubscription(subscriptionId) {
@@ -150,7 +158,12 @@ export function createAsaasProvider(options: {
     },
 
     async cancelInvoice(invoiceId) {
-      await client.request("POST", `/invoices/${encodeURIComponent(invoiceId)}/cancel`, {});
+      const data = await client.request("POST", `/invoices/${encodeURIComponent(invoiceId)}/cancel`, {});
+      // O Asaas responde com a nota. Só "cancelada" é final; qualquer outra coisa (ou uma resposta
+      // inesperada) = cancelamento em andamento — a resposta da prefeitura chega por aviso.
+      const parsed = asaasInvoiceSchema.safeParse(data);
+      const canceled = parsed.success && mapAsaasInvoiceStatus(parsed.data.status) === "CANCELED";
+      return { status: canceled ? "CANCELED" : "PROCESSING_CANCELLATION" };
     },
   };
 }

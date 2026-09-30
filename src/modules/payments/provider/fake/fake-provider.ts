@@ -52,6 +52,8 @@ export function createFakeProvider(): PaymentProvider {
         installmentNumber: installments > 1 ? 1 : null,
         invoiceUrl: fakePaymentPageUrl(paymentId),
         bankSlipUrl: input.method === "BOLETO" ? fakePaymentPageUrl(paymentId) : null,
+        paidDate: null,
+        refundDenied: false,
       };
     },
 
@@ -89,6 +91,8 @@ export function createFakeProvider(): PaymentProvider {
           installmentNumber: null,
           invoiceUrl: fakePaymentPageUrl(paymentId),
           bankSlipUrl: input.method === "BOLETO" ? fakePaymentPageUrl(paymentId) : null,
+          paidDate: null,
+          refundDenied: false,
         },
       };
     },
@@ -110,7 +114,8 @@ export function createFakeProvider(): PaymentProvider {
     },
 
     async cancelInvoice() {
-      // Nada a fazer no modo simulado.
+      // No modo simulado, o cancelamento é imediato.
+      return { status: "CANCELED" as const };
     },
   };
 }

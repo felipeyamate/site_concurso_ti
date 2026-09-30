@@ -8,10 +8,10 @@
  * cartão"; o acesso vem quando o provedor AVISA que foi pago (webhook).
  *
  * Passos de uma compra:
- *  1. Confere o produto (ativo, com cursos) e as parcelas.
+ *  1. Confere o produto (ativo, com cursos), as parcelas e o limite de pedidos por dia.
  *  2. Garante o cliente no provedor (CPF fica guardado depois da 1ª compra).
- *  3. Com a trava do aluno: confere o limite de pedidos por dia e cria o PEDIDO no nosso banco
- *     (com a "foto" do produto) — o ID dele vai na cobrança.
+ *  3. Com a trava do aluno: confere o limite de novo e cria o PEDIDO no nosso banco (com a
+ *     "foto" do produto) — o ID dele vai na cobrança.
  *  4. Cria a COBRANÇA no provedor. Se falhar, o pedido fica "cancelado" com o motivo.
  *  5. Registra a cobrança no nosso banco (modo "initial" — se um aviso chegou antes, ele vale).
  */
@@ -21,7 +21,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { PaymentMethod } from "@/generated/prisma/enums";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
-import { advisoryLock } from "@/lib/db-locks";
+import { withAdvisoryLock } from "@/lib/db-locks";
 import { UserFacingError } from "@/lib/form-state";
 
 import { applyChargeUpdate } from "./charges.server";
@@ -29,7 +29,7 @@ import { formatCpf, isValidCpf, maskCpf, normalizeCpf } from "./cpf";
 import { runEffects } from "./effects.server";
 import { installmentOptions } from "./money";
 import { getPaymentProvider } from "./provider/provider.server";
-import { PaymentProviderError, type PaymentProvider } from "./provider/types";
+import { providerErrorMessage, type PaymentProvider } from "./provider/types";
 import { MAX_NEW_ORDERS_PER_DAY, computeDueDate } from "./rules";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -49,11 +49,6 @@ function successUrlFor(path: string): string | null {
   return url.protocol === "https:" && !isLocal ? url.toString() : null;
 }
 
-function providerMessage(error: unknown): string {
-  return error instanceof PaymentProviderError ? error.message : "o provedor de pagamento não respondeu.";
-}
-
-/** Limite de pedidos/assinaturas novos por aluno em 24 h. */
 type Tx = Prisma.TransactionClient;
 
 /**
@@ -61,22 +56,35 @@ type Tx = Prisma.TransactionClient;
  * "confere e cria" no checkout passa por aqui (regra do CLAUDE.md sobre travas).
  */
 async function withCheckoutLock<T>(userId: string, work: (tx: Tx) => Promise<T>): Promise<T> {
-  return prisma.$transaction(
-    async (tx) => {
-      await advisoryLock(tx, `checkout:${userId}`);
-      return work(tx);
-    },
-    // Pode incluir uma chamada ao provedor (até 15 s) e esperar a trava de outro clique.
-    { maxWait: 10_000, timeout: 40_000 },
-  );
+  // Pode incluir uma chamada ao provedor (até 15 s) e esperar a trava de outro clique.
+  return withAdvisoryLock(prisma, `checkout:${userId}`, work, { maxWait: 10_000, timeout: 40_000 });
 }
 
+/** Limite de pedidos/assinaturas novos por aluno em 24 h. */
 async function checkDailyLimit(tx: Tx, userId: string, now: Date): Promise<void> {
   const since = new Date(now.getTime() - DAY_IN_MS);
   const orders = await tx.order.count({ where: { userId, createdAt: { gte: since } } });
   const subscriptions = await tx.subscription.count({ where: { userId, createdAt: { gte: since } } });
   if (orders + subscriptions >= MAX_NEW_ORDERS_PER_DAY) {
     throw new UserFacingError("Você já iniciou muitas compras hoje. Pague uma das pendentes ou tente amanhã.");
+  }
+}
+
+/**
+ * Uma assinatura por vez: a que está valendo (ou esperando o 1º pagamento) precisa ser usada ou
+ * cancelada antes (em "Minhas compras").
+ */
+async function checkNoOpenSubscription(tx: Tx, userId: string): Promise<void> {
+  const current = await tx.subscription.findFirst({
+    where: { userId, status: { in: ["PENDING", "ACTIVE"] } },
+    select: { status: true },
+  });
+  if (current) {
+    throw new UserFacingError(
+      current.status === "ACTIVE"
+        ? "Você já tem uma assinatura ativa. Veja em \"Minhas compras\"."
+        : "Você já tem uma assinatura esperando o 1º pagamento. Pague ou cancele em \"Minhas compras\".",
+    );
   }
 }
 
@@ -115,7 +123,7 @@ async function ensureCustomer(provider: PaymentProvider, buyer: Buyer, billing: 
         phone: billing.phone,
       }));
     } catch (error) {
-      throw new UserFacingError(`Não foi possível cadastrar seus dados de pagamento: ${providerMessage(error)}`);
+      throw new UserFacingError(`Não foi possível cadastrar seus dados de pagamento: ${providerErrorMessage(error)}`);
     }
     await tx.billingProfile.upsert({
       where: { userId: buyer.id },
@@ -157,6 +165,9 @@ export async function createOrder(params: {
   if (!allowed.includes(installments)) {
     throw new UserFacingError("Número de parcelas indisponível para este produto.", { field: "installments" });
   }
+  // Confere o limite diário ANTES de cadastrar o aluno no provedor (uma compra recusada não deve
+  // cadastrar nem travar o CPF). É conferido de novo, com a trava, na hora de criar o pedido.
+  await withCheckoutLock(params.buyer.id, (tx) => checkDailyLimit(tx, params.buyer.id, now));
 
   // 2. Cliente no provedor.
   const customerId = await ensureCustomer(provider, params.buyer, params.billing);
@@ -198,9 +209,9 @@ export async function createOrder(params: {
     console.error(`[checkout] Falha ao criar a cobrança do pedido ${order.id}:`, error);
     await prisma.order.update({
       where: { id: order.id },
-      data: { status: "CANCELED", failureReason: providerMessage(error).slice(0, 500) },
+      data: { status: "CANCELED", failureReason: providerErrorMessage(error).slice(0, 500) },
     });
-    throw new UserFacingError(`Não foi possível gerar a cobrança: ${providerMessage(error)}`);
+    throw new UserFacingError(`Não foi possível gerar a cobrança: ${providerErrorMessage(error)}`);
   }
 
   // 5. Registra a cobrança (e liga ao pedido).
@@ -223,24 +234,19 @@ export async function startSubscription(params: {
   const plan = await prisma.plan.findUnique({ where: { slug: params.planSlug } });
   if (!plan || !plan.isActive) throw new UserFacingError("Este plano não está disponível.");
 
+  // Confere ANTES de cadastrar o aluno no provedor (um pedido recusado não deve cadastrar nem
+  // travar o CPF) e de novo, com a trava, na hora de criar.
+  await withCheckoutLock(params.buyer.id, async (tx) => {
+    await checkNoOpenSubscription(tx, params.buyer.id);
+    await checkDailyLimit(tx, params.buyer.id, now);
+  });
+
   const customerId = await ensureCustomer(provider, params.buyer, params.billing);
 
   // Confere e cria com a trava do aluno: dois cliques ao mesmo tempo não criam duas assinaturas
   // (seriam duas cobranças recorrentes no cartão/boleto do aluno).
   const subscription = await withCheckoutLock(params.buyer.id, async (tx) => {
-    // Uma assinatura por vez: a que está valendo (ou esperando o 1º pagamento) precisa ser usada
-    // ou cancelada antes (em "Minhas compras").
-    const current = await tx.subscription.findFirst({
-      where: { userId: params.buyer.id, status: { in: ["PENDING", "ACTIVE"] } },
-      select: { status: true },
-    });
-    if (current) {
-      throw new UserFacingError(
-        current.status === "ACTIVE"
-          ? "Você já tem uma assinatura ativa. Veja em \"Minhas compras\"."
-          : "Você já tem uma assinatura esperando o 1º pagamento. Pague ou cancele em \"Minhas compras\".",
-      );
-    }
+    await checkNoOpenSubscription(tx, params.buyer.id);
     await checkDailyLimit(tx, params.buyer.id, now);
     return tx.subscription.create({
       data: {
@@ -273,9 +279,9 @@ export async function startSubscription(params: {
     console.error(`[checkout] Falha ao criar a assinatura ${subscription.id}:`, error);
     await prisma.subscription.update({
       where: { id: subscription.id },
-      data: { status: "CANCELED", canceledAt: now, failureReason: providerMessage(error).slice(0, 500) },
+      data: { status: "CANCELED", canceledAt: now, failureReason: providerErrorMessage(error).slice(0, 500) },
     });
-    throw new UserFacingError(`Não foi possível criar a assinatura: ${providerMessage(error)}`);
+    throw new UserFacingError(`Não foi possível criar a assinatura: ${providerErrorMessage(error)}`);
   }
 
   await prisma.subscription.update({

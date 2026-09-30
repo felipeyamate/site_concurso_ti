@@ -11,7 +11,9 @@
  *    ainda não foi, se a anterior deu erro na prefeitura ou se a anterior foi cancelada.
  *  - Reembolso/contestação → pede o cancelamento da nota.
  *  - Estorno NEGADO (ou contestação revertida): a cobrança volta a "paga" e a nota cancelada é
- *    substituída por uma nova (a venda valeu, então precisa de nota).
+ *    substituída por uma nova (a venda valeu, então precisa de nota). Se o cancelamento da antiga
+ *    ainda está em andamento na prefeitura, espera a resposta: cancelada → pede a nova; cancelamento
+ *    recusado → a antiga continua valendo (nunca duas notas válidas).
  */
 import "server-only";
 
@@ -57,8 +59,9 @@ function errorText(error: unknown): string {
  * propósito, para que dois pedidos simultâneos nunca gerem duas notas):
  *  1. Confere se a NFS-e está ligada e se a cobrança está paga.
  *  2. Se já existe nota valendo (agendada, emitida ou com cancelamento recusado), não faz nada.
- *     Nota com erro, cancelada ou em cancelamento → pede uma nova (a linha passa a apontar para ela;
- *     a antiga continua registrada no provedor, ligada à mesma cobrança).
+ *     Cancelamento em andamento → também não (a resposta da prefeitura decide; ver
+ *     `applyInvoiceUpdate`). Nota com erro ou cancelada → pede uma nova (a linha passa a apontar
+ *     para ela; a antiga continua registrada no provedor, ligada à mesma cobrança).
  *  3. Pede ao provedor e guarda o resultado (ou o erro, para tentar de novo pelo painel).
  */
 // Nota que ainda vale (ou vai valer): com ela, não se pede outra para a mesma cobrança.
@@ -87,6 +90,7 @@ export async function scheduleFiscalInvoice(paymentId: string, now: Date = new D
       if (!payment || !isPaidStatus(payment.status)) return;
       const existing = payment.fiscalInvoice;
       if (existing?.providerInvoiceId && VALID_INVOICE_STATUSES.has(existing.status)) return;
+      if (existing?.providerInvoiceId && existing.status === "PROCESSING_CANCELLATION") return;
 
       // Recomeça a linha do zero (inclusive tirando o ID da nota antiga: um aviso atrasado dela,
       // como "cancelada", não pode mais mexer nesta linha).
@@ -160,8 +164,8 @@ export async function cancelFiscalInvoice(paymentId: string): Promise<void> {
       const provider = getProviderForRecord(invoice.payment.provider);
       if (!provider) return;
       try {
-        await provider.cancelInvoice(invoice.providerInvoiceId);
-        await tx.fiscalInvoice.update({ where: { paymentId }, data: { status: "PROCESSING_CANCELLATION", error: null } });
+        const { status } = await provider.cancelInvoice(invoice.providerInvoiceId);
+        await tx.fiscalInvoice.update({ where: { paymentId }, data: { status, error: null } });
       } catch (error) {
         console.error(`[nfs-e] Falha ao cancelar a nota da cobrança ${paymentId}:`, error);
         await tx.fiscalInvoice.update({ where: { paymentId }, data: { error: errorText(error) } });
@@ -171,13 +175,26 @@ export async function cancelFiscalInvoice(paymentId: string): Promise<void> {
   );
 }
 
-/** Aviso INVOICE_* do provedor: atualiza a nota (emitida, cancelada, erro...). */
-export async function applyInvoiceUpdate(invoice: ProviderInvoice): Promise<string> {
-  const { count } = await prisma.fiscalInvoice.updateMany({
-    where: { providerInvoiceId: invoice.invoiceId },
-    data: invoiceData(invoice),
+/**
+ * Aviso INVOICE_* do provedor: atualiza a nota (emitida, cancelada, erro...).
+ * Devolve `reissueForPaymentId` quando a nota acabou de ser CANCELADA mas a cobrança está paga
+ * (estorno negado enquanto o cancelamento corria): quem chama pede a nota nova.
+ */
+export async function applyInvoiceUpdate(
+  invoice: ProviderInvoice,
+): Promise<{ note: string; reissueForPaymentId: string | null }> {
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.fiscalInvoice.findUnique({
+      where: { providerInvoiceId: invoice.invoiceId },
+      select: { paymentId: true, payment: { select: { status: true } } },
+    });
+    if (!row) return { note: `Nota fiscal ${invoice.invoiceId} não é do site: ignorada.`, reissueForPaymentId: null };
+    await advisoryLock(tx, `fiscal:${row.paymentId}`);
+    await tx.fiscalInvoice.updateMany({ where: { providerInvoiceId: invoice.invoiceId }, data: invoiceData(invoice) });
+    const reissue = invoice.status === "CANCELED" && isPaidStatus(row.payment.status);
+    return {
+      note: `Nota fiscal ${invoice.invoiceId}: ${invoice.status}.${reissue ? " A cobrança está paga: uma nota nova será pedida." : ""}`,
+      reissueForPaymentId: reissue ? row.paymentId : null,
+    };
   });
-  return count > 0
-    ? `Nota fiscal ${invoice.invoiceId}: ${invoice.status}.`
-    : `Nota fiscal ${invoice.invoiceId} não é do site: ignorada.`;
 }

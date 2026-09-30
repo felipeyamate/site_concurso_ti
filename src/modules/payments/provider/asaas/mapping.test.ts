@@ -56,6 +56,8 @@ describe("parseAsaasWebhook", () => {
       billingType: "PIX",
       status: "RECEIVED",
       dueDate: "2026-09-30",
+      paymentDate: "2026-09-29",
+      clientPaymentDate: "2026-09-29",
       externalReference: "pedido-123",
       invoiceUrl: "https://sandbox.asaas.com/i/080225913252",
       deleted: false,
@@ -84,9 +86,28 @@ describe("parseAsaasWebhook", () => {
           installmentNumber: null,
           invoiceUrl: "https://sandbox.asaas.com/i/080225913252",
           bankSlipUrl: null,
+          paidDate: "2026-09-29",
+          refundDenied: false,
         },
       },
     });
+  });
+
+  it("dia do pagamento (cartão: aprovação; Pix/boleto: dia em que pagou) e o aviso de estorno negado", () => {
+    const card = parseAsaasWebhook({
+      id: "evt_c",
+      event: "PAYMENT_REFUND_DENIED",
+      payment: { id: "pay_c", status: "CONFIRMED", confirmedDate: "2026-10-01", paymentDate: "2026-10-31" },
+    });
+    expect(card).toMatchObject({ ok: true, webhook: { charge: { paidDate: "2026-10-01", refundDenied: true } } });
+    const pix = parseAsaasWebhook({
+      id: "evt_p",
+      event: "PAYMENT_RECEIVED",
+      payment: { id: "pay_p", status: "RECEIVED", clientPaymentDate: "2026-10-02", paymentDate: "2026-10-03" },
+    });
+    expect(pix).toMatchObject({ ok: true, webhook: { charge: { paidDate: "2026-10-02", refundDenied: false } } });
+    const pending = parseAsaasWebhook({ id: "evt_n", event: "PAYMENT_CREATED", payment: { id: "pay_n", status: "PENDING" } });
+    expect(pending).toMatchObject({ ok: true, webhook: { charge: { paidDate: null, refundDenied: false } } });
   });
 
   it("aviso de cobrança da assinatura traz o ID da assinatura", () => {

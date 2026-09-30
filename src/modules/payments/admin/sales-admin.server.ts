@@ -268,8 +268,18 @@ export async function getOrderForAdmin(orderId: string) {
   });
 }
 
-export async function listSubscriptionsForAdmin(params: { status: SubscriptionStatus | null; search: string; page: number }) {
-  const where = { ...(params.status ? { status: params.status } : {}), ...userSearch(params.search) };
+export async function listSubscriptionsForAdmin(params: {
+  status: SubscriptionStatus | null;
+  search: string;
+  page: number;
+  // Só as que têm estorno de boleto pendente (a fazer à mão no painel do Asaas).
+  manualRefundPending?: boolean;
+}) {
+  const where = {
+    ...(params.status ? { status: params.status } : {}),
+    ...(params.manualRefundPending ? { payments: { some: { manualRefundRequestedAt: { not: null } } } } : {}),
+    ...userSearch(params.search),
+  };
   const page = Math.max(1, params.page);
   const [subscriptions, total] = await Promise.all([
     prisma.subscription.findMany({
@@ -335,7 +345,7 @@ export async function listWebhookEvents(params: { onlyErrors: boolean; page: num
 /** Números da visão geral de vendas (últimos 30 dias) e o que precisa de atenção. */
 export async function getSalesOverview(now: Date = new Date()) {
   const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const [paidOrders, revenue, activeSubscriptions, webhookErrors, manualRefunds, invoiceProblems] = await Promise.all([
+  const [paidOrders, revenue, activeSubscriptions, webhookErrors, manualRefunds, manualSubscriptionRefunds, invoiceProblems] = await Promise.all([
     prisma.order.count({ where: { status: "PAID", paidAt: { gte: since } } }),
     prisma.payment.aggregate({
       where: { status: { in: ["CONFIRMED", "RECEIVED"] }, paidAt: { gte: since } },
@@ -344,7 +354,9 @@ export async function getSalesOverview(now: Date = new Date()) {
     prisma.subscription.count({ where: { status: "ACTIVE" } }),
     prisma.webhookEvent.count({ where: { error: { not: null } } }),
     // Boletos com reembolso pedido e ainda não estornados: o estorno é manual no painel do Asaas.
-    prisma.order.count({ where: { method: "BOLETO", status: "REFUND_REQUESTED" } }),
+    // (A marca some sozinha quando o Asaas mostra o estorno.) Pedidos e assinaturas, separados.
+    prisma.order.count({ where: { payments: { some: { manualRefundRequestedAt: { not: null } } } } }),
+    prisma.subscription.count({ where: { payments: { some: { manualRefundRequestedAt: { not: null } } } } }),
     prisma.fiscalInvoice.count({ where: { OR: [{ status: "ERROR" }, { status: "PENDING", error: { not: null } }] } }),
   ]);
   return {
@@ -353,6 +365,7 @@ export async function getSalesOverview(now: Date = new Date()) {
     activeSubscriptions,
     webhookErrors,
     manualRefunds,
+    manualSubscriptionRefunds,
     invoiceProblems,
   };
 }

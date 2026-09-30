@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import type { PaymentStatus } from "@/generated/prisma/enums";
+
 import {
   checkRefundEligibility,
   computeDueDate,
@@ -105,43 +107,54 @@ describe("ciclos da assinatura", () => {
 });
 
 describe("isOutdatedChargeUpdate (aviso fora de ordem)", () => {
+  // Um aviso comum (não é a resposta "estorno negado").
+  const update = (input: {
+    incomingAt: string | null;
+    incomingStatus: PaymentStatus;
+    lastAppliedAt: string | null;
+    currentStatus: PaymentStatus;
+    incomingIsRefundDenial?: boolean;
+  }) => isOutdatedChargeUpdate({ incomingIsRefundDenial: false, ...input });
   const base = { lastAppliedAt: "2026-10-01 10:00:00", currentStatus: "RECEIVED" as const };
 
   it("mais antigo que o último aplicado: atrasado; mais novo: vale", () => {
-    expect(isOutdatedChargeUpdate({ ...base, incomingAt: "2026-10-01 09:59:59", incomingStatus: "OVERDUE" })).toBe(true);
-    expect(isOutdatedChargeUpdate({ ...base, incomingAt: "2026-10-01 10:00:01", incomingStatus: "OVERDUE" })).toBe(false);
+    expect(update({ ...base, incomingAt: "2026-10-01 09:59:59", incomingStatus: "OVERDUE" })).toBe(true);
+    expect(update({ ...base, incomingAt: "2026-10-01 10:00:01", incomingStatus: "OVERDUE" })).toBe(false);
   });
 
   it("no mesmo segundo, vale o status mais adiantado, em qualquer ordem de chegada", () => {
     const sameSecond = "2026-10-02 08:00:00";
     // Chegou "estornada" primeiro; "estorno em andamento" do mesmo segundo não desfaz.
     expect(
-      isOutdatedChargeUpdate({
-        incomingAt: sameSecond,
-        incomingStatus: "REFUND_REQUESTED",
-        lastAppliedAt: sameSecond,
-        currentStatus: "REFUNDED",
-      }),
+      update({ incomingAt: sameSecond, incomingStatus: "REFUND_REQUESTED", lastAppliedAt: sameSecond, currentStatus: "REFUNDED" }),
     ).toBe(true);
     // Na ordem certa, "estornada" depois de "estorno em andamento" vale.
     expect(
-      isOutdatedChargeUpdate({
-        incomingAt: sameSecond,
-        incomingStatus: "REFUNDED",
-        lastAppliedAt: sameSecond,
-        currentStatus: "REFUND_REQUESTED",
-      }),
+      update({ incomingAt: sameSecond, incomingStatus: "REFUNDED", lastAppliedAt: sameSecond, currentStatus: "REFUND_REQUESTED" }),
     ).toBe(false);
     // "Vencida" no mesmo segundo de "paga" não desfaz o pagamento.
+    expect(update({ incomingAt: sameSecond, incomingStatus: "OVERDUE", lastAppliedAt: sameSecond, currentStatus: "CONFIRMED" })).toBe(
+      true,
+    );
+  });
+
+  it("a resposta do provedor a um estorno pedido pelo site vale mesmo com o relógio dele 'atrás' do nosso", () => {
+    // Pedido de estorno carimbado pelo NOSSO relógio às 10:00:05; o provedor responde com o horário dele.
+    const refundRequested = { lastAppliedAt: "2026-10-01 10:00:05", currentStatus: "REFUND_REQUESTED" as const };
+    expect(update({ ...refundRequested, incomingAt: "2026-10-01 10:00:03", incomingStatus: "REFUNDED" })).toBe(false);
+    expect(update({ ...refundRequested, incomingAt: "2026-10-01 10:00:05", incomingStatus: "CHARGEBACK" })).toBe(false);
     expect(
-      isOutdatedChargeUpdate({ incomingAt: sameSecond, incomingStatus: "OVERDUE", lastAppliedAt: sameSecond, currentStatus: "CONFIRMED" }),
-    ).toBe(true);
+      update({ ...refundRequested, incomingAt: "2026-10-01 10:00:05", incomingStatus: "RECEIVED", incomingIsRefundDenial: true }),
+    ).toBe(false);
+    // Já um "paga" comum mais antigo que o pedido continua sendo atrasado (não devolve o acesso).
+    expect(update({ ...refundRequested, incomingAt: "2026-10-01 10:00:01", incomingStatus: "RECEIVED" })).toBe(true);
   });
 
   it("sem horário (conferência pelo painel, 1º registro) nunca é atrasado", () => {
-    expect(isOutdatedChargeUpdate({ ...base, incomingAt: null, incomingStatus: "PENDING" })).toBe(false);
-    expect(
-      isOutdatedChargeUpdate({ incomingAt: "2026-10-01 10:00:00", incomingStatus: "PENDING", lastAppliedAt: null, currentStatus: "PENDING" }),
-    ).toBe(false);
+    expect(update({ ...base, incomingAt: null, incomingStatus: "PENDING" })).toBe(false);
+    expect(update({ incomingAt: "2026-10-01 10:00:00", incomingStatus: "PENDING", lastAppliedAt: null, currentStatus: "PENDING" })).toBe(
+      false,
+    );
   });
 });
+

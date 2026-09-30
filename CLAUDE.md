@@ -34,8 +34,8 @@
   Exceção: o envio de PDF (3 passos, `attachment-manager.tsx`) não usa o `useAdminForm`, mas usa `FormState` + `FormStatus`.
 - Nunca apagar histórico de aluno: curso com matrícula ou aula com progresso de ALUNO não se apaga (despublicar).
   Toda operação "confere e depois grava/apaga" trava as linhas antes de conferir (ver `lockRows` em
-  `catalog-admin.server.ts`, `lockEnrollment` em `enrollment/grant.ts`, `withLock` em `payments/refunds.server.ts` e
-  `withCheckoutLock` em `payments/checkout.server.ts`); senão, um pedido simultâneo passa no meio.
+  `catalog-admin.server.ts`, `lockEnrollment` em `enrollment/grant.ts` e `withAdvisoryLock` em `src/lib/db-locks.ts`)
+  ou faz a conferência e a gravação num comando só (`updateMany` com a condição); senão, um pedido simultâneo passa no meio.
 - Vídeo do Panda: link do player só passa por `parsePandaEmbedInput` (`src/modules/video/panda/embed.ts`);
   mensagens do player só com `event.source` do nosso iframe + `isPandaPlayerOrigin`. Produção exige DRM.
 - Arquivos (PDFs): sempre via `getFileStorage()` (`src/modules/storage`); o endereço do arquivo nunca vai
@@ -54,6 +54,8 @@
   velho que o último aplicado (`isOutdatedChargeUpdate`).
 - Reembolso: chamar o provedor ANTES de gravar; num fluxo com duas chamadas ao provedor, gravar o que ele já aceitou.
   Estorno manual (boleto) marca `manualRefundRequestedAt` — um "paga" do provedor não devolve o acesso.
+  Depois que algo foi CRIADO no provedor, não transformar uma falha posterior em "erro ao criar" (ver `createSubscription`
+  no Asaas e a assinatura "órfã" em `charges.server.ts`). Erros do provedor para a tela: `providerErrorMessage`.
   Registros financeiros (pedido, pagamento, nota) usam `onDelete: Restrict` e nunca são apagados.
 - Teste de integração que apaga usuários precisa limpar antes os dados de venda (ver `tests/integration/payments.test.ts`).
 - Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`

@@ -3,7 +3,7 @@
  * conferimos o que seria enviado à API e como a resposta é traduzida.
  * Rodar: npm test
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PaymentProviderError } from "../types";
 import { createAsaasProvider } from "./asaas-provider";
@@ -138,6 +138,34 @@ describe("createAsaasProvider", () => {
     expect(requests[1].url).toBe("https://api-sandbox.asaas.com/v3/subscriptions/sub_1/payments");
     expect(result.subscriptionId).toBe("sub_1");
     expect(result.firstCharge).toMatchObject({ paymentId: "pay_first", subscriptionId: "sub_1" });
+  });
+
+  it("assinatura criada, mas a busca da 1ª cobrança falha: NÃO vira erro (a assinatura já existe no Asaas)", async () => {
+    const { fetchImpl } = fakeFetch([{ body: { id: "sub_2" } }, { status: 500, body: { errors: [{ description: "instável" }] } }]);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await createAsaasProvider({ apiKey: "k", environment: "sandbox", fetchImpl }).createSubscription({
+      customerId: "cus_1",
+      method: "PIX",
+      valueCents: 4990,
+      cycle: "MONTHLY",
+      nextDueDate: "2026-09-29",
+      description: "Assinatura mensal",
+      externalReference: "assinatura-2",
+      successUrl: null,
+    });
+    // O ID fica guardado (dá para cancelar); a cobrança chega depois pelo aviso.
+    expect(result).toEqual({ subscriptionId: "sub_2", firstCharge: null });
+    consoleError.mockRestore();
+  });
+
+  it("cancelar nota: devolve 'cancelada' só quando o Asaas diz; senão, cancelamento em andamento", async () => {
+    const provider = (body: unknown) =>
+      createAsaasProvider({ apiKey: "k", environment: "sandbox", fetchImpl: fakeFetch([{ body }]).fetchImpl });
+    expect(await provider({ id: "inv_1", status: "CANCELED" }).cancelInvoice("inv_1")).toEqual({ status: "CANCELED" });
+    expect(await provider({ id: "inv_1", status: "PROCESSING_CANCELLATION" }).cancelInvoice("inv_1")).toEqual({
+      status: "PROCESSING_CANCELLATION",
+    });
+    expect(await provider({}).cancelInvoice("inv_1")).toEqual({ status: "PROCESSING_CANCELLATION" });
   });
 
   it("nota fiscal: manda o serviço municipal e só o ISS como imposto", async () => {

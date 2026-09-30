@@ -205,6 +205,11 @@ atualizado.
 | 2026-09-30 | Estorno de **boleto** (manual no painel do Asaas) marca a cobrança (`manualRefundRequestedAt`): enquanto o Asaas ainda mostrar "paga", nenhum aviso nem "Conferir no Asaas" devolve o acesso; quando o Asaas mostrar o estorno, a marca some | Achado da revisão: o "Conferir no Asaas" desfazia o reembolso e devolvia o acesso |
 | 2026-09-30 | Estorno negado (ou contestação revertida) com a nota fiscal já cancelada → **nota nova** para a mesma cobrança | A venda valeu; sem isso ela ficava sem nota |
 | 2026-09-30 | Aviso do Asaas é guardado se tiver **ID e tipo**; o resto é conferido no processamento (formato inesperado = aviso guardado com erro, resposta 200, reprocessável). Dois avisos no **mesmo segundo**: vale o status mais adiantado (ex.: "estornada" ganha de "estorno em andamento") | Antes, um formato inesperado era recusado (o Asaas pausaria a fila); o horário do Asaas só tem segundos |
+| 2026-09-30 | **Segunda revisão da Fase 4:** assinatura que existe no Asaas mas cuja criação falhou aqui ("órfã") é **cancelada lá** assim que a 1ª cobrança dela é avisada; depois de criada no Asaas, uma falha ao buscar a 1ª cobrança não vira erro | A resposta do Asaas pode se perder (tempo esgotado): sem isso, o aluno via "não foi possível assinar" e o Asaas continuava gerando cobranças |
+| 2026-09-30 | Com a cobrança em "estorno em andamento", a **resposta do provedor** (estornada, contestada, estorno negado) sempre vale, mesmo com horário "antes" do nosso pedido | O pedido de estorno é carimbado pelo nosso relógio e o aviso pelo do Asaas; segundos de diferença descartavam a resposta |
+| 2026-09-30 | Nota fiscal com cancelamento **em andamento** na prefeitura e estorno negado: espera a resposta — cancelada → nota nova; cancelamento recusado → vale a antiga | Nunca duas notas válidas para a mesma venda |
+| 2026-09-30 | "Conferir no Asaas" que descobre um pagamento usa o **dia do pagamento** informado pelo Asaas (não a hora do clique) | O prazo de 7 dias do reembolso e o início do acesso contam do pagamento |
+| 2026-09-30 | Com um estorno em andamento na assinatura, "cancelar e estornar" de novo é recusado (e o botão some no painel); estorno de boleto pendente em assinatura aparece na visão geral e na página da assinatura | Achados da revisão: repetir o botão estornava um segundo ciclo; o estorno manual da assinatura ficava invisível |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -318,12 +323,15 @@ explicando o erro do Google para contas não confirmadas.
   reembolsar, cancelar, conferir no Asaas, reprocessar aviso e tentar a nota de novo. A ficha do usuário mostra as compras.
 - Simulador de pagamentos em desenvolvimento (`/dev/pagamentos/...`): pagar, vencer, estornar, negar estorno, chargeback e próximo ciclo.
 - E-mails de compra confirmada e de reembolso pedido.
-- Testes: 239 unitários + 71 de integração; 55 cenários novos no navegador (inclusive celular de 360 px) e os da Fase 2 e da Fase 3
+- Testes: 243 unitários + 78 de integração; 55 cenários novos no navegador (inclusive celular de 360 px) e os da Fase 2 e da Fase 3
   repetidos sem regressão.
 - Revisão de código no PR [#4](https://github.com/felipeyamate/site_concurso_ti/pull/4): 10 achados, todos corrigidos (ver decisões de
   2026-09-30) — os principais: o "Conferir no Asaas" desfazia um reembolso de boleto; duplo clique gerava dois estornos ou duas
   assinaturas; uma falha do provedor no meio do cancelamento fazia o aluno perder o reembolso; estorno negado ficava sem nota fiscal.
   Os casos principais têm testes que falham sem a correção.
+- Segunda revisão (antes do merge): mais 10 achados, todos corrigidos — os principais: assinatura "órfã" que continuava existindo no
+  Asaas depois de um erro na criação; repetir "cancelar e estornar" estornava um segundo ciclo; estorno de boleto de assinatura sem
+  aviso no painel; a resposta do Asaas a um estorno descartada por diferença de relógio. 7 testes novos falham sem as correções.
 
 **Como testar:** [README.md → "Como testar a Fase 4"](./README.md#5-como-testar-a-fase-4-passo-a-passo).
 
@@ -338,6 +346,8 @@ explicando o erro do Google para contas não confirmadas.
   matrícula manual. Rever se acontecer.
 - Recalcular todos os assinantes (ao mudar os cursos da assinatura) roda um aluno por vez dentro da ação do painel; com milhares
   de assinantes, passar para uma tarefa em segundo plano → Fase 7.
+- Reembolso, cancelamento e checkout seguram uma conexão do banco durante a chamada ao Asaas (até 15 s), por causa da trava. Com
+  muito movimento ao mesmo tempo, rever o tamanho do "pool" de conexões → Fase 7.
 - Cupons de desconto e afiliados → Fase 6.
 - Exclusão de conta (LGPD) de quem tem compras: os registros fiscais precisam ficar (anonimizar em vez de apagar) → Fase 7.
 - Aviso do `pg` nos testes ("client.query() when the client is already executing a query") vem de dentro do adaptador do Prisma; não

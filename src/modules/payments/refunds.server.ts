@@ -25,37 +25,26 @@ import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { advisoryLock } from "@/lib/db-locks";
+import { advisoryLock, withAdvisoryLock } from "@/lib/db-locks";
 import { UserFacingError } from "@/lib/form-state";
 
 import { syncPaidAccess } from "./access-sync.server";
 import { runEffects, type PaymentEffect } from "./effects.server";
 import { dateToEventTime } from "./provider/asaas/mapping";
 import { getProviderForRecord } from "./provider/provider.server";
-import { PaymentProviderError } from "./provider/types";
+import { providerErrorMessage } from "./provider/types";
 import { checkRefundEligibility, deriveOrderStatus, isPaidStatus, isWithinRefundWindow } from "./rules";
 
 export type Actor = { userId: string; isAdmin: boolean };
 
 type Tx = Prisma.TransactionClient;
 
-function providerMessage(error: unknown): string {
-  return error instanceof PaymentProviderError ? error.message : "o provedor de pagamento não respondeu.";
-}
-
 /**
- * Roda `work` numa transação com a trava `key` (ver `advisoryLock`). O tempo limite é maior que o
- * normal porque o trabalho inclui chamadas ao provedor (até 15 s cada) e pode esperar a trava.
- * Paralelo em Python: `with lock:` em volta do bloco — só que a trava vale entre servidores.
+ * Roda `work` com a trava `key` (ver `withAdvisoryLock`). O tempo limite é maior que o normal
+ * porque o trabalho inclui chamadas ao provedor (até 15 s cada) e pode esperar a trava.
  */
 async function withLock<T>(key: string, work: (tx: Tx) => Promise<T>): Promise<T> {
-  return prisma.$transaction(
-    async (tx) => {
-      await advisoryLock(tx, key);
-      return work(tx);
-    },
-    { maxWait: 10_000, timeout: 60_000 },
-  );
+  return withAdvisoryLock(prisma, key, work, { maxWait: 10_000, timeout: 60_000 });
 }
 
 /**
@@ -102,7 +91,7 @@ export async function requestOrderRefund(params: {
       try {
         await provider.refundCharge({ paymentId: order.providerPaymentId, installmentId: order.providerInstallmentId });
       } catch (error) {
-        throw new UserFacingError(`O provedor recusou o estorno: ${providerMessage(error)}`);
+        throw new UserFacingError(`O provedor recusou o estorno: ${providerErrorMessage(error)}`);
       }
     }
 
@@ -172,11 +161,12 @@ export type CancelSubscriptionResult = {
  *
  * Passos (com a trava da assinatura):
  *  1. Relê a assinatura, confere quem pede e escolhe o pagamento a reembolsar.
+ *     Com um estorno já em andamento nesta assinatura, não estorna outro.
  *  2. ESTORNO primeiro: se o provedor recusar, nada mudou — dá para tentar de novo (o direito aos
  *     7 dias não se perde por uma falha do provedor).
- *  3. Grava o estorno (o acesso daquele pagamento sai).
- *  4. Cancela no provedor. Se isso falhar DEPOIS do estorno, o estorno continua gravado (ele
+ *  3. Cancela no provedor. Se isso falhar DEPOIS do estorno, o estorno continua valendo (ele
  *     aconteceu) e a resposta avisa para tentar cancelar de novo.
+ *  4. Grava o estorno (o acesso daquele pagamento sai).
  *  5. Grava o cancelamento e recalcula o acesso (cancelada = sem a tolerância de 5 dias).
  */
 export async function cancelSubscription(params: {
@@ -204,6 +194,11 @@ export async function cancelSubscription(params: {
     // 1. Qual pagamento reembolsar (se pedido).
     const paid = subscription.payments.filter((payment) => isPaidStatus(payment.status));
     let refundPayment: (typeof paid)[number] | null = null;
+    // Um estorno já em andamento nesta assinatura (ex.: a tentativa anterior estornou, mas o
+    // provedor recusou o cancelamento): "cancelar e estornar" de novo estornaria OUTRO pagamento.
+    if (params.refund && subscription.payments.some((payment) => payment.status === "REFUND_REQUESTED")) {
+      throw new UserFacingError('Já há um estorno em andamento nesta assinatura. Para terminar, use "Cancelar" (sem estorno).');
+    }
     if (params.refund) {
       if (params.actor.isAdmin) {
         refundPayment = paid.at(-1) ?? null;
@@ -220,29 +215,33 @@ export async function cancelSubscription(params: {
     const provider = getProviderForRecord(subscription.provider);
     if (!provider) throw new UserFacingError("O provedor desta assinatura não está disponível agora. Tente mais tarde.");
 
-    // 2 e 3. Estorno primeiro (boleto: à mão, no painel do Asaas) e grava.
+    // 2. Estorno primeiro (boleto: à mão, no painel do Asaas).
     const manualRefund = refundPayment?.method === "BOLETO";
-    if (refundPayment) {
-      if (!manualRefund) {
-        try {
-          await provider.refundCharge({ paymentId: refundPayment.providerPaymentId, installmentId: null });
-        } catch (error) {
-          throw new UserFacingError(`O provedor recusou o estorno: ${providerMessage(error)}`);
-        }
+    if (refundPayment && !manualRefund) {
+      try {
+        await provider.refundCharge({ paymentId: refundPayment.providerPaymentId, installmentId: null });
+      } catch (error) {
+        throw new UserFacingError(`O provedor recusou o estorno: ${providerErrorMessage(error)}`);
       }
-      await markRefundRequested(tx, { provider: subscription.provider, payment: refundPayment, manualRefund, now });
     }
 
-    // 4. Cancela no provedor.
+    // 3. Cancela no provedor. As duas chamadas ao provedor vêm ANTES de travar a cobrança
+    //    (passo 4): assim um aviso dela (ex.: "estornada") não fica esperando uma chamada lenta.
     let cancelFailure: string | null = null;
     try {
       if (subscription.providerSubscriptionId) await provider.cancelSubscription(subscription.providerSubscriptionId);
     } catch (error) {
-      cancelFailure = providerMessage(error);
+      cancelFailure = providerErrorMessage(error);
     }
     // Sem estorno, uma falha aqui não deixou nada para gravar: é só um erro.
     if (cancelFailure && !refundPayment) {
       throw new UserFacingError(`O provedor recusou o cancelamento: ${cancelFailure}`);
+    }
+
+    // 4. Grava o estorno (o acesso daquele pagamento sai) — ele aconteceu, mesmo se o
+    //    cancelamento falhou.
+    if (refundPayment) {
+      await markRefundRequested(tx, { provider: subscription.provider, payment: refundPayment, manualRefund, now });
     }
 
     // 5. Grava o cancelamento. Cobranças ainda em aberto deixam de valer (o provedor também as remove).
