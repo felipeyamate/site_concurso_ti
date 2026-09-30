@@ -76,15 +76,18 @@ export type CommissionRow = {
 };
 
 /**
- * As comissões de um afiliado: uma por cobrança paga (ou estornada depois de paga) dos pedidos e
- * assinaturas dele, da mais nova para a mais antiga.
+ * As comissões de VÁRIOS afiliados de uma vez (uma consulta só, para a lista do painel): para cada
+ * afiliado, uma comissão por cobrança paga (ou estornada depois de paga) dos pedidos e assinaturas
+ * dele, da mais nova para a mais antiga.
  * Valor: o que foi PAGO × a comissão guardada no pedido/assinatura; se já entrou num pagamento
  * ao afiliado, vale o valor registrado nele.
  */
-export async function listAffiliateCommissions(db: Db, affiliateId: string, now: Date): Promise<CommissionRow[]> {
+export async function listCommissionsByAffiliate(db: Db, affiliateIds: string[], now: Date): Promise<Map<string, CommissionRow[]>> {
+  const byAffiliate = new Map<string, CommissionRow[]>(affiliateIds.map((id) => [id, []]));
+  if (affiliateIds.length === 0) return byAffiliate;
   const payments = await db.payment.findMany({
     where: {
-      OR: [{ order: { affiliateId } }, { subscription: { affiliateId } }],
+      OR: [{ order: { affiliateId: { in: affiliateIds } } }, { subscription: { affiliateId: { in: affiliateIds } } }],
       NOT: { status: { in: ["PENDING", "OVERDUE"] } },
     },
     orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
@@ -93,13 +96,15 @@ export async function listAffiliateCommissions(db: Db, affiliateId: string, now:
       status: true,
       paidAt: true,
       valueCents: true,
-      order: { select: { productTitle: true, affiliateCommissionBps: true } },
-      subscription: { select: { planTitle: true, affiliateCommissionBps: true } },
+      order: { select: { productTitle: true, affiliateId: true, affiliateCommissionBps: true } },
+      subscription: { select: { planTitle: true, affiliateId: true, affiliateCommissionBps: true } },
       affiliatePayoutItem: { select: { amountCents: true } },
     },
   });
-  const rows: CommissionRow[] = [];
   for (const payment of payments) {
+    const affiliateId = payment.order?.affiliateId ?? payment.subscription?.affiliateId;
+    const rows = affiliateId ? byAffiliate.get(affiliateId) : undefined;
+    if (!rows) continue;
     const situation = commissionStatus({ paymentStatus: payment.status, paidAt: payment.paidAt, paidOut: Boolean(payment.affiliatePayoutItem), now });
     if (!situation) continue;
     const bps = payment.order?.affiliateCommissionBps ?? payment.subscription?.affiliateCommissionBps ?? 0;
@@ -114,7 +119,12 @@ export async function listAffiliateCommissions(db: Db, affiliateId: string, now:
       releaseDate: payment.paidAt ? commissionReleaseDate(payment.paidAt) : null,
     });
   }
-  return rows;
+  return byAffiliate;
+}
+
+/** As comissões de um afiliado (ver `listCommissionsByAffiliate`). */
+export async function listAffiliateCommissions(db: Db, affiliateId: string, now: Date): Promise<CommissionRow[]> {
+  return (await listCommissionsByAffiliate(db, [affiliateId], now)).get(affiliateId) ?? [];
 }
 
 /** Cliques nos últimos 30 dias (contando hoje). */
@@ -133,8 +143,9 @@ async function buildAffiliateReport(affiliate: { id: string }, now: Date) {
   const [commissions, clicks, orders, subscriptions, payouts] = await Promise.all([
     listAffiliateCommissions(prisma, affiliate.id, now),
     clicksLast30Days(affiliate.id, now),
-    prisma.order.count({ where: { affiliateId: affiliate.id, status: { not: "CANCELED" } } }),
-    prisma.subscription.count({ where: { affiliateId: affiliate.id, failureReason: null } }),
+    // "Vendas" = pedidos pagos (mesmo que depois estornados) e assinaturas com algum ciclo pago.
+    prisma.order.count({ where: { affiliateId: affiliate.id, status: { in: ["PAID", "REFUND_REQUESTED", "REFUNDED", "CHARGEBACK"] } } }),
+    prisma.subscription.count({ where: { affiliateId: affiliate.id, payments: { some: { paidAt: { not: null } } } } }),
     prisma.affiliatePayout.findMany({
       where: { affiliateId: affiliate.id },
       orderBy: { createdAt: "desc" },

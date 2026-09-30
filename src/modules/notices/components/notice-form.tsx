@@ -48,10 +48,14 @@ type Options = {
   plans: Array<{ id: string; title: string; isActive: boolean }>;
 };
 
-export function NoticeForm({ notice, options }: { notice: NoticeFormValues; options: Options }) {
+export function NoticeForm({ notice, options, canChooseCoupon }: { notice: NoticeFormValues; options: Options; canChooseCoupon: boolean }) {
   const { state, onSubmit, pending } = useAdminForm(saveNoticeAction);
   const errors = state.fieldErrors;
-  const text = (name: keyof NoticeFormValues, label: string, props: { placeholder?: string; type?: string; required?: boolean } = {}) => (
+  const text = (
+    name: keyof NoticeFormValues,
+    label: string,
+    props: { placeholder?: string; type?: string; required?: boolean; readOnly?: boolean; hint?: string } = {},
+  ) => (
     <div className="grid gap-2">
       <Label htmlFor={`notice-${name}`}>{label}</Label>
       <Input
@@ -61,8 +65,10 @@ export function NoticeForm({ notice, options }: { notice: NoticeFormValues; opti
         placeholder={props.placeholder}
         type={props.type}
         required={props.required}
+        readOnly={props.readOnly}
         aria-invalid={errors[name] ? true : undefined}
       />
+      {props.hint ? <p className="text-muted-foreground text-xs">{props.hint}</p> : null}
       <FieldError id={`notice-${name}-error`} message={errors[name]} />
     </div>
   );
@@ -154,7 +160,10 @@ export function NoticeForm({ notice, options }: { notice: NoticeFormValues; opti
           </NativeSelect>
           <FieldError id="notice-plan-error" message={errors.planId} />
         </div>
-        {text("couponCode", "Cupom já aplicado nos botões (opcional)", { placeholder: "Ex.: BB10" })}
+        {/* Cupom: só o ADMIN escolhe (o servidor também confere e mantém o cupom atual para o professor). */}
+        {canChooseCoupon
+          ? text("couponCode", "Cupom já aplicado nos botões (opcional)", { placeholder: "Ex.: BB10" })
+          : text("couponCode", "Cupom já aplicado nos botões", { readOnly: true, hint: "Só o administrador escolhe o cupom." })}
       </fieldset>
 
       <label className="flex items-center gap-2 text-sm">

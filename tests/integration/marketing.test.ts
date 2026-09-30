@@ -15,7 +15,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { GET as referralRoute } from "@/app/r/[code]/route";
 import { prisma } from "@/lib/db";
-import { createAffiliate, registerAffiliatePayout } from "@/modules/affiliates/affiliates-admin.server";
+import { advisoryLock } from "@/lib/db-locks";
+import { createAffiliate, listAffiliatesForAdmin, registerAffiliatePayout } from "@/modules/affiliates/affiliates-admin.server";
 import { getAffiliateDashboard, getAffiliateForAdmin } from "@/modules/affiliates/affiliates.server";
 import { AFFILIATE_COOKIE } from "@/modules/affiliates/rules";
 import { deleteCoupon, saveCoupon } from "@/modules/coupons/coupons-admin.server";
@@ -139,18 +140,31 @@ describe("cupons no checkout", () => {
     expect(await prisma.billingProfile.count()).toBe(0);
   });
 
-  it("limites: por aluno e no total; pedido cancelado libera o uso", async () => {
+  it("limites: aguardando pagamento reserva o uso; vencido ou cancelado devolve; pago conta mesmo reembolsado", async () => {
     await setupCatalog();
     await createUser("mk-aluno");
     await createUser("mk-outro");
     await createCoupon({ maxRedemptions: "1" });
     const first = await buy("mk-aluno", { couponCode: "BEMVINDO10" });
-    await expect(buy("mk-aluno", { couponCode: "BEMVINDO10", now: at(0, 1) })).rejects.toThrow(/já usou/);
+    // Pix gerado e ainda não pago = reserva: o próprio aluno recebe "aguardando pagamento"; o outro, "esgotado".
+    await expect(buy("mk-aluno", { couponCode: "BEMVINDO10", now: at(0, 1) })).rejects.toThrow(/aguardando pagamento/);
     await expect(buy("mk-outro", { couponCode: "BEMVINDO10", now: at(0, 1) })).rejects.toThrow(/número máximo/);
-    // A cobrança do primeiro pedido é removida (ex.: Pix vencido apagado) → o uso volta.
-    await simulatePaymentAction({ paymentId: first.paymentId as string, action: "DELETE", now: at(0, 2) });
-    expect(await prisma.order.findUniqueOrThrow({ where: { id: first.orderId } })).toMatchObject({ status: "CANCELED" });
-    await expect(buy("mk-outro", { couponCode: "BEMVINDO10", now: at(0, 3) })).resolves.toHaveProperty("orderId");
+    // O Pix vence sem pagamento → o uso volta (antes, um Pix esquecido travava o cupom para sempre).
+    await simulatePaymentAction({ paymentId: first.paymentId as string, action: "OVERDUE", now: at(1, 1) });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: first.orderId } })).toMatchObject({ status: "OVERDUE" });
+    const second = await buy("mk-outro", { couponCode: "BEMVINDO10", now: at(1, 2) });
+    // Pago e reembolsado continua contando (senão: comprar, pedir reembolso e comprar de novo com o cupom).
+    await simulatePaymentAction({ paymentId: second.paymentId as string, action: "PAY", now: at(1, 3) });
+    await requestOrderRefund({ orderId: second.orderId, actor: { userId: "mk-outro", isAdmin: false }, now: at(1, 4) });
+    await expect(buy("mk-outro", { couponCode: "BEMVINDO10", now: at(1, 5) })).rejects.toThrow(/já usou/);
+    await expect(buy("mk-aluno", { couponCode: "BEMVINDO10", now: at(1, 5) })).rejects.toThrow(/número máximo/);
+
+    // Cobrança removida (pedido cancelado) também devolve o uso.
+    await createCoupon({ code: "UMAVEZ", maxRedemptions: "1" });
+    const removed = await buy("mk-aluno", { couponCode: "UMAVEZ", now: at(2) });
+    await simulatePaymentAction({ paymentId: removed.paymentId as string, action: "DELETE", now: at(2, 1) });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: removed.orderId } })).toMatchObject({ status: "CANCELED" });
+    await expect(buy("mk-outro", { couponCode: "UMAVEZ", now: at(2, 2) })).resolves.toHaveProperty("orderId");
   });
 
   it("dois alunos AO MESMO TEMPO no último uso: só um leva (trava do cupom)", async () => {
@@ -198,6 +212,50 @@ describe("cupons no checkout", () => {
     const unused = await createCoupon({ code: "NUNCAUSADO" });
     await deleteCoupon(unused.id);
     expect(await prisma.coupon.findUnique({ where: { id: unused.id } })).toBeNull();
+  });
+
+  it("painel: trocar o código ESPERA a compra com o cupom que está sendo gravada (a mesma trava do checkout)", async () => {
+    const { product } = await setupCatalog();
+    await createUser("mk-aluno");
+    const { id } = await createCoupon();
+    // Uma "compra" pega a trava do cupom (como o checkout faz) e só grava o pedido quando liberarmos.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let signalLocked: () => void = () => {};
+    const locked = new Promise<void>((resolve) => (signalLocked = resolve));
+    const purchase = prisma.$transaction(async (tx) => {
+      await advisoryLock(tx, `coupon:${id}`);
+      signalLocked();
+      await gate;
+      await tx.order.create({
+        data: {
+          userId: "mk-aluno",
+          productId: product.id,
+          productTitle: product.title,
+          priceCents: 17730,
+          discountCents: 1970,
+          couponId: id,
+          couponCode: "BEMVINDO10",
+          method: "PIX",
+          provider: "FAKE",
+        },
+      });
+    });
+    await locked;
+    const edit = couponFormSchema.parse({ couponId: id, code: "OUTRO10", description: "", discountType: "PERCENT", percentOff: "10", appliesToProducts: "on", maxPerUser: "1", isActive: "on" });
+    const rename = saveCoupon(edit);
+    const early = await Promise.race([
+      rename.then(
+        () => "gravou",
+        () => "falhou",
+      ),
+      new Promise((resolve) => setTimeout(() => resolve("esperando"), 300)),
+    ]);
+    expect(early).toBe("esperando"); // sem a trava, o código mudava aqui (a compra ainda não aparecia)
+    release();
+    await purchase;
+    await expect(rename).rejects.toThrow(/o código não muda/);
+    expect(await prisma.coupon.findUniqueOrThrow({ where: { id } })).toMatchObject({ code: "BEMVINDO10" });
   });
 });
 
@@ -273,7 +331,14 @@ describe("afiliados", () => {
     await expect(registerAffiliatePayout({ affiliateId: joao.id, adminId: "mk-joao", note: "", now: at(9) })).rejects.toThrow(/Não há comissões/);
     const dashboard = await getAffiliateDashboard("mk-joao", at(9));
     expect(dashboard?.totals).toMatchObject({ AVAILABLE: 0, PAID_OUT: 3940 });
-    expect(dashboard?.sales).toBe(3);
+    expect(dashboard?.sales).toBe(2); // o 3º pedido nunca foi pago: não é "venda"
+
+    // A lista do painel (uma consulta para todos) dá as mesmas somas, e afiliado sem vendas fica zerado.
+    await createUser("mk-maria");
+    await createAffiliate({ email: "mk-maria@exemplo.com", code: "maria", commissionBps: 1000, payoutInfo: "" });
+    const list = await listAffiliatesForAdmin(at(9));
+    expect(list.find((item) => item.code === "joao")?.totals).toEqual(dashboard?.totals);
+    expect(list.find((item) => item.code === "maria")?.totals).toEqual({ HOLD: 0, AVAILABLE: 0, PAID_OUT: 0, CANCELED: 0 });
   });
 
   it("assinatura indicada: comissão em cada ciclo pago", async () => {

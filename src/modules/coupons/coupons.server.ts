@@ -5,10 +5,15 @@
  * mostrar o preço com desconto). As regras em si ficam em `rules.ts` (arquivo puro).
  *
  * Quando um uso "conta":
- *  - pedido com o cupom que não foi cancelado (cancelado = a cobrança não chegou a existir ou foi
- *    removida). Pedido pago e depois reembolsado CONTINUA contando (senão: comprar com cupom, pedir
- *    reembolso e comprar de novo com o mesmo cupom);
- *  - assinatura com o cupom que foi criada sem erro no provedor.
+ *  - pedido PAGO com o cupom — inclusive se depois foi reembolsado ou contestado (senão: comprar com
+ *    cupom, pedir reembolso e comprar de novo com o mesmo cupom);
+ *  - pedido AGUARDANDO pagamento: é uma "reserva" (senão o aluno geraria vários Pix com o mesmo cupom e
+ *    pagaria todos). Pix e cartão vencem em 1 dia, boleto em 3: a reserva dura pouco;
+ *  - pedido VENCIDO sem pagamento ou cancelado NÃO conta: o uso volta (o aluno que desistiu do Pix pode
+ *    usar o cupom de novo). Se um boleto vencido for pago mesmo assim, ele volta a contar — o limite
+ *    pode passar em 1 nesse caso raro (aceito);
+ *  - assinatura: com algum ciclo pago (conta para sempre, como o pedido) ou com a 1ª cobrança ainda
+ *    aguardando pagamento (reserva). Criada com erro no provedor não conta.
  *
  * A trava: "o cupom ainda tem uso? → cria o pedido" é um "confere e grava" (regra do CLAUDE.md).
  * `reserveCoupon` trava o cupom (`coupon:<id>`) dentro da MESMA transação que cria o pedido: dois
@@ -22,7 +27,14 @@ import { prisma } from "@/lib/db";
 import { UserFacingError } from "@/lib/form-state";
 import type { AffiliateRef } from "@/modules/affiliates/rules";
 
-import { checkCoupon, couponRejectionMessage, normalizeCouponCode, type CouponRules, type CouponTarget } from "./rules";
+import {
+  checkCoupon,
+  couponRejectionMessage,
+  normalizeCouponCode,
+  type CouponRedemptions,
+  type CouponRules,
+  type CouponTarget,
+} from "./rules";
 
 type Db = Prisma.TransactionClient;
 
@@ -53,17 +65,39 @@ export async function findCoupon(db: Db, code: string): Promise<CouponRecord | n
   return { ...rest, productIds: products.map((item) => item.productId), planIds: plans.map((item) => item.planId) };
 }
 
-/** Usos que contam: no total e deste aluno (ver o cabeçalho). */
-export async function countRedemptions(db: Db, couponId: string, userId: string | null): Promise<{ total: number; byUser: number }> {
-  const orderWhere: Prisma.OrderWhereInput = { couponId, status: { not: "CANCELED" } };
-  const subscriptionWhere: Prisma.SubscriptionWhereInput = { couponId, failureReason: null };
-  const [orders, subscriptions, userOrders, userSubscriptions] = await Promise.all([
-    db.order.count({ where: orderWhere }),
-    db.subscription.count({ where: subscriptionWhere }),
-    userId ? db.order.count({ where: { ...orderWhere, userId } }) : 0,
-    userId ? db.subscription.count({ where: { ...subscriptionWhere, userId } }) : 0,
+// Pedido que já foi pago (mesmo que depois reembolsado/contestado) e pedido ainda aguardando pagamento.
+const PAID_ORDER_STATUSES = ["PAID", "REFUND_REQUESTED", "REFUNDED", "CHARGEBACK"] as const;
+const paidOrder: Prisma.OrderWhereInput = { status: { in: [...PAID_ORDER_STATUSES] } };
+const pendingOrder: Prisma.OrderWhereInput = { status: "PENDING" };
+// Assinatura com algum ciclo pago; ou, sem nenhum, com a 1ª cobrança ainda em aberto (e não cancelada).
+const paidSubscription: Prisma.SubscriptionWhereInput = { failureReason: null, payments: { some: { paidAt: { not: null } } } };
+const pendingSubscription: Prisma.SubscriptionWhereInput = {
+  failureReason: null,
+  status: { not: "CANCELED" },
+  payments: { some: { status: "PENDING" }, none: { paidAt: { not: null } } },
+};
+
+/** Onde (pedidos e assinaturas) um cupom conta como usado — ver o cabeçalho. Usado também pelas listas do painel. */
+export const redemptionWhere = {
+  order: { OR: [paidOrder, pendingOrder] } satisfies Prisma.OrderWhereInput,
+  subscription: { OR: [paidSubscription, pendingSubscription] } satisfies Prisma.SubscriptionWhereInput,
+};
+
+/** Usos que contam: no total, deste aluno e quantos do aluno são reservas (aguardando pagamento). */
+export async function countRedemptions(db: Db, couponId: string, userId: string | null): Promise<CouponRedemptions> {
+  const [orders, subscriptions, userOrders, userSubscriptions, userPendingOrders, userPendingSubscriptions] = await Promise.all([
+    db.order.count({ where: { couponId, ...redemptionWhere.order } }),
+    db.subscription.count({ where: { couponId, ...redemptionWhere.subscription } }),
+    userId ? db.order.count({ where: { couponId, userId, ...redemptionWhere.order } }) : 0,
+    userId ? db.subscription.count({ where: { couponId, userId, ...redemptionWhere.subscription } }) : 0,
+    userId ? db.order.count({ where: { couponId, userId, ...pendingOrder } }) : 0,
+    userId ? db.subscription.count({ where: { couponId, userId, ...pendingSubscription } }) : 0,
   ]);
-  return { total: orders + subscriptions, byUser: userOrders + userSubscriptions };
+  return {
+    total: orders + subscriptions,
+    byUser: userOrders + userSubscriptions,
+    pendingByUser: userPendingOrders + userPendingSubscriptions,
+  };
 }
 
 export type CouponPreview =

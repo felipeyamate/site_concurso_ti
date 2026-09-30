@@ -17,44 +17,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 
 import { saveCouponAction } from "../actions";
-
-export type CouponFormValues = {
-  id: string | null;
-  code: string;
-  description: string;
-  discountType: "PERCENT" | "AMOUNT";
-  percentOff: string;
-  amountOff: string; // já formatado ("20,00")
-  appliesToProducts: boolean;
-  appliesToPlans: boolean;
-  productIds: string[];
-  planIds: string[];
-  startsOn: string;
-  endsOn: string;
-  maxRedemptions: string;
-  maxPerUser: string;
-  affiliateId: string;
-  isActive: boolean;
-};
-
-export const EMPTY_COUPON: CouponFormValues = {
-  id: null,
-  code: "",
-  description: "",
-  discountType: "PERCENT",
-  percentOff: "10",
-  amountOff: "",
-  appliesToProducts: true,
-  appliesToPlans: false,
-  productIds: [],
-  planIds: [],
-  startsOn: "",
-  endsOn: "",
-  maxRedemptions: "",
-  maxPerUser: "1",
-  affiliateId: "",
-  isActive: true,
-};
+import type { CouponFormValues } from "../form-values";
 
 type Option = { id: string; title: string; isActive: boolean };
 type AffiliateOption = { id: string; code: string; name: string; isActive: boolean };

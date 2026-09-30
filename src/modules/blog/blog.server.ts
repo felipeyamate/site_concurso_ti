@@ -7,6 +7,8 @@
  */
 import "server-only";
 
+import { cache } from "react";
+
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { markdownToPlainText, truncateText } from "@/lib/markdown/parse";
@@ -62,15 +64,18 @@ export async function listLatestPosts(limit: number) {
   return posts.map(toCard);
 }
 
-/** Um post pelo slug. Rascunho só com `canSeeDrafts` (prévia do professor). */
-export async function getPostForViewer(slug: string, canSeeDrafts: boolean) {
+/**
+ * Um post pelo slug. Rascunho só com `canSeeDrafts` (prévia do professor).
+ * `cache` do React: a página e os metadados pedem o mesmo post; o banco é consultado uma vez por acesso.
+ */
+export const getPostForViewer = cache(async (slug: string, canSeeDrafts: boolean) => {
   const post = await prisma.blogPost.findUnique({
     where: { slug },
     select: { ...postCardSelect, isPublished: true, updatedAt: true, subjectId: true },
   });
   if (!post || (!post.isPublished && !canSeeDrafts)) return null;
   return post;
-}
+});
 
 /** Até `limit` posts relacionados: primeiro do mesmo assunto, depois os mais novos. */
 export async function listRelatedPosts(post: { id: string; subjectId: string | null }, limit = 3) {

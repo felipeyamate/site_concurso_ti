@@ -45,6 +45,7 @@ export type CouponRejection =
   | "NOT_APPLICABLE"
   | "SOLD_OUT"
   | "ALREADY_USED"
+  | "PENDING_BY_USER"
   | "BELOW_MINIMUM";
 
 export type CouponCheck =
@@ -74,15 +75,22 @@ function appliesTo(coupon: CouponRules, target: CouponTarget): boolean {
 }
 
 /**
+ * Usos que já contam: `total` (todos os alunos) e `byUser` (este aluno), ambos INCLUINDO os pedidos
+ * ainda aguardando pagamento ("reserva"); `pendingByUser` = quantos dos usos do aluno são essas reservas
+ * (só para escolher a mensagem certa).
+ */
+export type CouponRedemptions = { total: number; byUser: number; pendingByUser?: number };
+
+/**
  * O cupom vale para esta compra? Devolve o desconto e o preço final, ou o motivo da recusa.
- * `redemptions`: usos que já contam (no total e deste aluno) — quem chama busca no banco, COM a
- * trava do cupom, para dois alunos não passarem juntos pelo último uso.
+ * `redemptions`: usos que já contam — quem chama busca no banco, COM a trava do cupom, para dois
+ * alunos não passarem juntos pelo último uso.
  */
 export function checkCoupon(input: {
   coupon: CouponRules | null;
   target: CouponTarget;
   now: Date;
-  redemptions: { total: number; byUser: number };
+  redemptions: CouponRedemptions;
 }): CouponCheck {
   const { coupon, target, now, redemptions } = input;
   if (!coupon) return { ok: false, reason: "NOT_FOUND" };
@@ -91,7 +99,12 @@ export function checkCoupon(input: {
   if (coupon.endsAt && now >= coupon.endsAt) return { ok: false, reason: "EXPIRED" };
   if (!appliesTo(coupon, target)) return { ok: false, reason: "NOT_APPLICABLE" };
   // "Você já usou" vem antes de "esgotado": quando as duas valem, a primeira explica melhor.
-  if (redemptions.byUser >= coupon.maxPerUser) return { ok: false, reason: "ALREADY_USED" };
+  // Se o que falta é só um pedido do aluno ainda aguardando pagamento, a mensagem diz isso (ele pode
+  // pagar esse pedido, ou esperar vencer — pedido vencido sem pagamento devolve o uso).
+  if (redemptions.byUser >= coupon.maxPerUser) {
+    const paidByUser = redemptions.byUser - (redemptions.pendingByUser ?? 0);
+    return { ok: false, reason: paidByUser >= coupon.maxPerUser ? "ALREADY_USED" : "PENDING_BY_USER" };
+  }
   if (coupon.maxRedemptions !== null && redemptions.total >= coupon.maxRedemptions) return { ok: false, reason: "SOLD_OUT" };
 
   const discountCents = computeDiscountCents(coupon.discountType, coupon.discountValue, target.priceCents);
@@ -116,6 +129,8 @@ export function couponRejectionMessage(reason: CouponRejection, code: string): s
       return `O cupom ${code} já foi usado o número máximo de vezes.`;
     case "ALREADY_USED":
       return `Você já usou o cupom ${code}.`;
+    case "PENDING_BY_USER":
+      return `Você já tem um pedido com o cupom ${code} aguardando pagamento: pague esse pedido (em "Minhas compras") ou espere ele vencer para usar o cupom de novo.`;
     case "BELOW_MINIMUM":
       return `O cupom ${code} deixaria o valor abaixo do mínimo de cobrança (${formatBRL(MIN_CHARGE_CENTS)}).`;
   }

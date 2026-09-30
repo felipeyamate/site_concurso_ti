@@ -11,11 +11,13 @@ import { deletePost, savePost, setPostPublished } from "@/modules/blog/blog-admi
 import { getPostForViewer, listPublishedPosts, listRelatedPosts } from "@/modules/blog/blog.server";
 import { blogPostSchema } from "@/modules/blog/schemas";
 import { createCourse, createLesson, createModule, updateCourse, updateLesson } from "@/modules/catalog/admin/catalog-admin.server";
+import { saveCoupon } from "@/modules/coupons/coupons-admin.server";
+import { couponFormSchema } from "@/modules/coupons/schemas";
 import { saveNotice } from "@/modules/notices/notices-admin.server";
 import { getNoticeForViewer, listPublishedNotices } from "@/modules/notices/notices.server";
 import { noticeSchema } from "@/modules/notices/schemas";
 import { buildBlogRssXml, buildSitemapEntries } from "@/modules/seo/feeds.server";
-import { currentCatalogPath, findRedirectTarget } from "@/modules/seo/redirects.server";
+import { currentCatalogPath, findRedirectTarget, redirectOldSlugOrNotFound } from "@/modules/seo/redirects.server";
 import { seedMarketing } from "../../prisma/seed-marketing";
 import { seedQuestionBank } from "../../prisma/seed-questions";
 
@@ -29,6 +31,8 @@ async function resetContent() {
   await prisma.examNoticeSubject.deleteMany();
   await prisma.examNotice.deleteMany();
   await prisma.coupon.deleteMany({ where: { code: { startsWith: "CT-" } } });
+  await prisma.product.deleteMany({ where: { slug: { startsWith: "ct-" } } });
+  await prisma.plan.deleteMany({ where: { slug: { startsWith: "ct-" } } });
   await prisma.course.deleteMany({ where: { slug: { startsWith: "teste-conteudo" } } });
   await prisma.user.deleteMany({ where: { id: { startsWith: "ct-" } } });
 }
@@ -102,10 +106,10 @@ describe("páginas de edital", () => {
   it("cupom precisa existir; oferta inativa não aparece; 'o que mais cai' da banca", async () => {
     await seedQuestionBank(prisma);
     const board = await prisma.board.findUniqueOrThrow({ where: { slug: "cesgranrio" } });
-    await expect(saveNotice(notice({ couponCode: "CT-NAO-EXISTE" }), T0)).rejects.toThrow(/Não existe cupom/);
+    await expect(saveNotice(notice({ couponCode: "CT-NAO-EXISTE" }), { canChooseCoupon: true, now: T0 })).rejects.toThrow(/Não existe cupom/);
 
     const product = await prisma.product.create({ data: { slug: "ct-produto", title: "Produto", priceCents: 9900, isActive: false } });
-    const created = await saveNotice(notice({ boardId: board.id, productId: product.id, isPublished: "on" }), T0);
+    const created = await saveNotice(notice({ boardId: board.id, productId: product.id, isPublished: "on" }), { canChooseCoupon: true, now: T0 });
     const view = await getNoticeForViewer(created.slug, false);
     expect(view?.product).toBeNull(); // produto inativo: sem botão de compra
     expect(view?.topSubjects[0]).toMatchObject({ name: "Segurança da Informação" });
@@ -113,14 +117,42 @@ describe("páginas de edital", () => {
     await prisma.product.delete({ where: { id: product.id } });
   });
 
+  it("o cupom da página só aparece na oferta em que ele VALE (com o preço final)", async () => {
+    const product = await prisma.product.create({ data: { slug: "ct-produto-cupom", title: "Produto", priceCents: 10000, isActive: true } });
+    const plan = await prisma.plan.create({ data: { slug: "ct-plano-cupom", title: "Plano", priceCents: 5000, cycle: "MONTHLY", isActive: true } });
+    // Cupom só de compra avulsa (o padrão do formulário).
+    const coupon = await saveCoupon(
+      couponFormSchema.parse({ code: "CT-PAGINA", description: "", discountType: "PERCENT", percentOff: "20", appliesToProducts: "on", maxPerUser: "1", isActive: "on" }),
+    );
+    const page = await saveNotice(notice({ productId: product.id, planId: plan.id, couponCode: "ct-pagina", isPublished: "on" }), { canChooseCoupon: true, now: T0 });
+    const view = await getNoticeForViewer(page.slug, false);
+    expect(view?.product?.coupon).toMatchObject({ code: "CT-PAGINA", finalPriceCents: 8000 });
+    expect(view?.plan?.coupon).toBeNull(); // não vale para assinatura: a página não promete o desconto
+    // Cupom desativado (ou vencido/esgotado): a página para de prometer o desconto.
+    await prisma.coupon.update({ where: { id: coupon.id }, data: { isActive: false } });
+    expect((await getNoticeForViewer(page.slug, false))?.product?.coupon).toBeNull();
+  });
+
+  it("só o ADMIN escolhe o cupom: o professor salva e o cupom atual fica (sem conferir o código digitado)", async () => {
+    await saveCoupon(couponFormSchema.parse({ code: "CT-ADMIN", description: "", discountType: "PERCENT", percentOff: "10", appliesToProducts: "on", maxPerUser: "1", isActive: "on" }));
+    const page = await saveNotice(notice({ couponCode: "CT-ADMIN" }), { canChooseCoupon: true, now: T0 });
+    // Professor tenta trocar por outro código (existente ou não): nada muda e nenhum erro revela se o cupom existe.
+    await saveNotice(notice({ noticeId: page.id, title: "Novo título", couponCode: "CT-NAO-EXISTE" }), { canChooseCoupon: false, now: T0 });
+    await saveNotice(notice({ noticeId: page.id, title: "Novo título", couponCode: "" }), { canChooseCoupon: false, now: T0 });
+    expect(await prisma.examNotice.findUniqueOrThrow({ where: { id: page.id } })).toMatchObject({ title: "Novo título", couponCode: "CT-ADMIN" });
+    // Página nova do professor: sem cupom.
+    const byTeacher = await saveNotice(notice({ title: "Página do professor", couponCode: "CT-ADMIN" }), { canChooseCoupon: false, now: T0 });
+    expect(await prisma.examNotice.findUniqueOrThrow({ where: { id: byTeacher.id } })).toMatchObject({ couponCode: null });
+  });
+
   it("rascunho escondido; lista com inscrições abertas primeiro; slug antigo redireciona", async () => {
-    const done = await saveNotice(notice({ title: "Concurso antigo", status: "DONE", isPublished: "on" }), T0);
-    const open = await saveNotice(notice({ title: "Concurso aberto", status: "OPEN", isPublished: "on" }), T0);
-    const draft = await saveNotice(notice({ title: "Concurso rascunho" }), T0);
+    const done = await saveNotice(notice({ title: "Concurso antigo", status: "DONE", isPublished: "on" }), { canChooseCoupon: true, now: T0 });
+    const open = await saveNotice(notice({ title: "Concurso aberto", status: "OPEN", isPublished: "on" }), { canChooseCoupon: true, now: T0 });
+    const draft = await saveNotice(notice({ title: "Concurso rascunho" }), { canChooseCoupon: true, now: T0 });
     expect(await getNoticeForViewer(draft.slug, false)).toBeNull();
     expect((await listPublishedNotices()).map((item) => item.id)).toEqual([open.id, done.id]);
 
-    await saveNotice(notice({ noticeId: open.id, title: "Concurso aberto", slug: "concurso-aberto-2026", status: "OPEN", isPublished: "on" }), T0);
+    await saveNotice(notice({ noticeId: open.id, title: "Concurso aberto", slug: "concurso-aberto-2026", status: "OPEN", isPublished: "on" }), { canChooseCoupon: true, now: T0 });
     expect(await findRedirectTarget("EXAM_NOTICE", open.slug)).toBe(open.id);
   });
 });
@@ -141,6 +173,25 @@ describe("endereços antigos do catálogo", () => {
     expect(await currentCatalogPath(course.slug, lesson.slug)).toBe("/cursos/teste-conteudo-c/aulas/aula-nova");
     expect(await currentCatalogPath("teste-conteudo-c", "nao-existe")).toBeNull();
     expect(await currentCatalogPath("nao-existe")).toBeNull();
+
+    // Rascunho: o endereço antigo NÃO revela o novo para o público (só para professor/admin).
+    await updateCourse({ courseId: course.id, slug: "teste-conteudo-secreto", ...edit, isPublished: false });
+    expect(await currentCatalogPath("teste-conteudo-c")).toBeNull();
+    expect(await currentCatalogPath("teste-conteudo-c", undefined, true)).toBe("/cursos/teste-conteudo-secreto");
+    await updateCourse({ courseId: course.id, slug: "teste-conteudo-secreto", ...edit });
+    await updateLesson({ ...lessonEdit, slug: "aula-rascunho", isPublished: false });
+    expect(await currentCatalogPath("teste-conteudo-c", "aula-nova")).toBeNull();
+    expect(await currentCatalogPath("teste-conteudo-c", "aula-nova", true)).toBe("/cursos/teste-conteudo-secreto/aulas/aula-rascunho");
+  });
+
+  it("post e página de concurso em rascunho: endereço antigo dá 'não encontrado' para o público", async () => {
+    const created = await savePost(post({ slug: "post-antigo" }), authorId, T0); // rascunho
+    await savePost(post({ postId: created.id, slug: "post-novo-secreto" }), authorId, T0);
+    const digest = (promise: Promise<unknown>) => promise.then(() => "ok", (error: { digest?: string }) => String(error.digest));
+    expect(await digest(redirectOldSlugOrNotFound("BLOG_POST", "post-antigo", { canSeeDrafts: false }))).toMatch(/^NEXT_HTTP_ERROR_FALLBACK;404/);
+    expect(await digest(redirectOldSlugOrNotFound("BLOG_POST", "post-antigo", { canSeeDrafts: true }))).toMatch(/NEXT_REDIRECT.*\/blog\/post-novo-secreto;308/);
+    await setPostPublished(created.id, true);
+    expect(await digest(redirectOldSlugOrNotFound("BLOG_POST", "post-antigo", { canSeeDrafts: false }))).toMatch(/NEXT_REDIRECT.*\/blog\/post-novo-secreto;308/);
   });
 });
 

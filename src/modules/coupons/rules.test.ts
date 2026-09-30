@@ -90,6 +90,26 @@ describe("checkCoupon", () => {
     });
   });
 
+  it("pedido do aluno aguardando pagamento: mensagem própria (pagar ou esperar vencer)", () => {
+    const once = { ...base, maxPerUser: 1 };
+    // O único uso do aluno é uma reserva (Pix gerado e não pago).
+    expect(checkCoupon({ coupon: once, target: product, now: NOW, redemptions: { total: 1, byUser: 1, pendingByUser: 1 } })).toEqual({
+      ok: false,
+      reason: "PENDING_BY_USER",
+    });
+    // Já pagou uma vez: "você já usou", mesmo tendo outra reserva.
+    const twice = { ...base, maxPerUser: 2 };
+    expect(checkCoupon({ coupon: twice, target: product, now: NOW, redemptions: { total: 2, byUser: 2, pendingByUser: 1 } })).toEqual({
+      ok: false,
+      reason: "PENDING_BY_USER",
+    });
+    expect(checkCoupon({ coupon: once, target: product, now: NOW, redemptions: { total: 2, byUser: 2, pendingByUser: 1 } })).toEqual({
+      ok: false,
+      reason: "ALREADY_USED",
+    });
+    expect(couponRejectionMessage("PENDING_BY_USER", "BB10")).toContain("aguardando pagamento");
+  });
+
   it("não deixa o preço abaixo da cobrança mínima (R$ 5,00)", () => {
     const hundred = { ...base, discountValue: 100 };
     expect(checkCoupon({ coupon: hundred, target: product, now: NOW, redemptions: noUses })).toEqual({ ok: false, reason: "BELOW_MINIMUM" });

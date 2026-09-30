@@ -8,6 +8,7 @@ import "server-only";
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { hasMinimumRole } from "@/modules/auth/roles";
 import { requireRole } from "@/modules/auth/session";
 import { NoticeForm } from "@/modules/notices/components/notice-form";
 import { listNoticeFormOptions } from "@/modules/notices/notices-admin.server";
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
 };
 
 export default async function NewNoticePage() {
-  await requireRole("TEACHER", "/admin/conteudo/concursos/nova");
+  const { user } = await requireRole("TEACHER", "/admin/conteudo/concursos/nova");
   const options = await listNoticeFormOptions();
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-6">
@@ -51,6 +52,7 @@ export default async function NewNoticePage() {
           isPublished: false,
         }}
         options={options}
+        canChooseCoupon={hasMinimumRole(user.role, "ADMIN")}
       />
     </div>
   );

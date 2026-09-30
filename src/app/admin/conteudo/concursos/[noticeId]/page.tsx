@@ -11,6 +11,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ActionButton } from "@/components/admin/action-button";
+import { hasMinimumRole } from "@/modules/auth/roles";
 import { requireRole } from "@/modules/auth/session";
 import { deleteNoticeAction, setNoticePublishedAction } from "@/modules/notices/actions";
 import { NoticeForm } from "@/modules/notices/components/notice-form";
@@ -24,7 +25,7 @@ export const metadata: Metadata = {
 
 export default async function EditNoticePage({ params }: PageProps<"/admin/conteudo/concursos/[noticeId]">) {
   const { noticeId } = await params;
-  await requireRole("TEACHER", `/admin/conteudo/concursos/${noticeId}`);
+  const { user } = await requireRole("TEACHER", `/admin/conteudo/concursos/${noticeId}`);
   const [notice, options] = await Promise.all([getNoticeForAdmin(noticeId), listNoticeFormOptions()]);
   if (!notice) notFound();
 
@@ -64,6 +65,7 @@ export default async function EditNoticePage({ params }: PageProps<"/admin/conte
           isPublished: notice.isPublished,
         }}
         options={options}
+        canChooseCoupon={hasMinimumRole(user.role, "ADMIN")}
       />
       <div className="flex flex-wrap gap-3 border-t pt-4">
         <ActionButton

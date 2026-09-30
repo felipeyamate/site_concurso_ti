@@ -302,7 +302,8 @@ ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegad
 | 1 | `/admin/vendas` → **Cupons** → crie `bemvindo20` com 20%, "Usos por aluno" = 1 | O cupom aparece como **BEMVINDO20** (maiúsculas), "20% de desconto · compras avulsas · 0 uso(s)" |
 | 2 | Com a 1ª conta de aluno: abra `/comprar/<produto>?cupom=NAOEXISTE` | "O cupom NAOEXISTE não existe. Confira as letras e os números." |
 | 3 | Digite `bemvindo20` no campo **"Tem um cupom de desconto?"** → Aplicar | "Cupom BEMVINDO20 aplicado: −R$ ..."; o preço antigo riscado e o novo (as parcelas também mudam) |
-| 4 | Pague com Pix e aprove no simulador (como na Fase 4) | Em "Minhas compras": "(cupom BEMVINDO20: −R$ ...)". No painel, o pedido mostra o cupom e o desconto |
+| 4 | Gere o Pix e, **antes de pagar**, abra de novo `/comprar/<produto>?cupom=BEMVINDO20` | "Você já tem um pedido com o cupom BEMVINDO20 aguardando pagamento..." (o Pix aberto reserva o uso; se ele vencer sem pagamento, o uso volta) |
+| 4b | Pague o Pix no simulador (como na Fase 4) | Em "Minhas compras": "(cupom BEMVINDO20: −R$ ...)". No painel, o pedido mostra o cupom e o desconto |
 | 5 | Abra de novo `/comprar/<produto>?cupom=BEMVINDO20` | "Você já usou o cupom BEMVINDO20." Na lista de cupons: "1 uso(s)" |
 | 6 | Crie um cupom de R$ 500,00 e aplique num produto mais barato | "...deixaria o valor abaixo do mínimo de cobrança (R$ 5,00)." |
 
@@ -331,8 +332,8 @@ ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegad
 | 16 | Clique em **Publicar** | O post aparece em `/blog`, na página inicial ("Do blog") e em `/blog/rss.xml` |
 | 17 | Troque o **endereço (slug)** do post e salve; abra o endereço antigo | Leva para o novo (redirecionamento permanente, bom para o Google). O mesmo vale para cursos, aulas e páginas de concurso |
 | 18 | `/concursos` e a página "Exemplo — Banco (Escriturário) 2026" | Situação, banca, datas, os assuntos com "Treinar questões", "O que mais cai na Cesgranrio" |
-| 19 | Conteúdo do site → Concursos → **Nova página**; escolha o produto e o cupom `BEMVINDO20`; marque "Publicada" | Na página pública: "Com o cupom BEMVINDO20 já aplicado" e o botão "Quero me preparar" abre a compra já com o desconto. (Um cupom que não existe é recusado ao salvar) |
-| 20 | Desative o produto e recarregue a página do concurso | A oferta some (a página continua) |
+| 19 | Com a conta **ADMIN** (só o admin escolhe o cupom; para o professor o campo é só leitura): Conteúdo do site → Concursos → **Nova página**; escolha o produto, um plano e o cupom `BEMVINDO20`; marque "Publicada" | Na página pública, no produto: o preço riscado, o preço com desconto, "Com o cupom BEMVINDO20 já aplicado" e o botão "Quero me preparar" abre a compra já com o desconto. No plano, **sem** cupom (ele só vale para compras avulsas). (Um cupom que não existe é recusado ao salvar) |
+| 20 | Desative o cupom e recarregue a página; depois desative o produto | Sem o cupom: o botão continua, sem desconto. Sem o produto: a oferta some (a página continua) |
 
 **SEO**
 

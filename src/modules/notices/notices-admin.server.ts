@@ -7,7 +7,10 @@
  *  - Slug único; vazio = gerado do título. Mudou o slug → o endereço antigo redireciona.
  *  - A data de publicação é a da PRIMEIRA publicação.
  *  - Banca, assuntos, produto, plano e cupom escolhidos precisam existir. Um cupom que ainda não
- *    vale (ex.: começa amanhã) pode ser escolhido: a página de compra explica ao aluno.
+ *    vale (ex.: começa amanhã) pode ser escolhido: a página só mostra o desconto quando ele valer.
+ *  - O CUPOM da página só o ADMIN escolhe (`canChooseCoupon`): cupons são dados de venda, que o
+ *    professor não vê. Quando o professor salva, o cupom que já estava na página é mantido — e o
+ *    código digitado nem é conferido (senão dava para "adivinhar" cupons pela mensagem de erro).
  */
 import "server-only";
 
@@ -45,15 +48,26 @@ export async function listNoticeFormOptions() {
 /**
  * Cria ou edita uma página de edital (numa transação): confere o que foi escolhido; gera o slug
  * se vier vazio; grava; troca os assuntos; na edição, registra o endereço antigo se o slug mudou.
+ * `canChooseCoupon`: só o ADMIN (ver o cabeçalho); sem ele, o cupom atual da página é mantido.
  */
-export async function saveNotice(data: NoticeFormData, now: Date = new Date()): Promise<{ id: string; slug: string }> {
+export async function saveNotice(
+  data: NoticeFormData,
+  options: { canChooseCoupon: boolean; now?: Date },
+): Promise<{ id: string; slug: string }> {
+  const now = options.now ?? new Date();
   try {
     return await prisma.$transaction(async (tx) => {
+      const current = data.noticeId
+        ? await tx.examNotice.findUnique({ where: { id: data.noticeId }, select: { slug: true, publishedAt: true, couponCode: true } })
+        : null;
+      if (data.noticeId && !current) throw new UserFacingError("Página não encontrada.");
+      const couponCode = options.canChooseCoupon ? data.couponCode : (current?.couponCode ?? null);
+
       const [board, product, plan, coupon, subjects] = await Promise.all([
         data.boardId ? tx.board.count({ where: { id: data.boardId } }) : 1,
         data.productId ? tx.product.count({ where: { id: data.productId } }) : 1,
         data.planId ? tx.plan.count({ where: { id: data.planId } }) : 1,
-        data.couponCode ? tx.coupon.count({ where: { code: data.couponCode } }) : 1,
+        options.canChooseCoupon && couponCode ? tx.coupon.count({ where: { code: couponCode } }) : 1,
         tx.subject.count({ where: { id: { in: data.subjectIds } } }),
       ]);
       if (board === 0) throw new UserFacingError("Banca não encontrada.", { field: "boardId" });
@@ -77,14 +91,12 @@ export async function saveNotice(data: NoticeFormData, now: Date = new Date()): 
         officialUrl: data.officialUrl,
         productId: data.productId,
         planId: data.planId,
-        couponCode: data.couponCode,
+        couponCode,
         isPublished: data.isPublished,
       };
 
       let notice: { id: string; slug: string };
-      if (data.noticeId) {
-        const current = await tx.examNotice.findUnique({ where: { id: data.noticeId }, select: { slug: true, publishedAt: true } });
-        if (!current) throw new UserFacingError("Página não encontrada.");
+      if (data.noticeId && current) {
         const slug = data.slug ?? current.slug;
         notice = await tx.examNotice.update({
           where: { id: data.noticeId },

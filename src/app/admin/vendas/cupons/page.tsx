@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/format";
 import { requireRole } from "@/modules/auth/session";
-import { CouponForm, EMPTY_COUPON } from "@/modules/coupons/components/coupon-form";
+import { CouponForm } from "@/modules/coupons/components/coupon-form";
+import { EMPTY_COUPON } from "@/modules/coupons/form-values";
 import { listCouponFormOptions, listCouponsForAdmin } from "@/modules/coupons/coupons-admin.server";
 import { describeDiscount } from "@/modules/coupons/rules";
 

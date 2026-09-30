@@ -9,6 +9,9 @@
  *
  * Por que importa: links compartilhados (WhatsApp, afiliados) e o Google continuam válidos, e o
  * Google transfere a "reputação" da página antiga para a nova.
+ * Rascunho: o endereço antigo de um item NÃO publicado só redireciona para quem vê rascunhos
+ * (professor/admin); para o público é "não encontrado" — senão o 308 revelaria o endereço novo do
+ * rascunho (regra "rascunhos não vazam").
  * Guardamos o ID do item (não o slug novo): se o slug mudar de novo, o endereço mais antigo leva
  * direto ao atual, sem cadeia de redirecionamentos.
  */
@@ -51,25 +54,29 @@ export async function findRedirectTarget(kind: SlugRedirectKind, slug: string, s
 
 /**
  * Endereço ATUAL de um curso/aula a partir de slugs que podem ser antigos (páginas do catálogo).
- * Aula: o curso pode ter mudado de slug, a aula também, ou os dois. Devolve null se não achar.
+ * Aula: o curso pode ter mudado de slug, a aula também, ou os dois. Devolve null se não achar — ou
+ * se o curso/aula for rascunho e quem pede não vê rascunhos (`canSeeDrafts`).
  */
-export async function currentCatalogPath(courseSlug: string, lessonSlug?: string): Promise<string | null> {
+export async function currentCatalogPath(courseSlug: string, lessonSlug?: string, canSeeDrafts = false): Promise<string | null> {
+  const courseSelect = { id: true, slug: true, isPublished: true } as const;
   const course =
-    (await prisma.course.findUnique({ where: { slug: courseSlug }, select: { id: true, slug: true } })) ??
+    (await prisma.course.findUnique({ where: { slug: courseSlug }, select: courseSelect })) ??
     (await (async () => {
       const id = await findRedirectTarget("COURSE", courseSlug);
-      return id ? prisma.course.findUnique({ where: { id }, select: { id: true, slug: true } }) : null;
+      return id ? prisma.course.findUnique({ where: { id }, select: courseSelect }) : null;
     })());
-  if (!course) return null;
+  if (!course || (!course.isPublished && !canSeeDrafts)) return null;
   if (lessonSlug === undefined) return `/cursos/${course.slug}`;
 
+  const lessonSelect = { slug: true, isPublished: true } as const;
   const lesson =
-    (await prisma.lesson.findUnique({ where: { courseId_slug: { courseId: course.id, slug: lessonSlug } }, select: { slug: true } })) ??
+    (await prisma.lesson.findUnique({ where: { courseId_slug: { courseId: course.id, slug: lessonSlug } }, select: lessonSelect })) ??
     (await (async () => {
       const id = await findRedirectTarget("LESSON", lessonSlug, course.id);
-      return id ? prisma.lesson.findFirst({ where: { id, courseId: course.id }, select: { slug: true } }) : null;
+      return id ? prisma.lesson.findFirst({ where: { id, courseId: course.id }, select: lessonSelect }) : null;
     })());
-  return lesson ? `/cursos/${course.slug}/aulas/${lesson.slug}` : null;
+  if (!lesson || (!lesson.isPublished && !canSeeDrafts)) return null;
+  return `/cursos/${course.slug}/aulas/${lesson.slug}`;
 }
 
 /**
@@ -77,9 +84,34 @@ export async function currentCatalogPath(courseSlug: string, lessonSlug?: string
  * (308, permanente) para o atual; senão, "página não encontrada". Nunca volta (lança sempre).
  * Compara com o endereço pedido para não redirecionar para a mesma página (ex.: curso em rascunho).
  */
-export async function redirectOldCatalogPathOrNotFound(courseSlug: string, lessonSlug?: string): Promise<never> {
+export async function redirectOldCatalogPathOrNotFound(
+  courseSlug: string,
+  lessonSlug: string | undefined,
+  options: { canSeeDrafts: boolean },
+): Promise<never> {
   const requested = lessonSlug === undefined ? `/cursos/${courseSlug}` : `/cursos/${courseSlug}/aulas/${lessonSlug}`;
-  const current = await currentCatalogPath(courseSlug, lessonSlug);
+  const current = await currentCatalogPath(courseSlug, lessonSlug, options.canSeeDrafts);
   if (current && current !== requested) permanentRedirect(current);
+  notFound();
+}
+
+/**
+ * O mesmo para posts do blog e páginas de concurso: slug antigo → redireciona para o atual (se o item
+ * estiver publicado, ou se quem pede vê rascunhos); senão, "não encontrado". Nunca volta.
+ */
+export async function redirectOldSlugOrNotFound(
+  kind: "BLOG_POST" | "EXAM_NOTICE",
+  slug: string,
+  options: { canSeeDrafts: boolean },
+): Promise<never> {
+  const targetId = await findRedirectTarget(kind, slug);
+  const select = { slug: true, isPublished: true } as const;
+  const target = !targetId
+    ? null
+    : kind === "BLOG_POST"
+      ? await prisma.blogPost.findUnique({ where: { id: targetId }, select })
+      : await prisma.examNotice.findUnique({ where: { id: targetId }, select });
+  const basePath = kind === "BLOG_POST" ? "/blog" : "/concursos";
+  if (target && target.slug !== slug && (target.isPublished || options.canSeeDrafts)) permanentRedirect(`${basePath}/${target.slug}`);
   notFound();
 }

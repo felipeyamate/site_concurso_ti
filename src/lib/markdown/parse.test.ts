@@ -91,6 +91,11 @@ describe("parseMarkdown", () => {
     expect(extractHeadings(blocks).map((heading) => heading.id)).toEqual(["o-que-e-phishing", "como-se-proteger", "como-se-proteger-2"]);
   });
 
+  it('título que termina em "#" (C#, F#) não perde o caractere; "##" de fechamento sai', () => {
+    expect(parseMarkdown("## Linguagem C#")[0]).toMatchObject({ type: "heading", level: 2, id: "linguagem-c" });
+    expect(extractHeadings(parseMarkdown("## F# e C#\n\n## Fechado ##"))).toMatchObject([{ text: "F# e C#" }, { text: "Fechado" }]);
+  });
+
   it("h3 e item de lista quebrado em duas linhas", () => {
     const blocks = parseMarkdown("### Detalhe\n- item longo\n  continua aqui\n- outro");
     expect(blocks[0]).toMatchObject({ type: "heading", level: 3 });

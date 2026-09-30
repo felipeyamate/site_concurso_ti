@@ -12,16 +12,21 @@ const checkbox = z.preprocess((value) => value === "on" || value === "true", z.b
 const id = z.string().trim().min(1).max(200);
 
 // "12,5" → 1250. De 0 a 100%, com até 2 casas.
+// Lido como TEXTO (parte inteira + casas decimais), sem passar por número "quebrado": em ponto
+// flutuante, 0.29 * 100 dá 28.999999999999996 (em Python também) e a conta de casas falhava.
+const COMMISSION_PATTERN = /^(\d{1,3})(?:[.,](\d{1,2}))?$/;
 const commissionPercent = z
   .string()
   .trim()
   .transform((value, ctx) => {
-    const percent = Number(value.replace(",", "."));
-    if (value === "" || !Number.isFinite(percent) || percent < 0 || percent > 100 || Math.round(percent * 100) !== percent * 100) {
+    const match = COMMISSION_PATTERN.exec(value);
+    // "5" → 50 pontos-base na casa decimal ("12,5" = 12,50%); "05" → 5.
+    const bps = match ? Number(match[1]) * 100 + Number((match[2] ?? "0").padEnd(2, "0")) : NaN;
+    if (!match || bps > 10000) {
       ctx.addIssue({ code: "custom", message: "Comissão: um número de 0 a 100 (ex.: 20 ou 12,5)." });
       return z.NEVER;
     }
-    return Math.round(percent * 100);
+    return bps;
   });
 
 const payoutInfo = z.string().trim().max(300, "No máximo 300 caracteres.");

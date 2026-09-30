@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { formatDuration } from "@/lib/format";
+import { hasMinimumRole } from "@/modules/auth/roles";
 import { requireSession } from "@/modules/auth/session";
 import { getCourseCurriculum, getLessonVideo } from "@/modules/catalog/catalog.server";
 import { CurriculumList } from "@/modules/catalog/components/curriculum-list";
@@ -62,11 +63,12 @@ export default async function LessonPage({ params }: LessonPageProps) {
   const { user } = await requireSession(pagePath);
   const view = await getCourseView(courseSlug, { userId: user.id, role: user.role });
   // Não achou: pode ser um endereço ANTIGO (curso ou aula mudou de slug) → redireciona (Fase 6).
-  if (!view) return redirectOldCatalogPathOrNotFound(courseSlug, lessonSlug);
+  const canSeeDrafts = hasMinimumRole(user.role, "TEACHER");
+  if (!view) return redirectOldCatalogPathOrNotFound(courseSlug, lessonSlug, { canSeeDrafts });
 
   // 2. A aula.
   const lesson = view.orderedLessons.find((item) => item.slug === lessonSlug);
-  if (!lesson) return redirectOldCatalogPathOrNotFound(courseSlug, lessonSlug);
+  if (!lesson) return redirectOldCatalogPathOrNotFound(courseSlug, lessonSlug, { canSeeDrafts });
 
   const courseModule = view.curriculum.modules.find((item) => item.lessons.some((l) => l.id === lesson.id));
   const moduleNumber = courseModule ? view.curriculum.modules.indexOf(courseModule) + 1 : null;

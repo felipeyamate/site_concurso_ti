@@ -19,7 +19,7 @@ import { withAdvisoryLock } from "@/lib/db-locks";
 import { prisma } from "@/lib/db";
 import { UserFacingError } from "@/lib/form-state";
 
-import { listAffiliateCommissions } from "./affiliates.server";
+import { listAffiliateCommissions, listCommissionsByAffiliate } from "./affiliates.server";
 import { summarizeCommissions } from "./rules";
 
 /** Os afiliados com as somas das comissões (o painel mostra o que está liberado para pagar). */
@@ -28,13 +28,13 @@ export async function listAffiliatesForAdmin(now: Date = new Date()) {
     orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
     select: { id: true, code: true, commissionBps: true, isActive: true, user: { select: { name: true, email: true } } },
   });
-  // Uma consulta por afiliado: suficiente para dezenas de afiliados (rever com centenas).
-  return Promise.all(
-    affiliates.map(async (affiliate) => ({
-      ...affiliate,
-      totals: summarizeCommissions(await listAffiliateCommissions(prisma, affiliate.id, now)),
-    })),
+  // As comissões de todos numa consulta só (não uma por afiliado).
+  const commissions = await listCommissionsByAffiliate(
+    prisma,
+    affiliates.map((affiliate) => affiliate.id),
+    now,
   );
+  return affiliates.map((affiliate) => ({ ...affiliate, totals: summarizeCommissions(commissions.get(affiliate.id) ?? []) }));
 }
 
 export async function createAffiliate(input: { email: string; code: string; commissionBps: number; payoutInfo: string }): Promise<{ id: string }> {

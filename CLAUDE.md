@@ -76,13 +76,17 @@
   Planilha: bytes → texto só com `decodeCsvBytes` (UTF-8 ou Windows-1252 do Excel), nunca `file.text()`.
 - Cupom: preço com desconto só por `previewCoupon` (tela) e `reserveCoupon` (checkout, dentro da trava do checkout, com a
   trava `coupon:<id>`), em `src/modules/coupons/`; regras puras em `coupons/rules.ts`. Nunca calcular desconto solto na página.
+  O que conta como uso: `redemptionWhere` (pago, mesmo reembolsado, + aguardando pagamento). Quem altera/apaga cupom pega a
+  mesma trava `coupon:<id>`. O cupom da página de concurso só o ADMIN escolhe (`canChooseCoupon` em `saveNotice`).
 - Afiliado: quem indicou a venda só sai de `resolveSaleAttribution` (cupom do afiliado ganha do cookie `ct_afiliado`).
   Comissões são CALCULADAS dos pagamentos (`listAffiliateCommissions`), não gravadas; o que foi pago fica nos itens de
   repasse (`registerAffiliatePayout`, com trava). Link `/r/...` só redireciona para caminhos do site (`safeRedirectPath`).
 - Texto do blog/concursos só com `<Markdown>`/`parseMarkdown` (`src/lib/markdown/`); nunca `dangerouslySetInnerHTML`
   (única exceção: `<JsonLd>`, que escapa o conteúdo em `serializeJsonLd`).
 - Trocar o slug de curso, aula, post ou página de concurso chama `recordSlugChange` na mesma transação; a página pública
-  confere `findRedirectTarget`/`redirectOldCatalogPathOrNotFound` antes de dar 404.
+  chama `redirectOldCatalogPathOrNotFound`/`redirectOldSlugOrNotFound` (com `canSeeDrafts`) antes de dar 404 — endereço
+  antigo de rascunho nunca redireciona para o público (o 308 revelaria o endereço novo).
+- Função de busca usada pela página E pelo `generateMetadata` leva o `cache` do React (ex.: `getPostForViewer`).
 - Endereço absoluto do site (canonical, sitemap, RSS, link de afiliado): `siteUrl()`/`absoluteUrl()` (`src/modules/seo/site.server.ts`).
   Sitemap e RSS são montados em `seo/feeds.server.ts`; a rota só faz `await connection()` e chama (os testes chamam direto).
 - Botão com texto longo numa linha `flex-wrap`: `h-auto shrink whitespace-normal` (o `Button` tem `shrink-0` e

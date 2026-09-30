@@ -10,13 +10,11 @@ import "server-only";
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, permanentRedirect } from "next/navigation";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/format";
 import { Markdown } from "@/lib/markdown/markdown";
 import { readingMinutes } from "@/lib/markdown/parse";
@@ -26,7 +24,7 @@ import { getPostForViewer, listRelatedPosts, postSummary } from "@/modules/blog/
 import { PostCard } from "@/modules/blog/components/post-card";
 import { articleJsonLd, breadcrumbJsonLd } from "@/modules/seo/json-ld";
 import { JsonLd } from "@/modules/seo/json-ld-script";
-import { findRedirectTarget } from "@/modules/seo/redirects.server";
+import { redirectOldSlugOrNotFound } from "@/modules/seo/redirects.server";
 import { SITE_NAME } from "@/modules/seo/site";
 import { absoluteUrl, siteUrl } from "@/modules/seo/site.server";
 
@@ -61,11 +59,8 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
   const { slug } = await params;
   const post = await getPostForViewer(slug, await canSeeDrafts());
   if (!post) {
-    // Endereço antigo (o slug mudou): leva ao atual.
-    const targetId = await findRedirectTarget("BLOG_POST", slug);
-    const target = targetId ? await prisma.blogPost.findUnique({ where: { id: targetId }, select: { slug: true } }) : null;
-    if (target && target.slug !== slug) permanentRedirect(`/blog/${target.slug}`);
-    notFound();
+    // Endereço antigo (o slug mudou): leva ao atual (rascunho só para quem vê rascunhos).
+    return redirectOldSlugOrNotFound("BLOG_POST", slug, { canSeeDrafts: await canSeeDrafts() });
   }
   const related = await listRelatedPosts({ id: post.id, subjectId: post.subjectId });
   const url = absoluteUrl(`/blog/${post.slug}`);

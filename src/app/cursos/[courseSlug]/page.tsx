@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { formatDate, formatDuration } from "@/lib/format";
+import { hasMinimumRole } from "@/modules/auth/roles";
 import { getCurrentSession } from "@/modules/auth/session";
 import { getCourseCurriculum } from "@/modules/catalog/catalog.server";
 import { CurriculumList } from "@/modules/catalog/components/curriculum-list";
@@ -79,7 +80,7 @@ export default async function CoursePage({ params }: PageProps<"/cursos/[courseS
   );
   if (!view) {
     // Pode ser um endereço ANTIGO (o curso mudou de slug) → redireciona para o atual (Fase 6).
-    return redirectOldCatalogPathOrNotFound(courseSlug);
+    return redirectOldCatalogPathOrNotFound(courseSlug, undefined, { canSeeDrafts: hasMinimumRole(session?.user.role, "TEACHER") });
   }
 
   const { curriculum, orderedLessons, summary } = view;

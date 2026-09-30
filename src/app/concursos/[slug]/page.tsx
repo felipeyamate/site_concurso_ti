@@ -11,13 +11,11 @@ import "server-only";
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, permanentRedirect } from "next/navigation";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { prisma } from "@/lib/db";
 import { Markdown } from "@/lib/markdown/markdown";
 import { hasMinimumRole } from "@/modules/auth/roles";
 import { getCurrentSession } from "@/modules/auth/session";
@@ -29,7 +27,7 @@ import { PLAN_CYCLE_PERIOD, accessDaysLabel } from "@/modules/payments/labels";
 import { formatBRL } from "@/modules/payments/money";
 import { breadcrumbJsonLd } from "@/modules/seo/json-ld";
 import { JsonLd } from "@/modules/seo/json-ld-script";
-import { findRedirectTarget } from "@/modules/seo/redirects.server";
+import { redirectOldSlugOrNotFound } from "@/modules/seo/redirects.server";
 import { absoluteUrl } from "@/modules/seo/site.server";
 
 async function canSeeDrafts(): Promise<boolean> {
@@ -56,12 +54,11 @@ export default async function NoticePage({ params }: PageProps<"/concursos/[slug
   const { slug } = await params;
   const notice = await getNoticeForViewer(slug, await canSeeDrafts());
   if (!notice) {
-    const targetId = await findRedirectTarget("EXAM_NOTICE", slug);
-    const target = targetId ? await prisma.examNotice.findUnique({ where: { id: targetId }, select: { slug: true } }) : null;
-    if (target && target.slug !== slug) permanentRedirect(`/concursos/${target.slug}`);
-    notFound();
+    // Endereço antigo (o slug mudou): leva ao atual (rascunho só para quem vê rascunhos).
+    return redirectOldSlugOrNotFound("EXAM_NOTICE", slug, { canSeeDrafts: await canSeeDrafts() });
   }
-  const withCoupon = (path: string) => (notice.couponCode ? `${path}?${COUPON_PARAM}=${encodeURIComponent(notice.couponCode)}` : path);
+  // O cupom só vai no link da oferta para a qual ele VALE (conferido em `getNoticeForViewer`).
+  const withCoupon = (path: string, coupon: OfferCoupon | null) => (coupon ? `${path}?${COUPON_PARAM}=${encodeURIComponent(coupon.code)}` : path);
   const facts = [
     ["Situação", NOTICE_STATUS_LABELS[notice.status]],
     ["Banca", notice.board?.name ?? "A definir"],
@@ -129,14 +126,15 @@ export default async function NoticePage({ params }: PageProps<"/concursos/[slug
               <CardHeader>
                 <CardTitle>{notice.product.title}</CardTitle>
                 <CardDescription>
-                  {formatBRL(notice.product.priceCents)} · acesso {accessDaysLabel(notice.product.accessDays)}
+                  <OfferPrice priceCents={notice.product.priceCents} coupon={notice.product.coupon} /> · acesso{" "}
+                  {accessDaysLabel(notice.product.accessDays)}
                   {notice.product.maxInstallments > 1 ? ` · até ${notice.product.maxInstallments}x no cartão` : ""}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-2">
-                {notice.couponCode ? <p className="text-sm">Com o cupom <strong>{notice.couponCode}</strong> já aplicado.</p> : null}
+                <CouponNote coupon={notice.product.coupon} />
                 <Button asChild>
-                  <Link href={withCoupon(`/comprar/${notice.product.slug}`)}>Quero me preparar</Link>
+                  <Link href={withCoupon(`/comprar/${notice.product.slug}`, notice.product.coupon)}>Quero me preparar</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -146,13 +144,14 @@ export default async function NoticePage({ params }: PageProps<"/concursos/[slug
               <CardHeader>
                 <CardTitle>{notice.plan.title}</CardTitle>
                 <CardDescription>
-                  {formatBRL(notice.plan.priceCents)} {PLAN_CYCLE_PERIOD[notice.plan.cycle]} · todos os cursos da assinatura
+                  <OfferPrice priceCents={notice.plan.priceCents} coupon={notice.plan.coupon} /> {PLAN_CYCLE_PERIOD[notice.plan.cycle]} · todos
+                  os cursos da assinatura
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-2">
-                {notice.couponCode ? <p className="text-sm">Com o cupom <strong>{notice.couponCode}</strong> já aplicado.</p> : null}
+                <CouponNote coupon={notice.plan.coupon} />
                 <Button asChild variant={notice.product ? "outline" : "default"}>
-                  <Link href={withCoupon(`/assinar/${notice.plan.slug}`)}>Assinar</Link>
+                  <Link href={withCoupon(`/assinar/${notice.plan.slug}`, notice.plan.coupon)}>Assinar</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -217,5 +216,26 @@ export default async function NoticePage({ params }: PageProps<"/concursos/[slug
         </Button>
       </div>
     </div>
+  );
+}
+
+type OfferCoupon = { code: string; finalPriceCents: number };
+
+/** Preço da oferta: com o cupom valendo, o antigo riscado e o novo. */
+function OfferPrice({ priceCents, coupon }: { priceCents: number; coupon: OfferCoupon | null }) {
+  if (!coupon) return <>{formatBRL(priceCents)}</>;
+  return (
+    <>
+      <span className="line-through">{formatBRL(priceCents)}</span> <strong className="text-foreground">{formatBRL(coupon.finalPriceCents)}</strong>
+    </>
+  );
+}
+
+function CouponNote({ coupon }: { coupon: OfferCoupon | null }) {
+  if (!coupon) return null;
+  return (
+    <p className="text-sm">
+      Com o cupom <strong>{coupon.code}</strong> já aplicado.
+    </p>
   );
 }

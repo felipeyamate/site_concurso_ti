@@ -5,8 +5,10 @@
  * chamam direto.
  *
  * Regras:
- *  - O código é único. Depois de usado numa venda, o código não muda (o pedido guarda o código;
- *    para outro código, crie outro cupom).
+ *  - O código é único. Depois de aparecer numa venda (qualquer pedido/assinatura, mesmo vencido), o
+ *    código não muda (o pedido guarda o código; para outro código, crie outro cupom).
+ *  - Editar e apagar usam a MESMA trava do checkout (`coupon:<id>`): uma compra com o cupom que está
+ *    sendo gravada naquele instante termina antes, e a conferência já a enxerga.
  *  - Cupom usado não se apaga (a chave estrangeira do pedido impede): desative.
  *  - Mudar o desconto não altera vendas feitas: cada pedido guarda o desconto que teve.
  *  - Datas: o cupom vale do COMEÇO do dia inicial até o FIM do dia final (dias de Brasília).
@@ -14,11 +16,12 @@
 import "server-only";
 
 import { isUniqueViolation } from "@/lib/db-errors";
+import { advisoryLock } from "@/lib/db-locks";
 import { prisma } from "@/lib/db";
 import { UserFacingError } from "@/lib/form-state";
 import { addDays, startOfDayInSaoPaulo, toSaoPauloDate } from "@/modules/payments/dates";
 
-import { countRedemptions } from "./coupons.server";
+import { countRedemptions, redemptionWhere } from "./coupons.server";
 import type { CouponFormData } from "./schemas";
 
 /** Datas do formulário (dias) → instantes de começo e fim (fim exclusivo: 00:00 do dia seguinte). */
@@ -38,14 +41,23 @@ export function daysFromPeriod(startsAt: Date | null, endsAt: Date | null): { st
 }
 
 export async function listCouponsForAdmin() {
+  // Uma consulta só: o banco conta, junto com cada cupom, os pedidos e assinaturas que contam como uso
+  // (mesma regra do checkout, `redemptionWhere`) — sem uma consulta por cupom.
   const coupons = await prisma.coupon.findMany({
     orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
-    include: { affiliate: { select: { code: true } }, _count: { select: { products: true, plans: true } } },
+    include: {
+      affiliate: { select: { code: true } },
+      _count: {
+        select: {
+          products: true,
+          plans: true,
+          orders: { where: redemptionWhere.order },
+          subscriptions: { where: redemptionWhere.subscription },
+        },
+      },
+    },
   });
-  // Usos que contam (mesma regra do checkout), um cupom por vez — a lista é curta.
-  return Promise.all(
-    coupons.map(async (coupon) => ({ ...coupon, redemptions: (await countRedemptions(prisma, coupon.id, null)).total })),
-  );
+  return coupons.map((coupon) => ({ ...coupon, redemptions: coupon._count.orders + coupon._count.subscriptions }));
 }
 
 /** Um cupom com as restrições e as últimas vendas que o usaram. */
@@ -89,8 +101,9 @@ export async function listCouponFormOptions() {
 
 /**
  * Cria ou edita um cupom.
- * Passos (numa transação): confere os produtos/planos/afiliado escolhidos; na edição, trava o
- * cupom e recusa trocar o código de um cupom já usado; grava o cupom e troca as restrições.
+ * Passos (numa transação): confere os produtos/planos/afiliado escolhidos; na edição, pega a trava do
+ * cupom (a mesma do checkout) e recusa trocar o código de um cupom que já aparece em alguma venda;
+ * grava o cupom e troca as restrições.
  */
 export async function saveCoupon(data: CouponFormData): Promise<{ id: string }> {
   const fields = {
@@ -120,11 +133,16 @@ export async function saveCoupon(data: CouponFormData): Promise<{ id: string }> 
 
       let couponId = data.couponId;
       if (couponId) {
-        await tx.$executeRaw`SELECT id FROM coupons WHERE id = ${couponId} FOR UPDATE`;
-        const current = await tx.coupon.findUnique({ where: { id: couponId }, select: { code: true } });
+        // A mesma trava do checkout (`reserveCoupon`): uma compra com este cupom em andamento termina
+        // antes, e o pedido dela já aparece na conferência abaixo.
+        await advisoryLock(tx, `coupon:${couponId}`);
+        const current = await tx.coupon.findUnique({
+          where: { id: couponId },
+          select: { code: true, _count: { select: { orders: true, subscriptions: true } } },
+        });
         if (!current) throw new UserFacingError("Cupom não encontrado.");
-        if (current.code !== data.code && (await countRedemptions(tx, couponId, null)).total > 0) {
-          throw new UserFacingError("Este cupom já foi usado: o código não muda. Para outro código, crie outro cupom.", { field: "code" });
+        if (current.code !== data.code && current._count.orders + current._count.subscriptions > 0) {
+          throw new UserFacingError("Este cupom já aparece em vendas: o código não muda. Para outro código, crie outro cupom.", { field: "code" });
         }
         await tx.coupon.update({ where: { id: couponId }, data: fields });
         await tx.couponProduct.deleteMany({ where: { couponId } });
@@ -150,10 +168,14 @@ export async function setCouponActive(couponId: string, isActive: boolean): Prom
 
 /**
  * Apaga um cupom que NUNCA foi usado numa venda (nem em pedido cancelado). Conferência e apagar
- * num comando só: `deleteMany` com a condição "sem pedido e sem assinatura".
+ * num comando só (`deleteMany` com a condição "sem pedido e sem assinatura"), depois da trava do
+ * cupom: uma compra com ele em andamento termina antes (e então o cupom não se apaga).
  */
 export async function deleteCoupon(couponId: string): Promise<void> {
-  const { count } = await prisma.coupon.deleteMany({ where: { id: couponId, orders: { none: {} }, subscriptions: { none: {} } } });
+  const { count } = await prisma.$transaction(async (tx) => {
+    await advisoryLock(tx, `coupon:${couponId}`);
+    return tx.coupon.deleteMany({ where: { id: couponId, orders: { none: {} }, subscriptions: { none: {} } } });
+  });
   if (count === 0) {
     throw new UserFacingError("Este cupom já aparece em vendas (ou não existe mais): desative em vez de apagar.");
   }

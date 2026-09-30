@@ -109,7 +109,9 @@ export function headingId(text: string): string {
   );
 }
 
-const HEADING = /^(#{1,6})\s+(.+?)\s*#*$/;
+// "## Título" ou "## Título ##". Os "#" de fechamento só contam depois de um ESPAÇO (como no Markdown
+// padrão): "## Linguagem C#" continua terminando em "C#".
+const HEADING = /^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/;
 const UNORDERED_ITEM = /^[-*]\s+(.*)$/;
 const ORDERED_ITEM = /^\d{1,3}[.)]\s+(.*)$/;
 const RULE = /^(-{3,}|\*{3,}|_{3,})$/;
