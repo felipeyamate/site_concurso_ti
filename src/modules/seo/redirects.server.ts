@@ -1,5 +1,5 @@
 /**
- * redirects.server.ts — Endereços antigos: quando o slug de um curso, aula, post ou edital muda, o
+ * redirects.server.ts — Endereços antigos: quando o slug de um curso, aula, post, edital ou trilha muda, o
  * endereço antigo continua funcionando e leva (redirecionamento permanente, 308) ao novo.
  *
  * Quem chama:
@@ -95,23 +95,29 @@ export async function redirectOldCatalogPathOrNotFound(
   notFound();
 }
 
+// Onde fica a página pública de cada tipo (Fase 8: trilhas).
+const BASE_PATHS = { BLOG_POST: "/blog", EXAM_NOTICE: "/concursos", TRACK: "/trilhas" } as const;
+
+/** O slug atual e se está publicado, do item de destino (post, página de concurso ou trilha). */
+async function findSlugTarget(kind: keyof typeof BASE_PATHS, id: string) {
+  const select = { slug: true, isPublished: true } as const;
+  if (kind === "BLOG_POST") return prisma.blogPost.findUnique({ where: { id }, select });
+  if (kind === "EXAM_NOTICE") return prisma.examNotice.findUnique({ where: { id }, select });
+  return prisma.track.findUnique({ where: { id }, select });
+}
+
 /**
- * O mesmo para posts do blog e páginas de concurso: slug antigo → redireciona para o atual (se o item
- * estiver publicado, ou se quem pede vê rascunhos); senão, "não encontrado". Nunca volta.
+ * O mesmo para posts do blog, páginas de concurso e trilhas: slug antigo → redireciona para o atual
+ * (se o item estiver publicado, ou se quem pede vê rascunhos); senão, "não encontrado". Nunca volta.
  */
 export async function redirectOldSlugOrNotFound(
-  kind: "BLOG_POST" | "EXAM_NOTICE",
+  kind: keyof typeof BASE_PATHS,
   slug: string,
   options: { canSeeDrafts: boolean },
 ): Promise<never> {
   const targetId = await findRedirectTarget(kind, slug);
-  const select = { slug: true, isPublished: true } as const;
-  const target = !targetId
-    ? null
-    : kind === "BLOG_POST"
-      ? await prisma.blogPost.findUnique({ where: { id: targetId }, select })
-      : await prisma.examNotice.findUnique({ where: { id: targetId }, select });
-  const basePath = kind === "BLOG_POST" ? "/blog" : "/concursos";
+  const target = targetId ? await findSlugTarget(kind, targetId) : null;
+  const basePath = BASE_PATHS[kind];
   if (target && target.slug !== slug && (target.isPublished || options.canSeeDrafts)) permanentRedirect(`${basePath}/${target.slug}`);
   notFound();
 }

@@ -15,6 +15,7 @@ test("páginas públicas abrem; termos e privacidade mostram a versão", async (
   for (const [path, heading] of [
     ["/", "Informática e TI para concursos, do zero"],
     ["/cursos", null],
+    ["/trilhas", "Trilhas de estudo"],
     ["/blog", "Blog"],
     ["/concursos", null],
     ["/o-que-mais-cai", "O que mais cai de TI nos concursos"],
@@ -109,7 +110,7 @@ test("celular (360 px): páginas principais sem rolagem para o lado", async ({ b
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), { message: path, timeout: 10_000 })
       .toBe(true);
   }
-  for (const path of ["/", "/cursos", "/blog", "/concursos", "/o-que-mais-cai", "/termos", "/privacidade", "/cadastro"]) {
+  for (const path of ["/", "/cursos", "/trilhas", "/trilhas/exemplo-trilha-cesgranrio-banco", "/blog", "/concursos", "/o-que-mais-cai", "/termos", "/privacidade", "/cadastro"]) {
     await expectNoOverflow(path);
   }
   // E-mail comprido de propósito: aparece no topo da área do aluno e no aviso de confirmação.

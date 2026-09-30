@@ -23,8 +23,9 @@ import { env } from "@/lib/env";
 import { isProductionSite } from "@/lib/runtime";
 import { requireRole } from "@/modules/auth/session";
 import { deleteLessonAction } from "@/modules/catalog/admin/actions";
-import { countStudentProgress, getLessonForAdmin } from "@/modules/catalog/admin/catalog-admin.server";
+import { countStudentProgress, getLessonForAdmin, listSubjectOptions } from "@/modules/catalog/admin/catalog-admin.server";
 import { LessonDetailsForm } from "@/modules/catalog/admin/components/lesson-forms";
+import { LessonSubjectsForm } from "@/modules/catalog/admin/components/lesson-subjects-form";
 import { LessonVideoForm } from "@/modules/catalog/admin/components/lesson-video-form";
 import type { VideoSource } from "@/modules/catalog/admin/schemas";
 import { AttachmentManager } from "@/modules/materials/components/attachment-manager";
@@ -45,7 +46,9 @@ export default async function AdminLessonPage({ params }: AdminLessonPageProps) 
   if (!lesson || lesson.courseId !== courseId) notFound();
 
   const videoSource: VideoSource = !lesson.videoId ? "NONE" : lesson.videoProvider;
-  const studentsWatched = await countStudentProgress(lesson.id, lesson.courseId);
+  const [studentsWatched, subjects] = await Promise.all([countStudentProgress(lesson.id, lesson.courseId), listSubjectOptions()]);
+  // Fase 8: trilhas em que a aula está (uma aula entra no máximo uma vez em cada trilha).
+  const tracks = lesson.trackItems.map((item) => item.section.track);
 
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-10">
@@ -100,6 +103,32 @@ export default async function AdminLessonPage({ params }: AdminLessonPageProps) 
 
       <Card>
         <CardHeader>
+          <CardTitle>Assuntos desta aula</CardTitle>
+          <CardDescription>
+            Quem errar uma questão destes assuntos vê &quot;estude esta aula&quot;; a página da aula mostra &quot;treinar questões&quot;
+            deles; e as trilhas montadas pelo &quot;o que mais cai&quot; incluem a aula na etapa do assunto.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <LessonSubjectsForm lessonId={lesson.id} subjects={subjects} selectedIds={lesson.subjects.map((item) => item.subjectId)} />
+          {tracks.length > 0 ? (
+            <p className="text-muted-foreground text-sm">
+              Está nas trilhas:{" "}
+              {tracks.map((track, index) => (
+                <span key={track.id}>
+                  {index > 0 ? ", " : ""}
+                  <Link href={`/admin/conteudo/trilhas/${track.id}`} className="underline">
+                    {track.title}
+                  </Link>
+                </span>
+              ))}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Materiais (PDF)</CardTitle>
           <CardDescription>
             Aparecem embaixo do vídeo para quem tem acesso à aula. Cada download confere o acesso e gera um link que vale 5
@@ -121,7 +150,9 @@ export default async function AdminLessonPage({ params }: AdminLessonPageProps) 
           <CardDescription>
             {studentsWatched > 0
               ? `${studentsWatched} aluno(s) já assistiram esta aula: ela não pode ser apagada. Para tirar do ar, desmarque "Publicada".`
-              : "Apaga a aula e os PDFs dela. Isso não pode ser desfeito."}
+              : tracks.length > 0
+                ? "A aula está numa trilha: tire-a da trilha antes de apagar (ou desmarque \"Publicada\" para tirar do ar)."
+                : "Apaga a aula e os PDFs dela. Isso não pode ser desfeito."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -129,7 +160,7 @@ export default async function AdminLessonPage({ params }: AdminLessonPageProps) 
             action={deleteLessonAction}
             fields={{ id: lesson.id }}
             variant="destructive"
-            disabled={studentsWatched > 0}
+            disabled={studentsWatched > 0 || tracks.length > 0}
             confirmMessage={`Apagar a aula "${lesson.title}" e os PDFs dela?`}
           >
             <Trash2 />

@@ -28,6 +28,7 @@ import { formatDuration } from "@/lib/format";
 import { hasMinimumRole } from "@/modules/auth/roles";
 import { requireSession } from "@/modules/auth/session";
 import { getCourseCurriculum, getLessonVideo } from "@/modules/catalog/catalog.server";
+import { listLessonSubjects } from "@/modules/catalog/lesson-subjects.server";
 import { CurriculumList } from "@/modules/catalog/components/curriculum-list";
 import { findAdjacentLessons } from "@/modules/catalog/curriculum";
 import { LOCKED_LESSON_MESSAGES } from "@/modules/enrollment/access";
@@ -155,6 +156,9 @@ export default async function LessonPage({ params }: LessonPageProps) {
     );
   }
 
+  // Fase 8: assuntos que a aula ensina → "treinar questões" (do banco de questões).
+  const subjects = await listLessonSubjects(lesson.id);
+
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-8 px-4 py-8 lg:grid-cols-[1fr_340px]">
       <div className="grid content-start gap-6">
@@ -176,6 +180,19 @@ export default async function LessonPage({ params }: LessonPageProps) {
         {main}
 
         {lesson.description ? <p className="leading-relaxed">{lesson.description}</p> : null}
+
+        {subjects.length > 0 ? (
+          <section className="grid gap-2 rounded-lg border p-4" aria-label="Treinar questões">
+            <p className="text-sm font-medium">Treine o que você aprendeu nesta aula:</p>
+            <div className="flex flex-wrap gap-2">
+              {subjects.map((subject) => (
+                <Button key={subject.id} asChild variant="outline" size="sm" className="h-auto min-h-8 shrink py-1.5 text-left whitespace-normal">
+                  <Link href={`/questoes?assunto=${encodeURIComponent(subject.slug)}`}>Questões de {subject.name}</Link>
+                </Button>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <nav className="flex flex-wrap justify-between gap-2" aria-label="Navegação entre aulas">
           {previous ? (

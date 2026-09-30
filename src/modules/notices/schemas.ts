@@ -69,6 +69,8 @@ export const noticeSchema = z.object({
     .transform((value) => (value ? normalizeCouponCode(value) : null))
     .refine((value) => value === null || COUPON_CODE_PATTERN.test(value), "Código de cupom inválido."),
   subjectIds: z.array(id).max(50).default([]),
+  // Fase 8: a trilha de estudos indicada na página (opcional).
+  trackId: optionalId,
   isPublished: checkbox,
 });
 

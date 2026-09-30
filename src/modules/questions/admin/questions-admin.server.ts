@@ -98,9 +98,12 @@ export async function deleteBoard(boardId: string): Promise<void> {
   if (board._count.exams + board._count.questions > 0) {
     throw new UserFacingError("Esta banca tem provas ou questões cadastradas: não pode ser apagada.");
   }
+  // Fase 8: treino de uma trilha filtrado por esta banca (a chave estrangeira também impede).
+  const inTrack = await prisma.trackItem.findFirst({ where: { boardId }, select: { section: { select: { track: { select: { title: true } } } } } });
+  if (inTrack) throw new UserFacingError(`Esta banca é usada num treino da trilha "${inTrack.section.track.title}": tire o treino antes.`);
   // Se uma questão/prova for ligada a ela no meio, a chave estrangeira (Restrict) impede o apagar.
   await prisma.board.delete({ where: { id: boardId } }).catch(() => {
-    throw new UserFacingError("Esta banca passou a ter provas ou questões: não pode ser apagada.");
+    throw new UserFacingError("Esta banca passou a ser usada (provas, questões ou trilhas): não pode ser apagada.");
   });
 }
 
@@ -124,8 +127,11 @@ export async function saveSubject(input: {
 export async function deleteSubject(subjectId: string): Promise<void> {
   const count = await prisma.question.count({ where: { subjectId } });
   if (count > 0) throw new UserFacingError("Este assunto tem questões: não pode ser apagado.");
+  // Fase 8: treino de uma trilha sobre este assunto (a chave estrangeira também impede).
+  const inTrack = await prisma.trackItem.findFirst({ where: { subjectId }, select: { section: { select: { track: { select: { title: true } } } } } });
+  if (inTrack) throw new UserFacingError(`Este assunto é usado num treino da trilha "${inTrack.section.track.title}": tire o treino antes.`);
   await prisma.subject.delete({ where: { id: subjectId } }).catch(() => {
-    throw new UserFacingError("Este assunto passou a ter questões (ou não existe mais): não pode ser apagado.");
+    throw new UserFacingError("Este assunto passou a ser usado (questões ou trilhas) ou não existe mais: não pode ser apagado.");
   });
 }
 

@@ -7,6 +7,7 @@
  * O que recebe: enunciado e alternativas — SEM gabarito e SEM comentário. Os dois só chegam na
  * resposta da ação `answerQuestionAction`, depois que a tentativa é gravada.
  * "Tentar de novo" monta o formulário do zero (cada tentativa conta no desempenho).
+ * Fase 8: depois de responder, "estude esta aula" com as aulas que ensinam o assunto (`studyLessons`).
  */
 import Link from "next/link";
 import { startTransition, useActionState, useState } from "react";
@@ -27,7 +28,10 @@ export type PracticeQuestion = QuestionMetaData & {
   history: "CORRECT" | "WRONG" | null;
 };
 
-export function QuestionCard({ question, number }: { question: PracticeQuestion; number: number }) {
+// Aula que ensina o assunto da questão (a página da aula decide o acesso, como sempre).
+export type StudyLessonLink = { id: string; title: string; courseTitle: string; href: string };
+
+export function QuestionCard({ question, number, studyLessons = [] }: { question: PracticeQuestion; number: number; studyLessons?: StudyLessonLink[] }) {
   // Trocar a `key` recria o formulário (limpa a escolha e o resultado) para tentar de novo.
   const [round, setRound] = useState(0);
   return (
@@ -41,13 +45,13 @@ export function QuestionCard({ question, number }: { question: PracticeQuestion;
             {question.history === "CORRECT" ? "✓ Você já acertou esta questão." : "Você já errou esta questão — tente de novo."}
           </p>
         ) : null}
-        <AnswerForm key={round} question={question} onRetry={() => setRound((value) => value + 1)} />
+        <AnswerForm key={round} question={question} studyLessons={studyLessons} onRetry={() => setRound((value) => value + 1)} />
       </CardContent>
     </Card>
   );
 }
 
-function AnswerForm({ question, onRetry }: { question: PracticeQuestion; onRetry: () => void }) {
+function AnswerForm({ question, studyLessons, onRetry }: { question: PracticeQuestion; studyLessons: StudyLessonLink[]; onRetry: () => void }) {
   const [state, dispatch, pending] = useActionState<AnswerState, FormData>(answerQuestionAction, { status: "idle" });
   const [selected, setSelected] = useState<string | null>(null);
   const answered = state.status === "answered";
@@ -95,6 +99,21 @@ function AnswerForm({ question, onRetry }: { question: PracticeQuestion; onRetry
             <p className="mb-1 font-medium">Comentário do professor</p>
             <p className="whitespace-pre-line">{state.explanation}</p>
           </div>
+          {studyLessons.length > 0 ? (
+            <div className="grid gap-1 text-sm">
+              <p className="font-medium">{state.isCorrect ? "Quer revisar o assunto?" : "Estude esta aula antes de tentar de novo:"}</p>
+              <ul className="grid gap-1">
+                {studyLessons.map((lesson) => (
+                  <li key={lesson.id}>
+                    <Link href={lesson.href} className="text-primary underline">
+                      {lesson.title}
+                    </Link>{" "}
+                    <span className="text-muted-foreground text-xs">({lesson.courseTitle})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {state.remainingFree !== null ? (
             <p className="text-muted-foreground text-xs">
               {state.remainingFree === 1 ? "Resta 1 questão grátis hoje." : `Restam ${state.remainingFree} questões grátis hoje.`}

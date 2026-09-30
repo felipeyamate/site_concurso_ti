@@ -3,7 +3,8 @@
  *
  * Quem chama: o Next.js (link na área do aluno e no resultado do simulado).
  * Mostra: total de respostas e taxa de acerto, a tabela por assunto (pontos fracos primeiro, com
- * "Treinar" levando às questões do assunto) e os últimos simulados.
+ * "Treinar" levando às questões do assunto; Fase 8: e as aulas que ensinam cada ponto fraco) e os
+ * últimos simulados.
  */
 import "server-only";
 
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
 import { requireSession } from "@/modules/auth/session";
+import { listStudyLessonsBySubject } from "@/modules/catalog/lesson-subjects.server";
 import { MIN_ATTEMPTS_FOR_RANKING, WEAK_ACCURACY_PERCENT, accuracyPercent } from "@/modules/questions/performance";
 import { getMyPerformance } from "@/modules/questions/performance.server";
 
@@ -27,6 +29,11 @@ export default async function PerformancePage() {
   const { user } = await requireSession("/area-do-aluno/desempenho");
   const performance = await getMyPerformance(user.id);
   const weak = performance.subjects.filter((subject) => subject.isWeak);
+  // Fase 8: "estude esta aula" para cada ponto fraco (uma aula por assunto basta aqui).
+  const studyLessons = await listStudyLessonsBySubject(
+    weak.map((subject) => subject.subjectId),
+    { perSubject: 1 },
+  );
 
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-10">
@@ -79,14 +86,27 @@ export default async function PerformancePage() {
                   as questões que você errou.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                {weak.map((subject) => (
-                  <Button key={subject.subjectId} asChild size="sm" variant="outline">
-                    <Link href={`/questoes?assunto=${subject.slug}&situacao=erradas`}>
-                      {subject.name} ({subject.percent}%)
-                    </Link>
-                  </Button>
-                ))}
+              <CardContent className="grid gap-3">
+                {weak.map((subject) => {
+                  const lesson = studyLessons.get(subject.subjectId)?.[0];
+                  return (
+                    <div key={subject.subjectId} className="flex flex-wrap items-center gap-2 text-sm">
+                      <Button asChild size="sm" variant="outline" className="h-auto min-h-8 shrink py-1.5 text-left whitespace-normal">
+                        <Link href={`/questoes?assunto=${subject.slug}&situacao=erradas`}>
+                          {subject.name} ({subject.percent}%)
+                        </Link>
+                      </Button>
+                      {lesson ? (
+                        <span className="min-w-0">
+                          Estude:{" "}
+                          <Link href={lesson.href} className="text-primary underline">
+                            {lesson.title}
+                          </Link>
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           ) : null}

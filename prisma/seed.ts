@@ -3,8 +3,9 @@
  *
  * Quem chama: você, com `npm run db:seed`.
  * O que faz: grava o catálogo de exemplo (ver `seed-catalog.ts`), o banco de questões de exemplo
- * (ver `seed-questions.ts`, Fase 5) e os posts do blog + uma página de edital fictícia (ver
- * `seed-marketing.ts`, Fase 6). Pode rodar várias vezes.
+ * (ver `seed-questions.ts`, Fase 5), os posts do blog + uma página de edital fictícia (ver
+ * `seed-marketing.ts`, Fase 6) e os assuntos das aulas + uma trilha fictícia (ver `seed-tracks.ts`,
+ * Fase 8). Pode rodar várias vezes.
  *
  * Não rode no banco de produção: o conteúdo real entra pelo painel admin (Fase 3).
  */
@@ -13,6 +14,7 @@ import { createScriptPrismaClient } from "../scripts/script-db";
 import { seedCatalog } from "./seed-catalog";
 import { seedMarketing } from "./seed-marketing";
 import { seedQuestionBank } from "./seed-questions";
+import { seedTracks } from "./seed-tracks";
 
 async function main(): Promise<void> {
   // Trava de segurança: dados de exemplo nunca vão para o site de produção.
@@ -32,6 +34,8 @@ async function main(): Promise<void> {
     );
     const marketing = await seedMarketing(prisma);
     console.info(`Marketing: ${marketing.posts} post(s) novo(s) no blog e ${marketing.notices} página(s) de concurso nova(s).`);
+    const tracks = await seedTracks(prisma);
+    console.info(`Trilhas: ${tracks.lessonSubjects} ligação(ões) aula ↔ assunto nova(s) e ${tracks.tracks} trilha(s) nova(s).`);
   } finally {
     await prisma.$disconnect();
   }

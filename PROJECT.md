@@ -109,6 +109,9 @@ BlogPost, ExamNotice (página de concurso) ──< ExamNoticeSubject >── Sub
 WebhookEvent (log de tudo que chega dos provedores)
 User ──< LegalConsent   (aceites dos Termos/Privacidade: versão, data, IP, navegador)
 User ──< AccessLog      (registro de acesso do Marco Civil: cada login, guardado por 6 meses)
+Lesson >──< Subject    (LessonSubject: o que a aula ensina → "estude esta aula")
+Track (trilha por concurso/banca) ──< TrackSection (etapa) ──< TrackItem (aula de qualquer curso OU treino: assunto + banca + meta)
+ExamNotice >── Track   (a trilha indicada na página do concurso)
 ```
 
 ### Regras de negócio que não mudam
@@ -134,6 +137,7 @@ User ──< AccessLog      (registro de acesso do Marco Civil: cada login, guar
 | 5 | Banco de questões, simulados, mapa de incidência por banca | ✅ concluída (ver seção 10) |
 | 6 | Landing pages por edital, SEO, blog, cupons e afiliados | ✅ concluída (ver seção 10) |
 | 7 | Testes E2E, Sentry, LGPD, deploy de produção | ✅ concluída (ver seção 10) |
+| 8 | Trilhas por concurso/banca (Fase B do conteúdo) e "estude esta aula" | ✅ concluída (ver seção 10) |
 
 **Cada fase termina com:** código funcionando + testes + instruções de como testar + este arquivo
 atualizado.
@@ -179,7 +183,7 @@ atualizado.
 | 2026-09-28 | "Continuar": última aula assistida se não concluída; senão, a próxima pendente | Comportamento esperado por quem estuda em sequência |
 | 2026-09-28 | O banco garante que a aula pertence ao mesmo curso do seu módulo (chave estrangeira composta `(module_id, course_id)`) | A checagem de acesso usa o curso da aula; dados inconsistentes nunca podem liberar ou bloquear errado |
 | 2026-09-28 | Quem teve acesso e perdeu (vencido/cancelado) ou ainda vai começar vê o motivo na página do curso, na aula e em "Meus cursos" (o curso continua listado, com o progresso guardado). A aula grátis só é sugerida quando o curso tem uma | Evita mensagens erradas para ex-alunos e para quem tem matrícula futura |
-| 2026-09-28 | Trilhas por concurso/banca (Fase B do conteúdo) e reaproveitamento de aulas entre cursos ficam para depois (tabela de ligação quando for preciso); PDFs das aulas entram com o R2 na Fase 3 | Não criar tabelas sem uso |
+| 2026-09-28 | Trilhas por concurso/banca (Fase B do conteúdo) e reaproveitamento de aulas entre cursos ficam para depois (tabela de ligação quando for preciso); PDFs das aulas entram com o R2 na Fase 3 (*trilhas feitas na Fase 8 — ver 2026-10-02*) | Não criar tabelas sem uso |
 | 2026-09-28 | No celular, o cabeçalho esconde o botão "Criar conta" (continua na página inicial, no login e nos cursos) | Os 3 botões não cabiam em telas de 360 px |
 | 2026-09-29 | **Fase 3:** painel em `/admin` — PROFESSOR gerencia cursos, módulos, aulas, vídeos e PDFs; só ADMIN gerencia usuários, perfis e matrículas. Toda Server Action do painel confere login + perfil de novo (`getSessionWithRole`) | Separar conteúdo de dados pessoais/financeiros; uma Server Action pode ser chamada direto por HTTP |
 | 2026-09-29 | Cursos e aulas novos nascem como **rascunho**; tirar do ar = despublicar. **Não se apaga** curso com matrícula (mesmo vencida) nem aula que um ALUNO assistiu; módulo só é apagado vazio | Nunca perder histórico de aluno; o progresso de professor testando não bloqueia |
@@ -251,6 +255,11 @@ atualizado.
 | 2026-10-01 | Previews da Vercel usam o **próprio endereço** (`VERCEL_BRANCH_URL`/`VERCEL_URL`) como `BETTER_AUTH_URL` | O login em previews mandava para o site oficial |
 | 2026-10-01 | **Testes E2E** (Playwright) no repositório, contra o site em modo desenvolvimento (pagamento **simulado**), rodando no CI com o seed num banco descartável | Garante os caminhos mais importantes (cadastro, LGPD, compra, reembolso, celular) a cada PR, sem conta no Asaas |
 | 2026-10-01 | Dados da empresa nos textos legais pelas variáveis `LEGAL_*`, **obrigatórias** no site oficial; os textos atuais são **modelos** a revisar com um advogado | A LGPD exige identificar o controlador e o canal do encarregado; o site oficial não sobe com "[CNPJ]" |
+| 2026-10-02 | **Fase 8 — trilha = roteiro, não produto:** uma trilha (`tracks`) é um roteiro de estudo por concurso/banca, em **etapas**, cada uma com **aulas de qualquer curso** (o Curso Base + aulas próprias) e **treinos de questões** (assunto + banca opcional + meta). Ela **não libera nada**: o cadeado de cada aula vem da mesma regra das páginas do curso (`checkLessonAccess` com a matrícula no curso DAQUELA aula); para vender, a trilha aponta um produto/plano (como as páginas de concurso) | Reaproveita as aulas sem duplicar cursos e sem mexer na regra de acesso (o código mais sensível); "trilha direcionada" = ordem + foco, que é o diferencial |
+| 2026-10-02 | Progresso na trilha: aula **feita** = concluída; treino **feito** = respondeu a meta de questões **diferentes** do assunto (na banca do treino, se houver), na prática ou em simulados. "Próximo passo" = o primeiro não feito. Aula ou curso em rascunho: o aluno não vê o passo (o professor vê, com aviso) | Medida simples e honesta: repetir a mesma questão não completa o treino; a trilha mostra o que falta |
+| 2026-10-02 | **"Montar pelo que mais cai"**: ao criar a trilha (ou numa trilha vazia), uma etapa por assunto da banca, do que mais cai para o que menos cai (questões de prova publicadas), com as aulas daquele assunto (uma aula não se repete) e um treino na banca (meta 10). O professor revisa depois (ordem, dicas, metas, incluir/tirar). A página mostra, ao vivo, quanto cada etapa cai na banca | É o diferencial do produto ("estudar primeiro o que dá mais pontos") virando rotina de uma tela só |
+| 2026-10-02 | **Aula ↔ assunto** (`lesson_subjects`, marcado no painel da aula): depois de responder uma questão, "estude esta aula" (até 2 aulas publicadas do assunto); na página da aula, "treinar questões deste assunto"; em "Meu desempenho", a aula de cada ponto fraco | Liga a prática à teoria (pendência da Fase 5) com uma tabela só, usada também pelo "montar pelo que mais cai" |
+| 2026-10-02 | Estrutura da trilha editada com a trava da trilha (`track:<id>`); uma aula entra no máximo **uma vez** por trilha; aula, curso, assunto ou banca usados numa trilha **não se apagam** (chave estrangeira `Restrict` + aviso no painel); trocar o endereço da trilha redireciona o antigo; a página de concurso pode indicar uma trilha ("Seguir a trilha", só se publicada) | Mesmas regras de sempre: nada some sem o professor ver, posições nunca se embaralham, links antigos continuam valendo |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -431,7 +440,7 @@ explicando o erro do Google para contas não confirmadas.
 - Questões só com **texto** (sem imagem, tabela ou fórmula formatada). Questões de Office com print de tela → rever quando
   o professor precisar (upload de imagem pelo mesmo armazenamento dos PDFs).
 - O aluno não tem botão para **avisar erro** numa questão, e não existe a marca de questão **anulada** pela banca.
-- O assunto da questão não aponta para a **aula** que ensina aquilo ("estude esta aula") → junto com as trilhas.
+- O assunto da questão não aponta para a **aula** que ensina aquilo ("estude esta aula") → junto com as trilhas. (*Feito na Fase 8.*)
 - O mapa "o que mais cai" só fica representativo quando houver provas reais cadastradas (as do seed são fictícias).
 - Simulado em andamento que o aluno abandona fica "em andamento" (conta no limite de 3 até ele finalizar), e as questões dele
   ficam fora de "Resolver questões" até lá — inclusive para quem perdeu o acesso (não finaliza até o acesso voltar). Rever se incomodar.
@@ -516,7 +525,7 @@ explicando o erro do Google para contas não confirmadas.
   ele ligasse; Pix abandonados ocupariam a conferência automática. Os casos principais têm testes novos.
 
 **Como testar:** [README.md → "Como testar a Fase 7"](./README.md#8-como-testar-a-fase-7-passo-a-passo).
-**Publicar:** [README.md → "Publicando o site"](./README.md#12-publicando-o-site-produção-na-vercel).
+**Publicar:** [README.md → "Publicando o site"](./README.md#13-publicando-o-site-produção-na-vercel).
 
 **Pendências conhecidas:**
 - **Revisão jurídica** dos Termos e da Política de privacidade (os textos são modelos) e preenchimento dos dados reais (`LEGAL_*`).
@@ -532,3 +541,36 @@ explicando o erro do Google para contas não confirmadas.
   da Neon com movimento real.
 - Nos testes E2E, o pagamento é sempre **simulado**; a conferência com o sandbox real do Asaas continua pendente (Fase 4).
 - Os testes E2E deixam contas `e2e-...@exemplo.com` (e produtos/cupons de teste) no banco de desenvolvimento.
+
+### Fase 8 — Trilhas de estudo por concurso/banca e "estude esta aula" (2026-10-02)
+
+**Entregue:**
+- Banco: `tracks`, `track_sections`, `track_items` (aula OU treino, com travas `CHECK`), `lesson_subjects` e `exam_notices.track_id`
+  (migração `study_tracks`); endereço antigo de trilha redireciona (`SlugRedirectKind.TRACK`).
+- **Trilhas** (`src/modules/tracks`): regras puras testadas (`rules.ts`: visão do aluno com acesso pela matrícula, feito/próximo
+  passo, e o rascunho pelo "o que mais cai"), página pública `/trilhas` e `/trilhas/<trilha>` (etapas, cadeados, treinos
+  filtrados, progresso com login, "Próximo passo", oferta e quanto cada etapa cai na banca), no menu, no rodapé, na página
+  inicial e no sitemap.
+- **Painel** (`/admin/conteudo/trilhas`, PROFESSOR ou mais): criar/editar/publicar/apagar, "montar pelo que mais cai", etapas
+  e passos com ↑ ↓, editar (dica, meta, banca, mudar de etapa), incluir aula (de qualquer curso) e treino; proteções ao apagar
+  aula, curso, assunto e banca usados numa trilha.
+- **Aula ↔ assunto**: "Assuntos desta aula" no painel; "estude esta aula" depois de responder em "Resolver questões"; "treinar
+  questões" na página da aula; a aula de cada ponto fraco em "Meu desempenho".
+- **Página de concurso** indica a trilha ("Seguir a trilha"); os cartões de oferta viraram um componente só (`OfferCards`),
+  usado pela página de concurso e pela trilha.
+- Seed: os assuntos das aulas do Curso Base e a trilha **fictícia** "Exemplo — Trilha Cesgranrio (Banco)", indicada na
+  página de concurso fictícia.
+- Testes: 363 unitários + 160 de integração (inclusive passos incluídos **ao mesmo tempo** na mesma etapa) + 16 cenários E2E
+  (4 novos das trilhas; o celular de 360 px agora passa também por `/trilhas` e pela trilha de exemplo). O painel de trilhas,
+  a aula no painel e "Meu desempenho" foram conferidos a 360 px (sem rolagem lateral).
+
+**Como testar:** [README.md → "Como testar a Fase 8"](./README.md#9-como-testar-a-fase-8-passo-a-passo).
+
+**Pendências conhecidas:**
+- Trilha com **prazo** (ex.: "faltam 45 dias para a prova: estude X por semana") e lembretes por e-mail → quando houver alunos
+  usando as trilhas.
+- "Minhas trilhas" na área do aluno (hoje o aluno chega pela lista, pela página de concurso ou pelo link) → rever com uso real.
+- O "montar pelo que mais cai" usa as questões de **prova** da banca: com as provas fictícias do seed, a ordem é só um exemplo.
+- Simulado "da trilha" (sortear só os assuntos da trilha na banca dela) → junto com o prazo.
+- Os testes E2E deixam trilhas `Trilha E2E ...` no banco de desenvolvimento.
+

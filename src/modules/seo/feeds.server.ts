@@ -14,25 +14,28 @@ import { prisma } from "@/lib/db";
 import { markdownToPlainText, truncateText } from "@/lib/markdown/parse";
 import { listPostsForFeeds } from "@/modules/blog/blog.server";
 import { listNoticesForSitemap } from "@/modules/notices/notices.server";
+import { listTracksForSitemap } from "@/modules/tracks/tracks.server";
 
 import { buildRss } from "./rss";
 import { SITE_NAME } from "./site";
 import { absoluteUrl, siteUrl } from "./site.server";
 
 // Páginas públicas fixas (sem banco). Área do aluno, painel e checkout ficam de fora: são privadas.
-const FIXED_PATHS = ["/", "/cursos", "/planos", "/concursos", "/blog", "/o-que-mais-cai"];
+const FIXED_PATHS = ["/", "/cursos", "/trilhas", "/planos", "/concursos", "/blog", "/o-que-mais-cai"];
 const LEGAL_PATHS = ["/termos", "/privacidade"];
 
 /**
- * Lista do sitemap: páginas fixas, cursos publicados, páginas de edital publicadas e posts publicados.
+ * Lista do sitemap: páginas fixas, cursos publicados, trilhas publicadas (Fase 8), páginas de edital
+ * publicadas e posts publicados.
  * Rascunhos nunca entram (as funções de listagem já filtram por "publicado").
  */
 export async function buildSitemapEntries(): Promise<MetadataRoute.Sitemap> {
-  // Três consultas em paralelo (como um `asyncio.gather`).
-  const [courses, posts, notices] = await Promise.all([
+  // Quatro consultas em paralelo (como um `asyncio.gather`).
+  const [courses, posts, notices, tracks] = await Promise.all([
     prisma.course.findMany({ where: { isPublished: true }, select: { slug: true, updatedAt: true } }),
     listPostsForFeeds(),
     listNoticesForSitemap(),
+    listTracksForSitemap(),
   ]);
   const fixed = FIXED_PATHS.map((path) => ({
     url: absoluteUrl(path),
@@ -42,6 +45,7 @@ export async function buildSitemapEntries(): Promise<MetadataRoute.Sitemap> {
   return [
     ...fixed,
     ...courses.map((course) => ({ url: absoluteUrl(`/cursos/${course.slug}`), lastModified: course.updatedAt, priority: 0.9 })),
+    ...tracks.map((track) => ({ url: absoluteUrl(`/trilhas/${track.slug}`), lastModified: track.updatedAt, priority: 0.8 })),
     ...notices.map((notice) => ({ url: absoluteUrl(`/concursos/${notice.slug}`), lastModified: notice.updatedAt, priority: 0.8 })),
     ...posts.map((post) => ({ url: absoluteUrl(`/blog/${post.slug}`), lastModified: post.updatedAt, priority: 0.6 })),
     ...LEGAL_PATHS.map((path) => ({ url: absoluteUrl(path), priority: 0.1 })),

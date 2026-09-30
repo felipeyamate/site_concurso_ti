@@ -83,7 +83,7 @@ const practiceQuestionSelect = {
   type: true,
   statement: true,
   options: { orderBy: { label: "asc" }, select: { label: true, text: true } },
-  subject: { select: { name: true, slug: true } },
+  subject: { select: { id: true, name: true, slug: true } },
   board: { select: { name: true } },
   exam: { select: { name: true, year: true } },
 } as const satisfies Prisma.QuestionSelect;

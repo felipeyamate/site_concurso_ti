@@ -74,6 +74,12 @@ export const updateLessonSchema = z.object({
   isPublished: checkbox,
 });
 
+// Fase 8: assuntos que a aula ensina ("estude esta aula" nas questões do assunto; trilhas).
+export const lessonSubjectsSchema = z.object({
+  lessonId: id,
+  subjectIds: z.array(id).max(20, "No máximo 20 assuntos por aula.").default([]),
+});
+
 export const VIDEO_SOURCES = ["NONE", "PANDA", "DEV"] as const;
 export type VideoSource = (typeof VIDEO_SOURCES)[number];
 

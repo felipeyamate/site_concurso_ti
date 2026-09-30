@@ -19,7 +19,7 @@ import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { isRecordNotFound, isUniqueViolation } from "@/lib/db-errors";
+import { isForeignKeyViolation, isRecordNotFound, isUniqueViolation } from "@/lib/db-errors";
 import { UserFacingError } from "@/lib/form-state";
 import { recordSlugChange } from "@/modules/seo/redirects.server";
 import { parsePandaEmbedInput } from "@/modules/video/panda/embed";
@@ -145,6 +145,9 @@ export async function getLessonForAdmin(lessonId: string) {
         orderBy: { createdAt: "asc" },
         select: { id: true, title: true, fileName: true, sizeBytes: true },
       },
+      // Fase 8: assuntos que a aula ensina e as trilhas em que ela está.
+      subjects: { select: { subjectId: true } },
+      trackItems: { select: { section: { select: { track: { select: { id: true, title: true } } } } } },
     },
   });
 }
@@ -262,6 +265,11 @@ export async function deleteCourse(courseId: string): Promise<string[]> {
     const watched = await tx.lessonProgress.count({ where: { lesson: { courseId }, ...studentProgressIn(courseId) } });
     if (watched > 0) {
       throw new UserFacingError("Alunos já assistiram aulas deste curso. Despublique em vez de apagar.");
+    }
+    // Fase 8: aula que está numa trilha não some da trilha sem o professor ver (as aulas estão travadas acima).
+    const inTrack = await tx.trackItem.findFirst({ where: { lesson: { courseId } }, select: { section: { select: { track: { select: { title: true } } } } } });
+    if (inTrack) {
+      throw new UserFacingError(`Aulas deste curso estão na trilha "${inTrack.section.track.title}". Tire-as da trilha antes de apagar o curso.`);
     }
     const attachments = await tx.lessonAttachment.findMany({
       where: { lesson: { courseId } },
@@ -558,8 +566,45 @@ export async function deleteLesson(lessonId: string): Promise<{ courseId: string
     if (watched > 0) {
       throw new UserFacingError("Alunos já assistiram esta aula. Despublique em vez de apagar, para não perder o histórico.");
     }
+    // Fase 8: a aula está numa trilha? Sai da trilha antes (a aula travada acima segura quem tentar incluí-la agora).
+    const inTrack = await tx.trackItem.findFirst({ where: { lessonId }, select: { section: { select: { track: { select: { title: true } } } } } });
+    if (inTrack) {
+      throw new UserFacingError(`Esta aula está na trilha "${inTrack.section.track.title}". Tire-a da trilha antes de apagar.`);
+    }
     await tx.lesson.delete({ where: { id: lessonId } });
     await closeLessonGap(tx, lesson.moduleId, lesson.position);
     return { courseId: lesson.courseId, storageKeys: lesson.attachments.map((item) => item.storageKey) };
   });
+}
+
+// =============================================================================================
+// Assuntos da aula (Fase 8)
+// =============================================================================================
+
+/** Os assuntos do banco de questões, para marcar os da aula. */
+export async function listSubjectOptions() {
+  return prisma.subject.findMany({ orderBy: [{ position: "asc" }, { name: "asc" }], select: { id: true, name: true } });
+}
+
+/**
+ * Troca a lista de assuntos que a aula ensina ("estude esta aula" nas questões desses assuntos e o
+ * "montar pelo que mais cai" das trilhas).
+ * Passos: confere a aula e os assuntos; apaga a lista antiga e grava a nova (numa transação).
+ */
+export async function setLessonSubjects(input: { lessonId: string; subjectIds: string[] }): Promise<void> {
+  const subjectIds = [...new Set(input.subjectIds)];
+  try {
+    await prisma.$transaction(async (tx) => {
+      const lesson = await tx.lesson.findUnique({ where: { id: input.lessonId }, select: { id: true } });
+      if (!lesson) throw new UserFacingError("Aula não encontrada.");
+      const found = await tx.subject.count({ where: { id: { in: subjectIds } } });
+      if (found !== subjectIds.length) throw new UserFacingError("Algum assunto escolhido não existe mais. Recarregue a página.");
+      await tx.lessonSubject.deleteMany({ where: { lessonId: input.lessonId } });
+      await tx.lessonSubject.createMany({ data: subjectIds.map((subjectId) => ({ lessonId: input.lessonId, subjectId })) });
+    });
+  } catch (error) {
+    // Aula ou assunto apagado no meio do caminho.
+    if (isForeignKeyViolation(error)) throw new UserFacingError("A aula ou algum assunto não existe mais. Recarregue a página.");
+    throw error;
+  }
 }

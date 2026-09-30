@@ -62,6 +62,7 @@ export default async function EditNoticePage({ params }: PageProps<"/admin/conte
           planId: notice.planId ?? "",
           couponCode: notice.couponCode ?? "",
           subjectIds: notice.subjects.map((item) => item.subjectId),
+          trackId: notice.trackId ?? "",
           isPublished: notice.isPublished,
         }}
         options={options}

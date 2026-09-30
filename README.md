@@ -4,13 +4,12 @@ Plataforma de cursos que ensina Informática/TI para candidatos de concursos que
 área de TI**. Visão, regras de negócio, stack e roteiro estão em **[PROJECT.md](./PROJECT.md)**
 (leia primeiro).
 
-**Estado atual:** Fase 7 concluída — pronto para produção: LGPD (termos e privacidade versionados, aceite
-registrado, "Baixar meus dados" e "Excluir minha conta"), avisos de erro (Sentry, sem dados pessoais), análise de uso
-(PostHog, só com o aceite dos cookies), cabeçalhos de segurança, tarefas agendadas (conferir pagamentos no Asaas e
-limpeza), testes de ponta a ponta no navegador (Playwright) e o guia de publicação (seção 12). (Fase 1: projeto,
-banco, login e perfis. Fase 2: catálogo, player, matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs.
-Fase 4: vendas com o Asaas. Fase 5: banco de questões, simulados e "o que mais cai". Fase 6: páginas de concurso,
-blog, SEO, cupons e afiliados.)
+**Estado atual:** Fase 8 concluída — trilhas de estudo por concurso/banca: roteiros em etapas com aulas (de qualquer
+curso) e treinos de questões, montados pelo "o que mais cai" da banca, com o progresso do aluno; e a ligação aula ↔
+assunto ("estude esta aula" ao responder uma questão, "treinar questões" na página da aula). (Fase 1: projeto, banco,
+login e perfis. Fase 2: catálogo, player, matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs. Fase 4:
+vendas com o Asaas. Fase 5: banco de questões, simulados e "o que mais cai". Fase 6: páginas de concurso, blog, SEO,
+cupons e afiliados. Fase 7: LGPD, avisos de erro, análise de uso, testes E2E e o guia de publicação — seção 13.)
 
 ---
 
@@ -418,7 +417,45 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 
 ---
 
-## 9. Comandos do dia a dia
+## 9. Como testar a Fase 8 (passo a passo)
+
+Pré-requisitos: `npm run db:deploy` (migração nova `study_tracks`), `npm run db:generate` e `npm run db:seed` (agora ele liga
+as aulas do Curso Base aos assuntos das questões e cria a trilha **fictícia** "Exemplo — Trilha Cesgranrio (Banco)", indicada
+na página de concurso fictícia — pode rodar várias vezes). Uma conta PROFESSOR (ou ADMIN) e uma conta de aluno (navegador anônimo).
+
+**A trilha de exemplo (visitante e aluno)**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 1 | Abra `/trilhas` (menu "Trilhas" no computador; no celular, no rodapé) | O cartão "Exemplo — Trilha Cesgranrio (Banco)" com quantas aulas e treinos ela tem |
+| 2 | Abra a trilha **sem login** | Etapas na ordem do que mais cai, cada uma com "cai em X% das questões da Cesgranrio". Aulas com 🔒 ("precisa do curso"), a aula grátis liberada, e "Entre para acompanhar o seu progresso". No fim, "Para liberar as aulas com cadeado" com a oferta (produto/plano da trilha, se houver) |
+| 3 | Entre com a conta de aluno e abra a trilha de novo | "Você fez 0 de N passos", a barra de progresso e o botão "Próximo passo" (o primeiro passo fica destacado) |
+| 4 | Clique em "Treinar Segurança da Informação (Cesgranrio)" e responda uma questão | Cai em "Resolver questões" já filtrado. Depois de responder: "Estude esta aula antes de tentar de novo:" (se errou) ou "Quer revisar o assunto?" (se acertou), com o link da aula |
+| 5 | Volte à trilha | O treino mostra "1 de 10 questões · X% de acerto". Com 10 questões **diferentes** do assunto na banca, ele ganha o ✓ |
+| 6 | ADMIN: dê acesso ao Curso Base para o aluno (Usuários → matrícula manual). Com o aluno, abra a trilha e conclua uma aula ("Marcar como concluída") | Os cadeados somem (a trilha só **mostra** o acesso; quem libera é a matrícula no curso de cada aula). A aula concluída ganha o ✓ e o "Próximo passo" avança |
+| 7 | Abra a aula `/cursos/informatica-e-ti-do-zero/aulas/pilares-da-seguranca` | "Treine o que você aprendeu nesta aula:" com "Questões de Segurança da Informação" |
+| 8 | Erre 5 ou mais questões de um assunto e abra "Meu desempenho" | Em "Seus pontos fracos", ao lado do assunto: "Estude: <aula>" |
+| 9 | Abra `/concursos/exemplo-banco-escriturario-2026` | O cartão "Trilha de estudos indicada para este concurso" com "Seguir a trilha" |
+
+**Painel (PROFESSOR)**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 10 | Cursos → Curso Base → uma aula → **Assuntos desta aula**: marque/desmarque e salve | "Assuntos salvos." Embaixo, "Está nas trilhas: ..." (se ela estiver numa trilha) |
+| 11 | Conteúdo do site → **Trilhas de estudo** → Nova trilha: título, banca **Cesgranrio**, deixe marcado "Já montar as etapas pelo que mais cai" → Criar | Abre a edição com as etapas na ordem do que mais cai: as aulas de cada assunto e "Treinar ... · Cesgranrio · meta de 10 questões" |
+| 12 | Nova trilha com a caixa marcada e **sem** banca; depois com a banca **FCC** (sem questões de prova no seed) | "Escolha a banca para montar as etapas pelo que mais cai." / "Esta banca ainda não tem questões de prova publicadas: monte as etapas à mão." |
+| 13 | Na edição: ↑ ↓ nas etapas e nos passos; "Editar passo" (mude a meta para 15 ou mude o passo de etapa); "+ Incluir aula" com uma aula que já está na trilha | As posições se reorganizam. A aula repetida: "Esta aula já está na trilha (etapa "...")" |
+| 14 | Tente apagar uma aula que está numa trilha (Cursos → aula) e um assunto usado num treino (Banco de questões → assuntos) | A aula: botão desativado com "A aula está numa trilha: tire-a da trilha antes de apagar". O assunto: "Este assunto é usado num treino da trilha ..." |
+| 15 | Troque o endereço (slug) da trilha e salve; abra o endereço antigo | Redireciona para o novo (como cursos, posts e concursos) |
+| 16 | **Publicar** / **Despublicar** | Publicada: aparece em `/trilhas`, na página inicial e no `/sitemap.xml`. Rascunho: num navegador anônimo, "Página não encontrada" (o professor vê a prévia) |
+| 17 | Conteúdo do site → Concursos → uma página → "Trilha de estudos indicada" | A página do concurso mostra o cartão "Seguir a trilha" (trilha em rascunho não aparece para o público) |
+
+> A trilha do seed é **fictícia** (as provas de exemplo também). As trilhas reais entram pelo painel — o "montar pelo que
+> mais cai" fica bom quando houver provas reais cadastradas e as aulas estiverem ligadas aos assuntos (passo 10).
+
+---
+
+## 10. Comandos do dia a dia
 
 | Comando | Para que serve |
 |---|---|
@@ -427,8 +464,8 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 | `npm run lint` | Procura problemas comuns no código |
 | `npm run typecheck` | Checa os tipos do TypeScript (como o `mypy`) |
 | `npm test` | Testes unitários (rápidos, sem banco) |
-| `npm run test:integration` | Testes com banco de verdade (ver seção 10) |
-| `npm run test:e2e` | Testes de ponta a ponta: sobe o site e clica nele com um navegador (ver seção 10) |
+| `npm run test:integration` | Testes com banco de verdade (ver seção 11) |
+| `npm run test:e2e` | Testes de ponta a ponta: sobe o site e clica nele com um navegador (ver seção 11) |
 | `npm run db:migrate -- --name descricao` | Depois de **alterar** `prisma/schema.prisma`: cria e aplica uma nova migração |
 | `npm run db:deploy` | Aplica migrações já existentes (primeira vez, produção) |
 | `npm run db:studio` | Abre uma interface visual para ver/editar os dados do banco |
@@ -438,7 +475,7 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 
 ---
 
-## 10. Testes automáticos
+## 11. Testes automáticos
 
 - **Unitários** (`npm test`): regras puras — perfis, limite de sessões, proteção de redirecionamento,
   validação de formulários, variáveis de ambiente, e-mails, **acesso às aulas** (matrícula),
@@ -450,7 +487,8 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
   assunto, mapa "o que mais cai", leitura de planilha CSV e importação; e o **marketing**: regras do cupom
   (desconto, validade, limites), comissão dos afiliados (carência, estorno), o Markdown seguro do blog, os dados
   estruturados (JSON-LD) e o RSS; e a **Fase 7**: regras da exclusão de conta, limpeza de dados pessoais dos avisos
-  de erro (Sentry), aviso de cookies e a senha das tarefas agendadas.
+  de erro (Sentry), aviso de cookies e a senha das tarefas agendadas; e as **trilhas** (Fase 8): progresso do aluno
+  (acesso pela matrícula, treinos por questões diferentes), o rascunho pelo "o que mais cai" e os formulários.
 - **Integração** (`npm run test:integration`): cadastro, login, limite de sessões, seed do catálogo,
   acesso às aulas, progresso, painel de cursos (criar, reordenar, apagar com proteção), envio e
   download de PDFs, matrículas e perfis, e as vendas (compra, avisos repetidos/atrasados, reembolso,
@@ -458,7 +496,9 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
   respostas simultâneas, simulados, mapa, painel com a proteção do histórico, importação e o seed) e o marketing
   (compra com cupom, cupom disputado por duas compras ao mesmo tempo, venda indicada, comissão e repasse, blog,
   páginas de concurso, redirecionamento de endereços antigos, sitemap e RSS) e a Fase 7 (aceite dos termos, excluir a conta
-  com compras guardadas, baixar os dados, conferência automática de pagamentos e limpeza), gravando num PostgreSQL de verdade.
+  com compras guardadas, baixar os dados, conferência automática de pagamentos e limpeza) e as trilhas (aula ↔ assunto,
+  montar pelo "o que mais cai", ordem das etapas e passos — inclusive passos incluídos ao mesmo tempo —, proteções ao apagar
+  aula/curso/assunto/banca, visão do aluno e sitemap), gravando num PostgreSQL de verdade.
   Os pagamentos nos testes são sempre SIMULADOS (a chave do Asaas é ignorada). **Os testes apagam os dados do banco que usam**, por isso exigem um banco
   SEPARADO na variável `TEST_DATABASE_URL`:
   1. Na Neon, crie uma branch chamada `test` (Branches → New branch).
@@ -468,7 +508,8 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 - **Ponta a ponta / E2E** (`npm run test:e2e`, Playwright): sobe o site (`npm run dev`, porta 3100) e usa um navegador
   de verdade como um aluno: cadastro com o aceite, aceite de uma versão nova dos textos, baixar os dados, excluir a conta,
   compra com Pix simulado + reembolso, cupom, páginas públicas, SEO e cabeçalhos, questão grátis, link de afiliado, painel
-  fechado para alunos e celular de 360 px. Usa o banco do `.env.local` (com o `npm run db:seed`); na primeira vez, rode
+  fechado para alunos, celular de 360 px e as trilhas (visitante, progresso do aluno, "estude esta aula", professor montando
+  pelo "o que mais cai" e a página de concurso indicando a trilha). Usa o banco do `.env.local` (com o `npm run db:seed`); na primeira vez, rode
   `npx playwright install chromium`. Os testes ficam em `tests/e2e/`.
 - **CI:** a cada push/PR, o GitHub Actions roda lint, tipos, os testes unitários e de integração e o build e, em paralelo,
   os testes E2E com o conteúdo de exemplo (`.github/workflows/ci.yml`), cada um com um PostgreSQL temporário. Se o E2E
@@ -476,13 +517,13 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 
 ---
 
-## 11. Onde fica cada coisa
+## 12. Onde fica cada coisa
 
 ```
 prisma/
   schema.prisma          Tabelas do banco (como os models.py do Django/SQLAlchemy)
   migrations/            Histórico de alterações do banco (SQL gerado pelo Prisma)
-  seed.ts, seed-catalog.ts, seed-questions.ts, seed-marketing.ts  Curso, questões, posts e concurso de EXEMPLO (npm run db:seed)
+  seed.ts, seed-catalog.ts, seed-questions.ts, seed-marketing.ts, seed-tracks.ts  Curso, questões, posts, concurso e trilha de EXEMPLO (npm run db:seed)
 scripts/                 set-role.ts (perfil), enroll.ts (matrícula) e vercel-build.sh (build da Vercel: migra o banco em produção)
 vercel.json              Comando de build e tarefas agendadas (Vercel Cron)
 playwright.config.ts     Testes E2E (sobe o site e abre o navegador)
@@ -495,6 +536,7 @@ src/
     termos/, privacidade/  Textos legais (versão em modules/legal/version.ts)
     error.tsx, global-error.tsx  Páginas "Algo deu errado" (avisam o Sentry)
     blog/, concursos/    Blog (posts e rss.xml) e páginas por concurso/edital (públicos)
+    trilhas/             Trilhas de estudo (públicas; com login, mostram o progresso)
     r/[codigo]/          Link de divulgação do afiliado (conta o clique, guarda o cookie e redireciona)
     sitemap.ts, robots.ts  Mapa do site e regras para o Google
     questoes/, simulados/  Resolver questões e simulados (exige login); o-que-mais-cai/ = mapa público por banca
@@ -502,7 +544,7 @@ src/
     dev/pagamentos/      SIMULADOR de pagamento (só desenvolvimento, sem conta no Asaas)
     cursos/              /cursos (catálogo), /cursos/[curso], /cursos/[curso]/aulas/[aula] (player)
                          e .../materiais/[id] (download do PDF, confere o acesso a cada clique)
-    admin/               Painel: visão geral, cursos/[id]/aulas/[id], questoes/ e conteudo/ (blog e concursos) (TEACHER+),
+    admin/               Painel: visão geral, cursos/[id]/aulas/[id], questoes/ e conteudo/ (blog, concursos e trilhas) (TEACHER+),
                          usuarios/[id] e vendas/ (com cupons/ e afiliados/) (ADMIN)
     api/auth/[...all]/   API de autenticação (/api/auth/*)
     api/dev-storage/     Envio/download de PDFs SEM o R2 (só desenvolvimento)
@@ -515,7 +557,7 @@ src/
                          observability/ (Sentry sem dados pessoais) e cron-auth.ts (senha das tarefas agendadas)
   modules/               Domínios do sistema ("monolito modular")
     auth/                Contas: login, perfis, sessões; perfis pelo painel (admin-*)
-    catalog/             Cursos, módulos e aulas; admin/ = cadastro pelo painel
+    catalog/             Cursos, módulos e aulas; admin/ = cadastro pelo painel; lesson-subjects = aula ↔ assunto ("estude esta aula")
     enrollment/          Matrículas, a REGRA DE ACESSO às aulas (access.ts) e matricular/revogar (grant.ts)
     progress/            Progresso, conclusão, "continuar de onde parou", player da aula
     video/               Fornecedores de vídeo (exemplo e panda/) e os players
@@ -527,6 +569,7 @@ src/
     coupons/             Cupons de desconto: regras (rules.ts), conferência no checkout, painel
     affiliates/          Afiliados: link e cookie, quem indicou a venda, comissões e repasses
     blog/, notices/      Posts do blog e páginas de concurso (edital)
+    tracks/              Trilhas de estudo: regras (rules.ts: progresso e "montar pelo que mais cai"), página pública e painel
     seo/                 Endereço do site, dados estruturados (JSON-LD), RSS, sitemap e endereços antigos (redirects)
     storage/             Armazenamento de arquivos: Cloudflare R2 ou pasta local (desenvolvimento)
     email/               Envio de e-mails e modelos de texto
@@ -543,7 +586,7 @@ tests/e2e/               Testes de ponta a ponta no navegador (Playwright)
 
 ---
 
-## 12. Publicando o site (produção na Vercel)
+## 13. Publicando o site (produção na Vercel)
 
 Faça na ordem; cada passo diz onde clicar. **Nunca cole chaves no chat nem no código**: elas vão só nas variáveis da Vercel.
 

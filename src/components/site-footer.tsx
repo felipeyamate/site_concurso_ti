@@ -14,6 +14,9 @@ export function SiteFooter() {
       <div className="text-muted-foreground mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-6 text-sm">
         <span>© {new Date().getFullYear()} Concurso TI</span>
         <nav className="flex flex-wrap gap-4">
+          <Link href="/trilhas" className="hover:underline">
+            Trilhas
+          </Link>
           <Link href="/concursos" className="hover:underline">
             Concursos
           </Link>

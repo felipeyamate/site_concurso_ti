@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { toFieldErrors } from "@/lib/form-state";
 
-import { updateCourseSchema, updateLessonSchema, updateLessonVideoSchema } from "./schemas";
+import { lessonSubjectsSchema, updateCourseSchema, updateLessonSchema, updateLessonVideoSchema } from "./schemas";
 
 describe("formulário do curso", () => {
   const valid = {
@@ -88,5 +88,13 @@ describe("formulário do vídeo", () => {
 
   it("recusa origem de vídeo desconhecida", () => {
     expect(updateLessonVideoSchema.safeParse({ lessonId: "l1", source: "YOUTUBE" }).success).toBe(false);
+  });
+});
+
+describe("assuntos da aula (Fase 8)", () => {
+  it("lista (pode ser vazia), no máximo 20", () => {
+    expect(lessonSubjectsSchema.parse({ lessonId: "l" }).subjectIds).toEqual([]);
+    expect(lessonSubjectsSchema.parse({ lessonId: "l", subjectIds: ["a", "b"] }).subjectIds).toEqual(["a", "b"]);
+    expect(lessonSubjectsSchema.safeParse({ lessonId: "l", subjectIds: Array.from({ length: 21 }, (_, index) => `s${index}`) }).success).toBe(false);
   });
 });
