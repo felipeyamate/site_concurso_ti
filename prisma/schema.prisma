@@ -17,7 +17,9 @@
 // Fase 3: materiais das aulas em PDF (LessonAttachment) e o link do player do Panda na aula.
 // Fase 4: vendas — produtos (Product), planos de assinatura (Plan), pedidos (Order), assinaturas
 // (Subscription), cobranças (Payment), avisos do provedor (WebhookEvent) e notas fiscais (FiscalInvoice).
-// As demais tabelas (questões etc. — seção 6 do PROJECT.md) entram nas fases em que forem usadas.
+// Fase 5: banco de questões — bancas (Board), assuntos (Subject), provas de concurso (Exam), questões
+// (Question + QuestionOption), respostas dos alunos (QuestionAttempt) e simulados (MockExam).
+// As demais tabelas (cupons, afiliados — seção 6 do PROJECT.md) entram nas fases em que forem usadas.
 // =============================================================================
 
 generator client {
@@ -46,24 +48,27 @@ enum Role {
 
 // Uma pessoa cadastrada (aluno, professor ou administrador).
 model User {
-  id             String           @id
-  name           String
-  email          String           @unique
-  emailVerified  Boolean          @default(false) @map("email_verified")
-  image          String?
+  id               String            @id
+  name             String
+  email            String            @unique
+  emailVerified    Boolean           @default(false) @map("email_verified")
+  image            String?
   // Perfil do usuário. Todo cadastro novo nasce como STUDENT; só um script/admin promove.
-  role           Role             @default(STUDENT)
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @updatedAt @map("updated_at")
-  sessions       Session[]
-  accounts       Account[]
-  enrollments    Enrollment[]
-  progress       LessonProgress[]
+  role             Role              @default(STUDENT)
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  sessions         Session[]
+  accounts         Account[]
+  enrollments      Enrollment[]
+  progress         LessonProgress[]
   // Fase 4 (vendas). Pedidos e assinaturas NÃO são apagados junto com o usuário (histórico
   // financeiro/fiscal): apagar uma conta com compras é tratado na Fase 7 (LGPD).
-  billingProfile BillingProfile?
-  orders         Order[]
-  subscriptions  Subscription[]
+  billingProfile   BillingProfile?
+  orders           Order[]
+  subscriptions    Subscription[]
+  // Fase 5 (banco de questões): respostas e simulados do aluno.
+  questionAttempts QuestionAttempt[]
+  mockExams        MockExam[]
 
   @@map("users")
 }
@@ -604,4 +609,180 @@ model FiscalInvoice {
   updatedAt         DateTime            @updatedAt @map("updated_at")
 
   @@map("fiscal_invoices")
+}
+
+// -----------------------------------------------------------------------------
+// Banco de questões (Fase 5): questões comentadas, simulados e o mapa "o que mais cai".
+// -----------------------------------------------------------------------------
+
+// Formato da questão.
+enum QuestionType {
+  // Múltipla escolha: alternativas A a E (algumas bancas usam só até D).
+  MULTIPLE_CHOICE
+  // Certo ou Errado (estilo Cebraspe): o aluno julga uma afirmação.
+  TRUE_FALSE
+}
+
+// Onde o aluno respondeu (para as estatísticas).
+enum AttemptSource {
+  // "Resolver questões" (resposta e comentário na hora).
+  PRACTICE
+  // Simulado finalizado (o resultado só aparece no fim).
+  MOCK_EXAM
+}
+
+// Banca organizadora de concursos (ex.: Cesgranrio, Cebraspe, FGV, FCC).
+model Board {
+  id        String     @id @default(cuid())
+  // Identificador usado nos filtros da URL (?banca=cesgranrio).
+  slug      String     @unique
+  name      String     @unique
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  exams     Exam[]
+  questions Question[]
+
+  @@map("boards")
+}
+
+// Assunto cobrado (ex.: "Segurança da Informação — malware"). É a base do mapa "o que mais cai"
+// e do desempenho do aluno por assunto.
+model Subject {
+  id        String     @id @default(cuid())
+  slug      String     @unique
+  name      String     @unique
+  // Ordem nas listas (menor primeiro; empate = ordem alfabética).
+  position  Int        @default(0)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  questions Question[]
+
+  @@map("subjects")
+}
+
+// Uma prova de concurso já aplicada (ex.: "Banco do Brasil — Escriturário", 2023, Cesgranrio).
+// Questões ligadas a uma prova são as "de prova"; sem prova, são "inéditas" (autorais).
+model Exam {
+  id        String     @id @default(cuid())
+  slug      String     @unique
+  name      String
+  year      Int
+  boardId   String     @map("board_id")
+  // Restrict: uma banca com provas cadastradas não pode ser apagada.
+  board     Board      @relation(fields: [boardId], references: [id], onDelete: Restrict)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  questions Question[]
+
+  @@index([boardId])
+  @@map("exams")
+}
+
+// Uma questão comentada.
+model Question {
+  id            String             @id @default(cuid())
+  // Código opcional e único (ex.: "BB2023-41"): evita importar a mesma questão duas vezes.
+  code          String?            @unique
+  type          QuestionType
+  // Enunciado (texto puro; as quebras de linha são mantidas na tela).
+  statement     String
+  // Gabarito: "A" a "E" (múltipla escolha) ou "C"/"E" (Certo/Errado). NUNCA vai para a página
+  // antes de o aluno responder.
+  correctAnswer String             @map("correct_answer")
+  // Comentário do professor: aparece depois da resposta (ou no fim do simulado).
+  explanation   String
+  subjectId     String             @map("subject_id")
+  subject       Subject            @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  // Banca: preenchida sozinha a partir da prova; numa questão inédita, opcional ("no estilo de").
+  boardId       String?            @map("board_id")
+  board         Board?             @relation(fields: [boardId], references: [id], onDelete: Restrict)
+  examId        String?            @map("exam_id")
+  exam          Exam?              @relation(fields: [examId], references: [id], onDelete: Restrict)
+  // Só questões publicadas aparecem para os alunos (e contam no mapa de incidência).
+  isPublished   Boolean            @default(false) @map("is_published")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  options       QuestionOption[]
+  attempts      QuestionAttempt[]
+  mockExamItems MockExamQuestion[]
+
+  @@index([subjectId])
+  @@index([boardId])
+  @@index([examId])
+  @@index([isPublished, createdAt])
+  @@map("questions")
+}
+
+// Uma alternativa de uma questão de múltipla escolha (Certo/Errado não tem alternativas).
+model QuestionOption {
+  id         String   @id @default(cuid())
+  questionId String   @map("question_id")
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  // "A" a "E".
+  label      String
+  text       String
+
+  @@unique([questionId, label])
+  @@map("question_options")
+}
+
+// Uma resposta do aluno. Guardamos TODAS (não só a última): o desempenho conta cada tentativa.
+model QuestionAttempt {
+  id         String        @id @default(cuid())
+  userId     String        @map("user_id")
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId String        @map("question_id")
+  // Restrict: questão respondida por alguém não se apaga (histórico do aluno) — despublicar.
+  question   Question      @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  answer     String
+  isCorrect  Boolean       @map("is_correct")
+  source     AttemptSource
+  mockExamId String?       @map("mock_exam_id")
+  mockExam   MockExam?     @relation(fields: [mockExamId], references: [id], onDelete: Cascade)
+  answeredAt DateTime      @default(now()) @map("answered_at")
+
+  @@index([userId, answeredAt])
+  @@index([questionId])
+  @@index([mockExamId])
+  @@map("question_attempts")
+}
+
+// Um simulado: questões sorteadas, respondidas sem ver o gabarito, com nota no fim.
+model MockExam {
+  id               String             @id @default(cuid())
+  userId           String             @map("user_id")
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Descrição dos filtros usados no sorteio (ex.: "Cesgranrio · Segurança da Informação").
+  title            String
+  questionCount    Int                @map("question_count")
+  // Tempo de prova em minutos (vazio = sem limite).
+  timeLimitMinutes Int?               @map("time_limit_minutes")
+  startedAt        DateTime           @default(now()) @map("started_at")
+  // Preenchido ao finalizar (pelo aluno ou por tempo esgotado). Depois disso nada muda.
+  finishedAt       DateTime?          @map("finished_at")
+  correctCount     Int?               @map("correct_count")
+  items            MockExamQuestion[]
+  attempts         QuestionAttempt[]
+
+  @@index([userId, startedAt])
+  @@map("mock_exams")
+}
+
+// Uma questão dentro de um simulado, com a resposta marcada (ainda sem correção até o fim).
+model MockExamQuestion {
+  id         String    @id @default(cuid())
+  mockExamId String    @map("mock_exam_id")
+  mockExam   MockExam  @relation(fields: [mockExamId], references: [id], onDelete: Cascade)
+  questionId String    @map("question_id")
+  question   Question  @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  position   Int
+  answer     String?
+  answeredAt DateTime? @map("answered_at")
+  // Preenchido ao finalizar o simulado.
+  isCorrect  Boolean?  @map("is_correct")
+
+  @@unique([mockExamId, questionId])
+  @@unique([mockExamId, position])
+  @@index([questionId])
+  @@map("mock_exam_questions")
 }

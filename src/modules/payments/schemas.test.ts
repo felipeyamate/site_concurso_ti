@@ -4,7 +4,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { checkoutSchema, formDataWithLists, updateProductSchema } from "./schemas";
+import { formDataWithLists } from "@/lib/form-state";
+
+import { checkoutSchema, updateProductSchema } from "./schemas";
 
 const validCheckout = {
   productSlug: "curso-base",

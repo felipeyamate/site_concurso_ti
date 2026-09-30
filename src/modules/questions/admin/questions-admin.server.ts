@@ -1,0 +1,424 @@
+/**
+ * questions-admin.server.ts — O painel do banco de questões (PROFESSOR ou mais): bancas, assuntos,
+ * provas, questões e a importação por planilha.
+ *
+ * Quem chama: as Server Actions de `actions.ts` e as páginas /admin/questoes/... Os testes de
+ * integração chamam direto.
+ *
+ * Regras de histórico (PROJECT.md, "nunca apagar histórico de aluno"):
+ *  - "Histórico de aluno" = resposta (ou simulado) de quem é ALUNO ou tem/teve matrícula — a mesma
+ *    regra das aulas (Fase 3). Professor/admin testando a questão não trava nada.
+ *  - Questão já respondida por aluno (ou num simulado de aluno) NÃO se apaga: despublica.
+ *  - Numa questão com histórico, dá para corrigir textos (enunciado, alternativas, comentário),
+ *    mas NÃO o tipo, as letras das alternativas nem o gabarito — as respostas antigas foram
+ *    corrigidas com eles. Para trocar o gabarito, despublique e cadastre a questão corrigida.
+ *  - Banca, assunto ou prova com questões (ou banca com provas) não se apagam.
+ * Toda conferência de histórico trava a linha da questão antes (`SELECT ... FOR UPDATE`): uma
+ * resposta gravada no mesmo instante espera a nossa transação (ou nós a esperamos e a enxergamos).
+ */
+import "server-only";
+
+import type { Prisma } from "@/generated/prisma/client";
+import { isUniqueViolation } from "@/lib/db-errors";
+import { prisma } from "@/lib/db";
+import { UserFacingError } from "@/lib/form-state";
+import { findAvailableSlug } from "@/modules/catalog/admin/slug";
+
+import { CsvError, parseCsv } from "../csv";
+import { importCodes, parseQuestionImport, type ImportError } from "../import-questions";
+import type { QuestionFormData } from "../schemas";
+import { STUDENT_USER } from "../student-history";
+
+type Tx = Prisma.TransactionClient;
+
+export const QUESTIONS_ADMIN_PAGE_SIZE = 30;
+
+const lockQuestion = (tx: Tx, questionId: string) => tx.$executeRaw`SELECT id FROM questions WHERE id = ${questionId} FOR UPDATE`;
+
+/** A questão tem histórico de ALUNO (resposta ou simulado)? Respostas de professor testando não contam. */
+async function hasStudentHistory(tx: Tx, questionId: string): Promise<boolean> {
+  const [attempts, items] = await Promise.all([
+    tx.questionAttempt.count({ where: { questionId, user: STUDENT_USER } }),
+    tx.mockExamQuestion.count({ where: { questionId, mockExam: { user: STUDENT_USER } } }),
+  ]);
+  return attempts + items > 0;
+}
+
+// =============================================================================================
+// Classificação: bancas, assuntos, provas
+// =============================================================================================
+
+export async function listClassification() {
+  const [boards, subjects, exams] = await Promise.all([
+    prisma.board.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, slug: true, _count: { select: { exams: true, questions: true } } },
+    }),
+    prisma.subject.findMany({
+      orderBy: [{ position: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, slug: true, position: true, _count: { select: { questions: true } } },
+    }),
+    prisma.exam.findMany({
+      orderBy: [{ year: "desc" }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        year: true,
+        boardId: true,
+        board: { select: { name: true } },
+        _count: { select: { questions: true } },
+      },
+    }),
+  ]);
+  return { boards, subjects, exams };
+}
+
+/** Traduz "nome/identificador repetido" (chave única do banco) numa mensagem para o professor. */
+function rethrowDuplicate(error: unknown, what: string): never {
+  if (isUniqueViolation(error)) throw new UserFacingError(`Já existe ${what} com esse nome ou identificador.`);
+  throw error;
+}
+
+export async function saveBoard(input: { boardId?: string | null; name: string; slug: string | null }): Promise<{ id: string }> {
+  const slug = input.slug ?? (await findAvailableSlug(input.name, async (value) => Boolean(await prisma.board.findUnique({ where: { slug: value } }))));
+  try {
+    if (input.boardId) {
+      return await prisma.board.update({ where: { id: input.boardId }, data: { name: input.name, slug }, select: { id: true } });
+    }
+    return await prisma.board.create({ data: { name: input.name, slug }, select: { id: true } });
+  } catch (error) {
+    rethrowDuplicate(error, "uma banca");
+  }
+}
+
+export async function deleteBoard(boardId: string): Promise<void> {
+  const board = await prisma.board.findUnique({ where: { id: boardId }, select: { _count: { select: { exams: true, questions: true } } } });
+  if (!board) throw new UserFacingError("Banca não encontrada.");
+  if (board._count.exams + board._count.questions > 0) {
+    throw new UserFacingError("Esta banca tem provas ou questões cadastradas: não pode ser apagada.");
+  }
+  // Se uma questão/prova for ligada a ela no meio, a chave estrangeira (Restrict) impede o apagar.
+  await prisma.board.delete({ where: { id: boardId } }).catch(() => {
+    throw new UserFacingError("Esta banca passou a ter provas ou questões: não pode ser apagada.");
+  });
+}
+
+export async function saveSubject(input: {
+  subjectId?: string | null;
+  name: string;
+  slug: string | null;
+  position: number;
+}): Promise<{ id: string }> {
+  const slug =
+    input.slug ?? (await findAvailableSlug(input.name, async (value) => Boolean(await prisma.subject.findUnique({ where: { slug: value } }))));
+  try {
+    const data = { name: input.name, slug, position: input.position };
+    if (input.subjectId) return await prisma.subject.update({ where: { id: input.subjectId }, data, select: { id: true } });
+    return await prisma.subject.create({ data, select: { id: true } });
+  } catch (error) {
+    rethrowDuplicate(error, "um assunto");
+  }
+}
+
+export async function deleteSubject(subjectId: string): Promise<void> {
+  const count = await prisma.question.count({ where: { subjectId } });
+  if (count > 0) throw new UserFacingError("Este assunto tem questões: não pode ser apagado.");
+  await prisma.subject.delete({ where: { id: subjectId } }).catch(() => {
+    throw new UserFacingError("Este assunto passou a ter questões (ou não existe mais): não pode ser apagado.");
+  });
+}
+
+/**
+ * Cria/edita uma prova. Se a BANCA da prova mudar, as questões dela passam para a nova banca
+ * (a banca de uma questão de prova é sempre a da prova — é isso que o mapa "o que mais cai" conta).
+ */
+export async function saveExam(input: {
+  examId?: string | null;
+  name: string;
+  slug: string | null;
+  year: number;
+  boardId: string;
+}): Promise<{ id: string }> {
+  const board = await prisma.board.findUnique({ where: { id: input.boardId }, select: { id: true } });
+  if (!board) throw new UserFacingError("Banca não encontrada.");
+  const slug =
+    input.slug ??
+    (await findAvailableSlug(`${input.name} ${input.year}`, async (value) => Boolean(await prisma.exam.findUnique({ where: { slug: value } }))));
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const data = { name: input.name, slug, year: input.year, boardId: input.boardId };
+      if (!input.examId) return tx.exam.create({ data, select: { id: true } });
+      const exam = await tx.exam.update({ where: { id: input.examId }, data, select: { id: true } });
+      await tx.question.updateMany({ where: { examId: exam.id }, data: { boardId: input.boardId } });
+      return exam;
+    });
+  } catch (error) {
+    rethrowDuplicate(error, "uma prova");
+  }
+}
+
+export async function deleteExam(examId: string): Promise<void> {
+  const count = await prisma.question.count({ where: { examId } });
+  if (count > 0) throw new UserFacingError("Esta prova tem questões: não pode ser apagada.");
+  await prisma.exam.delete({ where: { id: examId } }).catch(() => {
+    throw new UserFacingError("Esta prova passou a ter questões (ou não existe mais): não pode ser apagada.");
+  });
+}
+
+// =============================================================================================
+// Questões
+// =============================================================================================
+
+export type AdminQuestionFilters = {
+  search: string;
+  subjectId: string | null;
+  boardId: string | null;
+  status: "all" | "published" | "draft";
+  page: number;
+};
+
+export async function listQuestionsForAdmin(filters: AdminQuestionFilters) {
+  const where: Prisma.QuestionWhereInput = {
+    ...(filters.search
+      ? { OR: [{ statement: { contains: filters.search, mode: "insensitive" } }, { code: { contains: filters.search, mode: "insensitive" } }] }
+      : {}),
+    ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    ...(filters.boardId ? { boardId: filters.boardId } : {}),
+    ...(filters.status === "published" ? { isPublished: true } : filters.status === "draft" ? { isPublished: false } : {}),
+  };
+  const total = await prisma.question.count({ where });
+  const pageCount = Math.max(1, Math.ceil(total / QUESTIONS_ADMIN_PAGE_SIZE));
+  const page = Math.min(Math.max(1, filters.page), pageCount);
+  const questions = await prisma.question.findMany({
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    skip: (page - 1) * QUESTIONS_ADMIN_PAGE_SIZE,
+    take: QUESTIONS_ADMIN_PAGE_SIZE,
+    select: {
+      id: true,
+      code: true,
+      type: true,
+      statement: true,
+      isPublished: true,
+      subject: { select: { name: true } },
+      board: { select: { name: true } },
+      exam: { select: { name: true, year: true } },
+      _count: { select: { attempts: true } },
+    },
+  });
+  return { questions, total, page, pageCount };
+}
+
+export async function getQuestionForAdmin(questionId: string) {
+  const question = await prisma.question.findUnique({
+    where: { id: questionId },
+    include: { options: { orderBy: { label: "asc" } }, _count: { select: { attempts: true } } },
+  });
+  if (!question) return null;
+  const [correct, studentHistory] = await Promise.all([
+    prisma.questionAttempt.count({ where: { questionId, isCorrect: true } }),
+    hasStudentHistory(prisma, questionId),
+  ]);
+  // `hasStudentHistory`: a tela trava tipo/letras/gabarito com a MESMA regra que o servidor confere.
+  return { ...question, correctAttempts: correct, hasStudentHistory: studentHistory };
+}
+
+/**
+ * Trava as provas para leitura (`FOR SHARE`) antes de usar a banca delas. Por quê: trocar a banca
+ * de uma prova (`saveExam`) atualiza a prova e depois as questões dela; uma questão gravada no meio
+ * com a banca ANTIGA ficaria de fora dessa atualização. Com a trava, ou esperamos a troca terminar
+ * (e lemos a banca nova), ou a troca espera a nossa gravação (e atualiza a questão nova também).
+ * A chave estrangeira sozinha não basta: ela só trava a "chave" da prova, e a troca de banca não
+ * mexe na chave.
+ */
+async function lockExamsForRead(tx: Tx, examIds: string[]): Promise<Map<string, string>> {
+  if (examIds.length === 0) return new Map();
+  const rows = await tx.$queryRaw<Array<{ id: string; board_id: string }>>`
+    SELECT id, board_id FROM exams WHERE id = ANY(${examIds}) FOR SHARE`;
+  return new Map(rows.map((row) => [row.id, row.board_id]));
+}
+
+/** Confere assunto, banca e prova; a banca de uma questão de prova é a da prova (lida com a prova travada). */
+async function resolveClassification(tx: Tx, data: QuestionFormData) {
+  const subject = await tx.subject.findUnique({ where: { id: data.subjectId }, select: { id: true } });
+  if (!subject) throw new UserFacingError("Assunto não encontrado.", { field: "subjectId" });
+  if (data.examId) {
+    await lockExamsForRead(tx, [data.examId]);
+    const exam = await tx.exam.findUnique({ where: { id: data.examId }, select: { id: true, boardId: true } });
+    if (!exam) throw new UserFacingError("Prova não encontrada.", { field: "examId" });
+    return { subjectId: subject.id, examId: exam.id, boardId: exam.boardId };
+  }
+  if (data.boardId) {
+    const board = await tx.board.findUnique({ where: { id: data.boardId }, select: { id: true } });
+    if (!board) throw new UserFacingError("Banca não encontrada.", { field: "boardId" });
+    return { subjectId: subject.id, examId: null, boardId: board.id };
+  }
+  return { subjectId: subject.id, examId: null, boardId: null };
+}
+
+/**
+ * Cria ou edita uma questão.
+ * Passos (numa transação):
+ *  1. Confere assunto/banca/prova.
+ *  2. Edição: trava a questão; com histórico de aluno, recusa mudar tipo, letras ou gabarito.
+ *  3. Grava a questão e troca as alternativas (apaga as antigas e cria as do formulário).
+ */
+export async function saveQuestion(data: QuestionFormData): Promise<{ id: string }> {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const classification = await resolveClassification(tx, data);
+      const fields = {
+        code: data.code,
+        type: data.type,
+        statement: data.statement,
+        correctAnswer: data.correctAnswer,
+        explanation: data.explanation,
+        isPublished: data.isPublished,
+        ...classification,
+      };
+
+      if (!data.questionId) {
+        return tx.question.create({ data: { ...fields, options: { create: data.options } }, select: { id: true } });
+      }
+
+      await lockQuestion(tx, data.questionId);
+      const current = await tx.question.findUnique({
+        where: { id: data.questionId },
+        select: { id: true, type: true, correctAnswer: true, options: { select: { label: true } } },
+      });
+      if (!current) throw new UserFacingError("Questão não encontrada.");
+      if (await hasStudentHistory(tx, current.id)) {
+        const sameLabels =
+          current.options.map((option) => option.label).sort().join() === data.options.map((option) => option.label).join();
+        if (current.type !== data.type || current.correctAnswer !== data.correctAnswer || !sameLabels) {
+          throw new UserFacingError(
+            "Esta questão já foi respondida por alunos: dá para corrigir os textos, mas não o tipo, as alternativas (letras) nem o gabarito. Despublique-a e cadastre a versão corrigida.",
+            { field: "correctAnswer" },
+          );
+        }
+      }
+      await tx.questionOption.deleteMany({ where: { questionId: current.id } });
+      return tx.question.update({
+        where: { id: current.id },
+        data: { ...fields, options: { create: data.options } },
+        select: { id: true },
+      });
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new UserFacingError("Já existe uma questão com esse código.", { field: "code" });
+    throw error;
+  }
+}
+
+/** Publica ou despublica (atalho da lista). */
+export async function setQuestionPublished(questionId: string, isPublished: boolean): Promise<void> {
+  const { count } = await prisma.question.updateMany({ where: { id: questionId }, data: { isPublished } });
+  if (count === 0) throw new UserFacingError("Questão não encontrada.");
+}
+
+/** Apaga uma questão SEM histórico de aluno (com histórico: despublicar). */
+export async function deleteQuestion(questionId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await lockQuestion(tx, questionId);
+    const exists = await tx.question.findUnique({ where: { id: questionId }, select: { id: true } });
+    if (!exists) throw new UserFacingError("Questão não encontrada.");
+    if (await hasStudentHistory(tx, questionId)) {
+      throw new UserFacingError("Esta questão já foi respondida por alunos: despublique em vez de apagar (o histórico deles fica).");
+    }
+    // Sobraram só testes de professor/admin: saem junto (a chave estrangeira impede apagar a questão
+    // com respostas). Apagar o simulado leva as questões e as respostas dele (cascata).
+    await tx.mockExam.deleteMany({ where: { items: { some: { questionId } } } });
+    await tx.questionAttempt.deleteMany({ where: { questionId } });
+    await tx.question.delete({ where: { id: questionId } });
+  });
+}
+
+// =============================================================================================
+// Importação por planilha
+// =============================================================================================
+
+export type ImportOutcome = { ok: true; created: number } | { ok: false; errors: ImportError[] };
+
+/**
+ * Importa questões de um CSV (tudo ou nada; entram como RASCUNHO).
+ * Passos:
+ *  1. Lê o CSV (`parseCsv`) e busca bancas, assuntos, provas e os códigos já usados.
+ *  2. Confere todas as linhas (`parseQuestionImport`). Algum erro → devolve os erros, nada gravado.
+ *  3. Grava todas numa transação (se uma falhar, nenhuma fica), com as provas travadas.
+ */
+export async function importQuestionsFromCsv(csvText: string): Promise<ImportOutcome> {
+  let parsed: ReturnType<typeof parseCsv>;
+  try {
+    parsed = parseCsv(csvText);
+  } catch (error) {
+    if (error instanceof CsvError) return { ok: false, errors: [{ line: error.line, message: error.message }] };
+    throw error;
+  }
+
+  const codes = importCodes(parsed.rows);
+  const [subjects, boards, exams, existing] = await Promise.all([
+    prisma.subject.findMany({ select: { id: true, name: true, slug: true } }),
+    prisma.board.findMany({ select: { id: true, name: true, slug: true } }),
+    prisma.exam.findMany({ select: { id: true, slug: true, boardId: true } }),
+    // Só os códigos da planilha (coluna `codigo`) — não a tabela inteira.
+    codes.length > 0 ? prisma.question.findMany({ where: { code: { in: codes } }, select: { code: true } }) : [],
+  ]);
+  const result = parseQuestionImport({
+    rows: parsed.rows,
+    lineNumbers: parsed.lineNumbers,
+    subjects,
+    boards,
+    exams,
+    existingCodes: new Set(existing.map((row) => row.code as string)),
+  });
+  if (!result.ok) return result;
+
+  const examIds = [...new Set(result.questions.flatMap((question) => (question.examId ? [question.examId] : [])))];
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        // A banca de uma questão de prova é a da prova — relida AQUI, com as provas travadas
+        // (a conferência acima leu antes; uma troca de banca no meio não pode passar batido).
+        const examBoards = await lockExamsForRead(tx, examIds);
+        if (examBoards.size !== examIds.length) {
+          throw new UserFacingError("Uma prova usada na planilha acabou de ser apagada. Confira e importe de novo.");
+        }
+        for (const question of result.questions) {
+          await tx.question.create({
+            data: {
+              code: question.code,
+              type: question.type,
+              statement: question.statement,
+              correctAnswer: question.correctAnswer,
+              explanation: question.explanation,
+              subjectId: question.subjectId,
+              boardId: question.examId ? (examBoards.get(question.examId) ?? null) : question.boardId,
+              examId: question.examId,
+              isPublished: false,
+              options: { create: question.options },
+            },
+          });
+        }
+      },
+      { timeout: 60_000 },
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return { ok: false, errors: [{ line: 1, message: "Algum código da planilha acabou de ser usado por outra questão. Importe de novo." }] };
+    }
+    throw error;
+  }
+  return { ok: true, created: result.questions.length };
+}
+
+/** Números para a visão geral do painel. */
+export async function getQuestionBankOverview() {
+  const [published, drafts, attempts] = await Promise.all([
+    prisma.question.count({ where: { isPublished: true } }),
+    prisma.question.count({ where: { isPublished: false } }),
+    // "Respostas de alunos": os testes de professor/admin não entram (mesma regra do histórico).
+    prisma.questionAttempt.count({ where: { user: STUDENT_USER } }),
+  ]);
+  return { published, drafts, attempts };
+}

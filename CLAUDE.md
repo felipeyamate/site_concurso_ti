@@ -31,7 +31,10 @@
 - Painel admin: toda Server Action começa com `getSessionWithRole` (`src/modules/auth/action-guards.ts`):
   TEACHER para conteúdo (cursos, aulas, vídeos, PDFs), ADMIN para usuários, perfis e matrículas.
   Formulários usam `useAdminForm` + `FormState`; erros esperados são `UserFacingError` (`src/lib/form-state.ts`).
+  Caixas marcadas repetidas (listas) no FormData: `formDataWithLists` (`src/lib/form-state.ts`).
   Exceção: o envio de PDF (3 passos, `attachment-manager.tsx`) não usa o `useAdminForm`, mas usa `FormState` + `FormStatus`.
+  Lista de erros detalhados (ex.: por linha da planilha): `FormState.details`, mostrada pelo `FormStatus`.
+  Server Action aceita até 1 MB por envio (padrão do Next, mantido): arquivo maior só com conferência antes de enviar.
 - Nunca apagar histórico de aluno: curso com matrícula ou aula com progresso de ALUNO não se apaga (despublicar).
   Toda operação "confere e depois grava/apaga" trava as linhas antes de conferir (ver `lockRows` em
   `catalog-admin.server.ts`, `lockEnrollment` em `enrollment/grant.ts` e `withAdvisoryLock` em `src/lib/db-locks.ts`)
@@ -57,7 +60,21 @@
   Depois que algo foi CRIADO no provedor, não transformar uma falha posterior em "erro ao criar" (ver `createSubscription`
   no Asaas e a assinatura "órfã" em `charges.server.ts`). Erros do provedor para a tela: `providerErrorMessage`.
   Registros financeiros (pedido, pagamento, nota) usam `onDelete: Restrict` e nunca são apagados.
-- Teste de integração que apaga usuários precisa limpar antes os dados de venda (ver `tests/integration/payments.test.ts`).
+- Teste de integração que apaga usuários precisa limpar antes os dados de venda (ver `tests/integration/payments.test.ts`);
+  o que apaga questões precisa limpar antes `question_attempts` e `mock_exam_questions` (`onDelete: Restrict` na questão).
+- Banco de questões: o nível de acesso sai SEMPRE de `getQuestionBankLevelFor` + `checkAnswerPermission`
+  (`src/modules/questions/`), nunca de um `if` solto. Gabarito (`correctAnswer`) e comentário (`explanation`) nunca entram
+  no `select` de listas nem de simulado em andamento: só saem em `answerQuestion` e no simulado finalizado.
+  Responder, criar/salvar/finalizar simulado rodam com `withAdvisoryLock` (`questions:<aluno>` / `mock-exam:<id>`);
+  responder também trava a questão com `FOR SHARE` (o painel usa `FOR UPDATE`). Salvar/finalizar simulado conferem o acesso.
+  Questão com resposta de ALUNO (`hasStudentHistory`) não muda tipo/letras/gabarito nem se apaga (`questions-admin.server.ts`).
+  Relógio na tela: conta a partir do tempo restante medido no servidor, nunca comparando com o relógio do aparelho,
+  e se acerta de novo (`mockExamClockAction`) ao abrir e ao voltar para a aba (a página pode vir do cache do "Voltar").
+  Questão de simulado em andamento do aluno não aparece nem responde em "Resolver questões". "Quem é aluno" nas
+  contas: `STUDENT_USER` (`student-history.ts`). Questão de prova: banca lida com a prova travada (`lockExamsForRead`).
+  Planilha: bytes → texto só com `decodeCsvBytes` (UTF-8 ou Windows-1252 do Excel), nunca `file.text()`.
+- Componente com `"use client"` só exporta componentes: função usada também no servidor (ex.: `choicesFor`) fica num
+  arquivo "puro" (senão a página quebra ao ser montada no servidor).
 - Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`
   escapam e alargam a página no celular); e o Card/item de grid que contém a tabela leva `min-w-0`
   (senão a tabela estica o item e a página inteira rola para o lado).
