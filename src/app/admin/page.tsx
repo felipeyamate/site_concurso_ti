@@ -4,7 +4,7 @@
  * Quem chama: o Next.js. O `requireRole` confere login + perfil no banco;
  * quem não tem o perfil recebe "página não encontrada" (404).
  *
- * Mostra: atalhos para cursos e usuários, e a situação das integrações (Panda Video e
+ * Mostra: atalhos para cursos, usuários e vendas, e a situação das integrações (Panda Video, pagamentos e
  * armazenamento de PDFs) — só "configurado / não configurado", nunca os valores das chaves.
  */
 import "server-only";
@@ -21,6 +21,7 @@ import { env } from "@/lib/env";
 import { SignOutButton } from "@/modules/auth/components/sign-out-button";
 import { ROLE_LABELS, hasMinimumRole } from "@/modules/auth/roles";
 import { requireRole } from "@/modules/auth/session";
+import { getPaymentsSetup } from "@/modules/payments/provider/provider.server";
 import { getStorageKind } from "@/modules/storage/storage.server";
 
 export const metadata: Metadata = {
@@ -42,6 +43,7 @@ export default async function AdminPage() {
   const isProduction = env.NODE_ENV === "production";
   const drmConfigured = Boolean(env.PANDA_DRM_GROUP_ID && env.PANDA_DRM_SECRET);
   const storageKind = getStorageKind();
+  const payments = getPaymentsSetup();
 
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-10">
@@ -88,6 +90,20 @@ export default async function AdminPage() {
             </CardContent>
           </Card>
         ) : null}
+
+        {isAdmin ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Vendas</CardTitle>
+              <CardDescription>Produtos, planos de assinatura, pedidos, reembolsos e notas fiscais.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild>
+                <Link href="/admin/vendas">Abrir vendas</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <Card>
@@ -123,6 +139,16 @@ export default async function AdminPage() {
                 : "Pasta local (só desenvolvimento). Em produção, configure o Cloudflare R2."
             }
             missingText="Desligado: configure o Cloudflare R2 (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET)."
+          />
+          <IntegrationStatus
+            ok={payments.enabled}
+            title="Pagamentos (Asaas)"
+            okText={
+              payments.enabled && payments.kind === "ASAAS"
+                ? `Asaas configurado (${payments.environment === "production" ? "produção" : "sandbox, para testes"}).`
+                : "Simulados (só desenvolvimento): configure o Asaas para vender de verdade."
+            }
+            missingText={payments.enabled ? "" : payments.problem}
           />
         </CardContent>
       </Card>

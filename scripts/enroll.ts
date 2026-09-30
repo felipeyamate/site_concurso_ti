@@ -6,16 +6,16 @@
  *   npm run enroll -- aluno@exemplo.com informatica-e-ti-do-zero 365      (acesso por 365 dias)
  *   npm run enroll -- aluno@exemplo.com informatica-e-ti-do-zero --revogar (cancela o acesso)
  *
- * Por que existe: até a Fase 4 (pagamentos), matrículas são feitas à mão (cortesia, testes).
- * O jeito mais fácil é o painel (/admin/usuarios → aluno → "Matricular"); este script faz o mesmo
- * pelo terminal. Depois da Fase 4, o pagamento confirmado cria a matrícula sozinho.
+ * Por que existe: matrículas MANUAIS (cortesia, testes, suporte). O jeito mais fácil é o painel
+ * (/admin/usuarios → aluno → "Matricular"); este script faz o mesmo pelo terminal. Compras e
+ * assinaturas (Fase 4) liberam o acesso sozinhas, quando o pagamento é confirmado.
  *
- * Regras: uma matrícula por aluno e curso. Rodar de novo RENOVA a mesma matrícula:
+ * Regras: uma matrícula MANUAL por aluno e curso. Rodar de novo RENOVA a mesma matrícula:
  *  - se ela está ativa, os dias novos são SOMADOS ao que faltava (ninguém perde dias);
- *  - se venceu ou foi revogada, recomeça agora;
- *  - a origem (MANUAL, compra, assinatura) de uma matrícula existente é mantida.
- * As regras ficam em `src/modules/enrollment/grant.ts` e `renewal.ts` — as mesmas do painel e,
- * na Fase 4, dos pagamentos. Revogar não apaga a linha: marca `revokedAt`, para ficar o histórico.
+ *  - se venceu ou foi revogada, recomeça agora.
+ * `--revogar` cancela só o acesso manual (um acesso comprado sai pelo reembolso, no painel).
+ * As regras ficam em `src/modules/enrollment/grant.ts` e `renewal.ts` — as mesmas do painel.
+ * Revogar não apaga a linha: marca `revokedAt`, para ficar o histórico.
  */
 import { grantEnrollment, revokeEnrollment } from "../src/modules/enrollment/grant";
 import { createScriptPrismaClient } from "./script-db";
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
 
     if (revoke) {
       const revoked = await revokeEnrollment(prisma, { userId: user.id, courseId: course.id, now: new Date() });
-      console.info(revoked ? `Acesso de ${email} a "${course.title}" revogado.` : "Não havia matrícula ativa.");
+      console.info(revoked ? `Acesso manual de ${email} a "${course.title}" revogado.` : "Não havia matrícula manual ativa.");
       return;
     }
 

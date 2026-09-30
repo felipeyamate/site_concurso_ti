@@ -77,4 +77,30 @@ describe("parseEnv", () => {
     expect(env.R2_BUCKET).toBe("materiais");
     expect(parseEnv(validEnv).LOCAL_STORAGE_DIR).toBe(".data/uploads");
   });
+
+  it("Asaas: com a chave, exige o token do webhook (longo); ambiente padrão é o sandbox", () => {
+    expect(() => parseEnv({ ...validEnv, ASAAS_API_KEY: "$aact_123" })).toThrowError(/ASAAS_WEBHOOK_TOKEN/);
+    expect(() => parseEnv({ ...validEnv, ASAAS_API_KEY: "$aact_123", ASAAS_WEBHOOK_TOKEN: "curto" })).toThrowError(
+      /32 caracteres/,
+    );
+    const env = parseEnv({ ...validEnv, ASAAS_API_KEY: "$aact_123", ASAAS_WEBHOOK_TOKEN: "t".repeat(32) });
+    expect(env.ASAAS_ENVIRONMENT).toBe("sandbox");
+    expect(() => parseEnv({ ...validEnv, ASAAS_ENVIRONMENT: "producao" })).toThrowError(/ASAAS_ENVIRONMENT/);
+  });
+
+  it("NFS-e: desligada por padrão; ligada, exige descrição, serviço municipal e ISS", () => {
+    expect(parseEnv(validEnv).NFSE_ENABLED).toBe("false");
+    expect(() => parseEnv({ ...validEnv, NFSE_ENABLED: "true" })).toThrowError(
+      /NFSE_SERVICE_DESCRIPTION[\s\S]*NFSE_MUNICIPAL_SERVICE_NAME[\s\S]*NFSE_ISS_RATE[\s\S]*NFSE_MUNICIPAL_SERVICE_CODE/,
+    );
+    const env = parseEnv({
+      ...validEnv,
+      NFSE_ENABLED: "true",
+      NFSE_SERVICE_DESCRIPTION: "Curso online",
+      NFSE_MUNICIPAL_SERVICE_CODE: "08.02",
+      NFSE_MUNICIPAL_SERVICE_NAME: "Instrução, treinamento",
+      NFSE_ISS_RATE: "2.5",
+    });
+    expect(env.NFSE_ISS_RATE).toBe(2.5);
+  });
 });

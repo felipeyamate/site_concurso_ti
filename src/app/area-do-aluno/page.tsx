@@ -5,7 +5,8 @@
  * aqui o `requireSession` confere a sessão de verdade no banco.
  *
  * Mostra os dados da conta, avisos (e-mail não confirmado, conta sem senha), "Meus cursos"
- * com o progresso e o botão "Continuar", e os dispositivos conectados (limite de sessões).
+ * com o progresso e o botão "Continuar", o atalho para "Minhas compras" (Fase 4) e os
+ * dispositivos conectados (limite de sessões).
  */
 import "server-only";
 
@@ -68,8 +69,11 @@ export default async function StudentAreaPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Olá, {user.name}!</h1>
           <p className="text-muted-foreground text-sm">{user.email}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">{roleLabel}</Badge>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/area-do-aluno/compras">Minhas compras</Link>
+          </Button>
           {canSeeAdmin ? (
             <Button asChild variant="outline" size="sm">
               <Link href="/admin">Painel admin</Link>

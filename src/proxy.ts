@@ -4,8 +4,9 @@
  * Quem chama: o próprio Next.js, automaticamente, para os caminhos do `matcher`.
  * (No Next.js 16 este arquivo substitui o antigo `middleware.ts`.)
  *
- * O que faz: se a pessoa tenta abrir /area-do-aluno, /admin ou uma aula SEM o cookie de login,
- * manda direto para /entrar?voltar=<página pedida>.
+ * O que faz: se a pessoa tenta abrir /area-do-aluno, /admin, uma aula, o checkout (/comprar,
+ * /assinar) ou as páginas de desenvolvimento (/dev) SEM o cookie de login, manda direto para
+ * /entrar?voltar=<página pedida>.
  *
  * Importante: aqui só verificamos se o cookie EXISTE (rápido, sem consultar o banco).
  * Um cookie vencido ou falso passa por aqui — por isso cada página protegida TAMBÉM
@@ -31,5 +32,13 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Caminhos protegidos. `:path*` inclui todas as subpáginas (ex.: /admin/usuarios).
   // As aulas (/cursos/<curso>/aulas/<aula>) exigem login; a página do curso é pública.
-  matcher: ["/area-do-aluno/:path*", "/admin/:path*", "/cursos/:courseSlug/aulas/:path*"],
+  // Comprar/assinar exigem login; /planos (vitrine) é pública.
+  matcher: [
+    "/area-do-aluno/:path*",
+    "/admin/:path*",
+    "/cursos/:courseSlug/aulas/:path*",
+    "/comprar/:path*",
+    "/assinar/:path*",
+    "/dev/:path*",
+  ],
 };

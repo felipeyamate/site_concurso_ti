@@ -34,11 +34,30 @@
   Exceção: o envio de PDF (3 passos, `attachment-manager.tsx`) não usa o `useAdminForm`, mas usa `FormState` + `FormStatus`.
 - Nunca apagar histórico de aluno: curso com matrícula ou aula com progresso de ALUNO não se apaga (despublicar).
   Toda operação "confere e depois grava/apaga" trava as linhas antes de conferir (ver `lockRows` em
-  `catalog-admin.server.ts` e `lockEnrollment` em `enrollment/grant.ts`); senão, um pedido simultâneo passa no meio.
+  `catalog-admin.server.ts`, `lockEnrollment` em `enrollment/grant.ts` e `withAdvisoryLock` em `src/lib/db-locks.ts`)
+  ou faz a conferência e a gravação num comando só (`updateMany` com a condição); senão, um pedido simultâneo passa no meio.
 - Vídeo do Panda: link do player só passa por `parsePandaEmbedInput` (`src/modules/video/panda/embed.ts`);
   mensagens do player só com `event.source` do nosso iframe + `isPandaPlayerOrigin`. Produção exige DRM.
 - Arquivos (PDFs): sempre via `getFileStorage()` (`src/modules/storage`); o endereço do arquivo nunca vai
   para a página — o download passa por uma rota que confere `checkLessonAccess` e gera link temporário.
-- Matricular/renovar/revogar: sempre `grantEnrollment`/`revokeEnrollment` (`src/modules/enrollment/grant.ts`).
+- Matrícula MANUAL (painel/script): sempre `grantEnrollment`/`revokeEnrollment` (`src/modules/enrollment/grant.ts`).
+  Matrículas de COMPRA/ASSINATURA nunca são gravadas à mão: só o recálculo `syncPaidAccess`
+  (`src/modules/payments/access-sync.server.ts`), chamado por `applyChargeUpdate` (`charges.server.ts`) quando um
+  pagamento muda. Nunca liberar acesso pela página de "sucesso"/retorno do pagamento.
+- Pagamentos: provedor só via `getPaymentProvider()`/`getProviderForRecord()` (`src/modules/payments/provider/provider.server.ts`);
+  dados de cartão nunca passam pelo nosso site (o cartão é digitado na página do Asaas).
+- Dinheiro sempre em centavos inteiros (`priceCents`); converter só com `centsToReais`/`reaisToCents`/`parseBRLInput`
+  (`src/modules/payments/money.ts`). Datas de cobrança pelo dia de Brasília (`src/modules/payments/dates.ts`);
+  colunas `@db.Date` (ex.: `dueDate`) são exibidas com `formatDateOnly`, nunca com `formatDateTime`.
+- Webhook: confere só o envelope (`parseAsaasEnvelope`: ID e tipo), grava o evento em `webhook_events` ANTES de
+  processar, responde 200 mesmo se o processamento falhar (o erro fica registrado para reprocessar) e ignora evento mais
+  velho que o último aplicado (`isOutdatedChargeUpdate`).
+- Reembolso: chamar o provedor ANTES de gravar; num fluxo com duas chamadas ao provedor, gravar o que ele já aceitou.
+  Estorno manual (boleto) marca `manualRefundRequestedAt` — um "paga" do provedor não devolve o acesso.
+  Depois que algo foi CRIADO no provedor, não transformar uma falha posterior em "erro ao criar" (ver `createSubscription`
+  no Asaas e a assinatura "órfã" em `charges.server.ts`). Erros do provedor para a tela: `providerErrorMessage`.
+  Registros financeiros (pedido, pagamento, nota) usam `onDelete: Restrict` e nunca são apagados.
+- Teste de integração que apaga usuários precisa limpar antes os dados de venda (ver `tests/integration/payments.test.ts`).
 - Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`
-  escapam e alargam a página no celular).
+  escapam e alargam a página no celular); e o Card/item de grid que contém a tabela leva `min-w-0`
+  (senão a tabela estica o item e a página inteira rola para o lado).

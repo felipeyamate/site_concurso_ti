@@ -74,6 +74,31 @@ const envSchema = z
 
     // Pasta dos PDFs em desenvolvimento (sem R2). Padrão: .data/uploads (fora do Git).
     LOCAL_STORAGE_DIR: z.preprocess(emptyToUndefined, z.string().default(".data/uploads")),
+
+    // Asaas (Fase 4): pagamentos. Sem a chave: em desenvolvimento, pagamentos SIMULADOS (para
+    // testar tudo sem conta); em produção, as vendas ficam desligadas (com aviso no painel).
+    //  - ASAAS_ENVIRONMENT: "sandbox" (testes, dinheiro de mentira) ou "production" (de verdade).
+    //  - ASAAS_WEBHOOK_TOKEN: o mesmo "token de autenticação" configurado no webhook do Asaas;
+    //    todo aviso que chega sem ele é recusado (ninguém consegue "fingir" um pagamento).
+    ASAAS_API_KEY: optionalString(),
+    ASAAS_ENVIRONMENT: z.preprocess(emptyToUndefined, z.enum(["sandbox", "production"]).default("sandbox")),
+    ASAAS_WEBHOOK_TOKEN: z.preprocess(
+      emptyToUndefined,
+      z.string().min(32, "ASAAS_WEBHOOK_TOKEN precisa ter pelo menos 32 caracteres.").optional(),
+    ),
+
+    // Nota fiscal de serviço (NFS-e) automática, emitida pelo Asaas (Fase 4, opcional).
+    // Os dados fiscais vêm do seu contador/prefeitura (ver README, "Nota fiscal").
+    NFSE_ENABLED: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("false")),
+    NFSE_SERVICE_DESCRIPTION: optionalString(),
+    NFSE_MUNICIPAL_SERVICE_ID: optionalString(),
+    NFSE_MUNICIPAL_SERVICE_CODE: optionalString(),
+    NFSE_MUNICIPAL_SERVICE_NAME: optionalString(),
+    // Alíquota do ISS em %, ex.: "2" ou "2.5".
+    NFSE_ISS_RATE: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number({ error: "NFSE_ISS_RATE deve ser um número (ex.: 2 ou 2.5)." }).min(0).max(5).optional(),
+    ),
   })
   // Regra que envolve mais de um campo (como um `@model_validator` do pydantic):
   // não faz sentido ter só o ID do Google sem o segredo, ou vice-versa.
@@ -108,6 +133,34 @@ const envSchema = z
           code: "custom",
           path: [key],
           message: "Para o Cloudflare R2, preencha R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY e R2_BUCKET juntos.",
+        });
+      }
+    }
+
+    // Asaas: com a chave, o token do webhook é obrigatório (sem ele, nenhum pagamento seria
+    // confirmado — ou, pior, qualquer um poderia mandar avisos falsos).
+    if (values.ASAAS_API_KEY && !values.ASAAS_WEBHOOK_TOKEN) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ASAAS_WEBHOOK_TOKEN"],
+        message: "Com ASAAS_API_KEY, preencha também ASAAS_WEBHOOK_TOKEN (o token do webhook configurado no Asaas).",
+      });
+    }
+
+    // NFS-e ligada: precisa da descrição, do nome do serviço municipal, de um código/ID do serviço
+    // e da alíquota do ISS (sem isso a prefeitura recusa a nota).
+    if (values.NFSE_ENABLED === "true") {
+      const required = ["NFSE_SERVICE_DESCRIPTION", "NFSE_MUNICIPAL_SERVICE_NAME", "NFSE_ISS_RATE"] as const;
+      for (const key of required) {
+        if (values[key] === undefined) {
+          ctx.addIssue({ code: "custom", path: [key], message: `Com NFSE_ENABLED=true, preencha ${key}.` });
+        }
+      }
+      if (!values.NFSE_MUNICIPAL_SERVICE_ID && !values.NFSE_MUNICIPAL_SERVICE_CODE) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["NFSE_MUNICIPAL_SERVICE_CODE"],
+          message: "Com NFSE_ENABLED=true, preencha NFSE_MUNICIPAL_SERVICE_ID ou NFSE_MUNICIPAL_SERVICE_CODE.",
         });
       }
     }

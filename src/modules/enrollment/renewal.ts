@@ -1,8 +1,9 @@
 /**
  * renewal.ts — Regra de criar/renovar uma matrícula: quando começa e até quando vale.
  *
- * Quem chama: o script `npm run enroll` (hoje) e, na Fase 4, o webhook de pagamento confirmado
- * ("pagamento confirmado → gera/renova um Enrollment", PROJECT.md seção 6).
+ * Quem chama: a matrícula manual (`grant.ts`: painel e `npm run enroll`) e, na Fase 4, o recálculo
+ * do acesso das compras (`payments/access-sync.ts`), que aplica esta regra compra a compra, na ordem
+ * em que foram pagas ("pagamento confirmado → gera/renova um Enrollment", PROJECT.md seção 6).
  *
  * Função "pura" (sem banco), testada em `renewal.test.ts`.
  */

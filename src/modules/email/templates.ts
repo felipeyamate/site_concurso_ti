@@ -1,7 +1,8 @@
 /**
- * templates.ts — Textos dos e-mails automáticos (verificação, senha, link mágico).
+ * templates.ts — Textos dos e-mails automáticos (verificação, senha, link mágico e compras).
  *
- * Quem chama: `src/modules/auth/auth.ts`, quando o Better Auth pede para enviar um e-mail.
+ * Quem chama: `src/modules/auth/auth.ts`, quando o Better Auth pede para enviar um e-mail, e as
+ * vendas (Fase 4: `src/modules/payments/effects.server.ts`) — pagamento confirmado e reembolso.
  * O que devolve: um objeto `{ subject, html, text }` pronto para `sendEmail`.
  *   - `html`: versão bonita, para a maioria dos leitores de e-mail;
  *   - `text`: versão em texto puro (alguns leitores/antispam preferem ter as duas).
@@ -96,5 +97,48 @@ export function magicLinkTemplate(params: { url: string }): EmailContent {
       footnote: "O link vale por 5 minutos e só pode ser usado uma vez. Se você não pediu, ignore esta mensagem.",
     }),
     text: `Olá!\n\nPara entrar na sua conta, acesse: ${params.url}\n\nO link vale por 5 minutos e só pode ser usado uma vez.`,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Compras (Fase 4). O Asaas também manda os e-mails dele (cobrança, recibo); os nossos avisam
+// o que importa no site: o acesso liberado ou retirado.
+// ---------------------------------------------------------------------------------------------
+
+export function purchaseConfirmedTemplate(params: { name: string; itemTitle: string; url: string }): EmailContent {
+  const item = escapeHtml(params.itemTitle);
+  return {
+    subject: "Pagamento confirmado: seu acesso está liberado",
+    html: renderLayout({
+      greetingName: params.name,
+      paragraph: `Recebemos o pagamento de <strong>${item}</strong>. Seu acesso já está liberado — bons estudos!`,
+      buttonLabel: "Ir para meus cursos",
+      url: params.url,
+      footnote: "Você pode acompanhar suas compras na Área do aluno, em \"Minhas compras\".",
+    }),
+    text: `Olá, ${params.name}!\n\nRecebemos o pagamento de ${params.itemTitle}. Seu acesso já está liberado.\n\nSeus cursos: ${params.url}`,
+  };
+}
+
+export function refundRequestedTemplate(params: {
+  name: string;
+  itemTitle: string;
+  url: string;
+  manualRefund: boolean;
+}): EmailContent {
+  const item = escapeHtml(params.itemTitle);
+  const how = params.manualRefund
+    ? "Como o pagamento foi por boleto, nossa equipe vai entrar em contato para combinar a devolução."
+    : "A devolução é feita na mesma forma de pagamento (no cartão, pode levar até 2 faturas para aparecer).";
+  return {
+    subject: "Reembolso solicitado",
+    html: renderLayout({
+      greetingName: params.name,
+      paragraph: `Recebemos o pedido de reembolso de <strong>${item}</strong> e o acesso correspondente foi encerrado. ${how}`,
+      buttonLabel: "Ver minhas compras",
+      url: params.url,
+      footnote: "Se você não pediu este reembolso, responda este e-mail.",
+    }),
+    text: `Olá, ${params.name}!\n\nRecebemos o pedido de reembolso de ${params.itemTitle} e o acesso correspondente foi encerrado. ${how}\n\nSuas compras: ${params.url}`,
   };
 }

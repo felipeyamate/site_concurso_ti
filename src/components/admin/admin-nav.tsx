@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * admin-nav.tsx — Menu do painel admin (Visão geral, Cursos, Usuários).
+ * admin-nav.tsx — Menu do painel admin (Visão geral, Cursos, Usuários, Vendas).
  *
  * Quem chama: `src/app/admin/layout.tsx`.
  * "use client" porque destaca a página atual (`usePathname` lê o endereço no navegador).
@@ -19,7 +19,12 @@ export function AdminNav({ isAdmin }: AdminNavProps) {
   const links = [
     { href: "/admin", label: "Visão geral", exact: true },
     { href: "/admin/cursos", label: "Cursos", exact: false },
-    ...(isAdmin ? [{ href: "/admin/usuarios", label: "Usuários", exact: false }] : []),
+    ...(isAdmin
+      ? [
+          { href: "/admin/usuarios", label: "Usuários", exact: false },
+          { href: "/admin/vendas", label: "Vendas", exact: false },
+        ]
+      : []),
   ];
 
   return (

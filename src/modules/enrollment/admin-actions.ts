@@ -91,7 +91,7 @@ export async function revokeEnrollmentAction(_previous: FormState, formData: For
   try {
     const revoked = await revokeEnrollment(prisma, { ...parsed.data, now: new Date() });
     refreshScreens();
-    return revoked ? successState("Acesso revogado.") : errorState("Esta matrícula já estava revogada.");
+    return revoked ? successState("Acesso revogado.") : errorState("Não há matrícula manual ativa para revogar.");
   } catch (error) {
     return stateFromError(error, "revogar matrícula");
   }

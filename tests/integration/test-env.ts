@@ -7,6 +7,8 @@
  *  1. Exige TEST_DATABASE_URL (no terminal, no CI ou no `.env.local`).
  *  2. Recusa rodar se TEST_DATABASE_URL for igual ao banco do app (DATABASE_URL/DIRECT_URL).
  *  3. Desliga Resend e Google: nenhum e-mail real é enviado durante os testes.
+ *  4. Pagamentos SEMPRE simulados (sem ASAAS_API_KEY): nenhuma cobrança real, nem no sandbox.
+ *     A NFS-e fica ligada com dados de teste (o provedor simulado "emite" notas sem valor fiscal).
  */
 import { config as loadEnv } from "dotenv";
 
@@ -43,6 +45,14 @@ export function configureTestEnv(): string {
   process.env.RESEND_API_KEY = "";
   process.env.GOOGLE_CLIENT_ID = "";
   process.env.GOOGLE_CLIENT_SECRET = "";
+  process.env.ASAAS_API_KEY = "";
+  process.env.ASAAS_WEBHOOK_TOKEN = "token-do-webhook-apenas-para-os-testes-0123456789";
+  process.env.NFSE_ENABLED = "true";
+  process.env.NFSE_SERVICE_DESCRIPTION = "Curso online (teste)";
+  process.env.NFSE_MUNICIPAL_SERVICE_ID = "";
+  process.env.NFSE_MUNICIPAL_SERVICE_CODE = "08.02";
+  process.env.NFSE_MUNICIPAL_SERVICE_NAME = "Ensino (teste)";
+  process.env.NFSE_ISS_RATE = "2";
   process.env[READY_FLAG] = "1";
 
   return testDatabaseUrl;

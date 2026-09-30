@@ -4,9 +4,11 @@ Plataforma de cursos que ensina Informática/TI para candidatos de concursos que
 área de TI**. Visão, regras de negócio, stack e roteiro estão em **[PROJECT.md](./PROJECT.md)**
 (leia primeiro).
 
-**Estado atual:** Fase 3 concluída — painel admin para cadastrar cursos, módulos, aulas, vídeos do
-Panda Video e PDFs (Cloudflare R2), e para gerenciar perfis e matrículas. (Fase 1: projeto, banco,
-login e perfis. Fase 2: catálogo, player, matrículas e progresso.)
+**Estado atual:** Fase 4 concluída — vendas: produtos (curso avulso ou pacote) e assinaturas, pagos
+com Pix, boleto ou cartão parcelado pelo Asaas; o acesso é liberado pelo aviso de pagamento (webhook)
+e retirado no reembolso; nota fiscal automática (opcional). Sem conta no Asaas, os pagamentos são
+**simulados** em desenvolvimento. (Fase 1: projeto, banco, login e perfis. Fase 2: catálogo, player,
+matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs.)
 
 ---
 
@@ -177,7 +179,78 @@ vão para a pasta `.data/uploads`; sem o Panda, dá para testar o cadastro com u
 
 ---
 
-## 5. Comandos do dia a dia
+## 5. Como testar a Fase 4 (passo a passo)
+
+Pré-requisitos: uma conta ADMIN (seção 1), duas contas de aluno (navegadores anônimos), o seed
+(`npm run db:seed`) e o `npm run dev` rodando. **Não precisa de conta no Asaas**: sem `ASAAS_API_KEY`,
+os pagamentos são SIMULADOS — a "página de pagamento do Asaas" vira o simulador
+`/dev/pagamentos/...`, com botões que fazem o papel do Asaas (pagar, estornar, contestar). Os avisos
+simulados passam pelo MESMO código dos avisos reais. Para testar com o Asaas de verdade (sandbox), veja
+"Configurando o Asaas" logo abaixo.
+
+CPFs de teste (válidos na conta, não pertencem a ninguém): `529.982.247-25`, `111.444.777-35`, `935.411.347-80`.
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 1 | Como ADMIN, abra `/admin` → **Vendas** | "Provedor de pagamento: Simulado (desenvolvimento)" e os números zerados |
+| 2 | **Produtos** → crie "Curso Base — 12 meses", preço `197,00`, 365 dias, 12 parcelas | Abre o produto **inativo**. Marque "Ativo" sem marcar curso e salve: erro "Marque pelo menos um curso" |
+| 3 | Marque o curso "Informática e TI para Concursos — do zero" e "Ativo"; salve | "Produto salvo." |
+| 4 | **Planos** → em "Cursos incluídos na assinatura", marque o mesmo curso e salve; crie o plano "Assinatura mensal", `49,90`, Mensal, e ative | "Cursos da assinatura salvos"; "Plano salvo." |
+| 5 | Num navegador anônimo, abra `/cursos/informatica-e-ti-do-zero` | Ofertas: "R$ 197,00 · ou até 12x de R$ 16,42 sem juros · acesso por 1 ano" e o quadro da assinatura. "Comprar" pede login |
+| 6 | Como aluno, clique em "Comprar". Envie com CPF `111.111.111-11` e sem aceitar os termos | Erros no CPF e nos termos (o que foi digitado continua) |
+| 7 | CPF `529.982.247-25`, Pix, aceite os termos, "Ir para o pagamento" | Página do Pix com o QR Code "PIX SIMULADO", o "copia e cola" e "Aguardando pagamento". Uma aula paga continua bloqueada |
+| 8 | Clique em "Abra a fatura" (abre o simulador) → "Pagar (aprovar)". Volte à aba do pagamento | Em até 5 s: "Pagamento confirmado!". A aula paga abre. No terminal: o e-mail "Pagamento confirmado" |
+| 9 | Área do aluno → **Minhas compras** → "Pedir reembolso" | Pedido "Reembolso em andamento" e o acesso sai **na hora** (a aula mostra "acesso cancelado"). No simulador, "Concluir estorno" → pedido "Reembolsado" |
+| 10 | Com a 2ª conta: compre no **Cartão de crédito** em 3x | Página com "3x de R$ 65,67" e "Pagar com cartão" (no Asaas real, a página segura dele). No simulador, "Pagar (aprovar)" → acesso liberado |
+| 11 | Com a 1ª conta: `/planos` → "Assinar" → **Boleto** → "Abrir o boleto" (simulador) → "Pagar (aprovar)" | Em Minhas compras: assinatura "Ativa" e "Acesso garantido até <vencimento + 1 mês + 5 dias de tolerância>" (vale o dia inteiro) |
+| 12 | No simulador da assinatura, "Gerar a cobrança do próximo ciclo"; em Minhas compras, "Pagar" → simulador → "Pagar (aprovar)" | A data de "acesso garantido" avança 1 mês |
+| 13 | "Cancelar assinatura" | Assinatura "Cancelada". A data de "acesso garantido" passa para a **véspera do próximo vencimento** (sem os 5 dias de tolerância: não há mais pagamento para esperar) e o acesso continua até lá |
+| 14 | Como ADMIN: **Pedidos** → abra o pedido da 2ª conta → "Reembolsar pedido" | Pedido em reembolso e a aula volta a ficar bloqueada para a 2ª conta |
+| 15 | **Avisos do provedor** | Cada aviso (pago, estorno...) com o que foi feito. Em **Usuários** → aluno: quadro "Compras" |
+| 16 | Matricule a 2ª conta manualmente (Usuários) e revogue | Só a matrícula manual muda: compra e assinatura têm a própria linha ("Origem") |
+| 17 | Abra `/admin/vendas` e `/area-do-aluno/pagamentos/<id de outra pessoa>` com um aluno | "Página não encontrada" nos dois |
+| 18 | Compre com **Boleto**, pague no simulador e peça o reembolso em Minhas compras | "Reembolso em andamento" e a aula bloqueada. No painel, o pedido avisa "Estorno de boleto pendente" |
+| 19 | No simulador desse boleto, clique **"Pagar (aprovar)" de novo** (é o que o Asaas mostraria até alguém fazer o estorno no painel dele) | A aula **continua bloqueada** e o aviso fica registrado como "estorno manual pendente". Depois, "Concluir estorno" → pedido "Reembolsado" |
+| 20 | Assine com **Boleto**, pague no simulador e use "Cancelar e pedir reembolso" | Em `/admin/vendas`: "1 assinatura(s) com estorno de boleto para fazer no painel do Asaas". Na página da assinatura: aviso "Estorno de boleto pendente" e sem o botão "Cancelar e estornar" |
+
+### Configurando o Asaas
+
+1. **Sandbox (testes, dinheiro de mentira):** crie uma conta em [sandbox.asaas.com](https://sandbox.asaas.com)
+   (é separada da conta de produção).
+2. **Chave da API:** Integrações → Chaves de API → gerar. Cole em `ASAAS_API_KEY` (no `.env.local`) e deixe
+   `ASAAS_ENVIRONMENT="sandbox"`.
+3. **Webhook (os avisos de pagamento):** Integrações → Webhooks → Adicionar:
+   - URL: `https://SEU-DOMINIO/api/webhooks/asaas` (o painel do site mostra o endereço exato em Vendas).
+     Em `localhost` o Asaas não alcança a sua máquina: teste num deploy de preview da Vercel ou com um
+     túnel (ex.: `npx cloudflared tunnel --url http://localhost:3000`).
+   - Token de autenticação: gere com `openssl rand -hex 32` e use o MESMO valor em `ASAAS_WEBHOOK_TOKEN`.
+   - Tipo de envio: **Sequencial**. Eventos: todos de **Cobranças**, **Assinaturas** e **Notas fiscais**.
+4. **Domínio do site:** Minha conta → Informações → site. O Asaas só devolve o aluno ao site (depois do
+   cartão) se o endereço for desse domínio.
+5. Reinicie o site. Em Vendas deve aparecer "Asaas — sandbox (testes)". No sandbox, pague as cobranças
+   pelo próprio painel do Asaas (ou com os cartões de teste da documentação do Asaas).
+6. **Produção:** conta de produção aprovada, chave de produção, `ASAAS_ENVIRONMENT="production"` e um webhook
+   de produção com outro token. Por segurança, o **site de produção com a chave do sandbox fica com as vendas
+   desligadas** (no sandbox, cartões de teste "pagariam" de mentira).
+
+> A integração segue a API v3 do Asaas (documentação pública e os formatos usados por SDKs conhecidos).
+> Como o ambiente do Claude não acessa o Asaas, **confira no sandbox** o fluxo completo (passos 7 a 14 acima,
+> pagando pelo painel do Asaas). Ajustes ficam em `src/modules/payments/provider/asaas/`.
+
+### Nota fiscal (NFS-e) automática — opcional
+
+1. No Asaas: Notas fiscais → configure os dados fiscais da empresa (inscrição municipal, certificado etc.).
+2. Com o seu contador: o **serviço municipal** (código ou ID da lista do Asaas, ex.: `08.02` — instrução e
+   treinamento) e a **alíquota do ISS**. O site manda só o ISS (sem retenção) e zera os demais impostos —
+   o comum no Simples Nacional; confirme com o contador.
+3. Preencha `NFSE_ENABLED="true"`, `NFSE_SERVICE_DESCRIPTION`, `NFSE_MUNICIPAL_SERVICE_CODE` (ou `_ID`),
+   `NFSE_MUNICIPAL_SERVICE_NAME` e `NFSE_ISS_RATE`, e reinicie.
+4. A nota é pedida quando o pagamento é confirmado e cancelada quando há reembolso/contestação. A situação
+   aparece em Vendas → Pedidos (com "Emitir nota de novo" se a prefeitura recusar) e o PDF em "Minhas compras".
+
+---
+
+## 6. Comandos do dia a dia
 
 | Comando | Para que serve |
 |---|---|
@@ -186,25 +259,29 @@ vão para a pasta `.data/uploads`; sem o Panda, dá para testar o cadastro com u
 | `npm run lint` | Procura problemas comuns no código |
 | `npm run typecheck` | Checa os tipos do TypeScript (como o `mypy`) |
 | `npm test` | Testes unitários (rápidos, sem banco) |
-| `npm run test:integration` | Testes com banco de verdade (ver seção 6) |
+| `npm run test:integration` | Testes com banco de verdade (ver seção 7) |
 | `npm run db:migrate -- --name descricao` | Depois de **alterar** `prisma/schema.prisma`: cria e aplica uma nova migração |
 | `npm run db:deploy` | Aplica migrações já existentes (primeira vez, produção) |
 | `npm run db:studio` | Abre uma interface visual para ver/editar os dados do banco |
 | `npm run db:seed` | Grava o curso de exemplo (só desenvolvimento; pode rodar várias vezes) |
 | `npm run user:set-role -- email PERFIL` | Muda o perfil de um usuário (STUDENT, TEACHER, ADMIN). No dia a dia, use o painel (/admin/usuarios); o script serve para criar o primeiro ADMIN |
-| `npm run enroll -- email curso [dias \| --revogar]` | Matricula num curso (sem data de fim ou por N dias), renova, ou revoga o acesso — o mesmo que o painel faz |
+| `npm run enroll -- email curso [dias \| --revogar]` | Matrícula MANUAL num curso (sem data de fim ou por N dias), renova, ou revoga — o mesmo que o painel faz. Compras e assinaturas não mudam (acesso pago sai pelo reembolso) |
 
 ---
 
-## 6. Testes automáticos
+## 7. Testes automáticos
 
 - **Unitários** (`npm test`): regras puras — perfis, limite de sessões, proteção de redirecionamento,
   validação de formulários, variáveis de ambiente, e-mails, **acesso às aulas** (matrícula),
   progresso, "continuar de onde parou", link, mensagens e regras de progresso do player do Panda,
-  token da marca d'água, links assinados dos PDFs e as travas de perfil.
+  token da marca d'água, links assinados dos PDFs, as travas de perfil e as **vendas**: dinheiro em
+  centavos, parcelas, CPF, datas de cobrança (fuso de Brasília), situação do pedido, prazo de reembolso,
+  recálculo do acesso pago, tradução dos dados do Asaas e o provedor do Asaas com um `fetch` falso.
 - **Integração** (`npm run test:integration`): cadastro, login, limite de sessões, seed do catálogo,
   acesso às aulas, progresso, painel de cursos (criar, reordenar, apagar com proteção), envio e
-  download de PDFs, matrículas e perfis, gravando num PostgreSQL de verdade. **Os testes apagam os dados do banco que usam**, por isso exigem um banco
+  download de PDFs, matrículas e perfis, e as vendas (compra, avisos repetidos/atrasados, reembolso,
+  contestação, assinatura, concorrência e a rota do webhook), gravando num PostgreSQL de verdade.
+  Os pagamentos nos testes são sempre SIMULADOS (a chave do Asaas é ignorada). **Os testes apagam os dados do banco que usam**, por isso exigem um banco
   SEPARADO na variável `TEST_DATABASE_URL`:
   1. Na Neon, crie uma branch chamada `test` (Branches → New branch).
   2. Copie a string de conexão **direta** dessa branch.
@@ -215,7 +292,7 @@ vão para a pasta `.data/uploads`; sem o Panda, dá para testar o cadastro com u
 
 ---
 
-## 7. Onde fica cada coisa
+## 8. Onde fica cada coisa
 
 ```
 prisma/
@@ -226,12 +303,15 @@ scripts/                 set-role.ts (perfil) e enroll.ts (matrícula)
 src/
   app/                   Páginas e rotas (cada pasta = um endereço do site)
     (auth)/              /entrar, /cadastro, /esqueci-senha, /redefinir-senha
-    area-do-aluno/       Área do aluno: meus cursos, dispositivos (exige login)
+    area-do-aluno/       Área do aluno: meus cursos, dispositivos, compras/ e pagamentos/[id] (exige login)
+    comprar/, assinar/   Checkout de produto e de assinatura (exige login); planos/ = vitrine da assinatura
+    dev/pagamentos/      SIMULADOR de pagamento (só desenvolvimento, sem conta no Asaas)
     cursos/              /cursos (catálogo), /cursos/[curso], /cursos/[curso]/aulas/[aula] (player)
                          e .../materiais/[id] (download do PDF, confere o acesso a cada clique)
-    admin/               Painel: visão geral, cursos/[id]/aulas/[id] (TEACHER+), usuarios/[id] (ADMIN)
+    admin/               Painel: visão geral, cursos/[id]/aulas/[id] (TEACHER+), usuarios/[id] e vendas/ (ADMIN)
     api/auth/[...all]/   API de autenticação (/api/auth/*)
     api/dev-storage/     Envio/download de PDFs SEM o R2 (só desenvolvimento)
+    api/webhooks/asaas/  Onde o Asaas avisa os pagamentos (confere o token)
   components/ui/         Componentes visuais (shadcn/ui)
   components/admin/      Peças comuns do painel (menu, botões de ação, mensagens dos formulários)
   lib/                   Utilidades gerais: banco (db.ts), configurações (env.ts), formulários (form-state.ts)
@@ -242,6 +322,8 @@ src/
     progress/            Progresso, conclusão, "continuar de onde parou", player da aula
     video/               Fornecedores de vídeo (exemplo e panda/) e os players
     materials/           PDFs das aulas: envio, lista, download
+    payments/            Vendas: checkout, avisos do provedor, recálculo do acesso pago (access-sync),
+                         reembolsos, notas fiscais; provider/ = Asaas e o simulado; admin/ = painel de vendas
     storage/             Armazenamento de arquivos: Cloudflare R2 ou pasta local (desenvolvimento)
     email/               Envio de e-mails e modelos de texto
   proxy.ts               Barreira rápida das áreas protegidas
@@ -251,12 +333,13 @@ tests/integration/       Testes que usam o banco de verdade
 
 ---
 
-## 8. Publicando na Vercel (quando for a hora)
+## 9. Publicando na Vercel (quando for a hora)
 
 1. Na Vercel: **Add New → Project** e importe este repositório do GitHub.
 2. Em **Settings → Environment Variables**, cadastre as mesmas variáveis do `.env.example`,
    com valores de produção (`BETTER_AUTH_URL` = endereço do site, `BETTER_AUTH_SECRET` novo,
-   `RESEND_API_KEY` obrigatória, `PANDA_DRM_*` obrigatórias para os vídeos tocarem e `R2_*` para os PDFs).
+   `RESEND_API_KEY` obrigatória, `PANDA_DRM_*` obrigatórias para os vídeos tocarem, `R2_*` para os PDFs e
+   `ASAAS_*` para vender — sem a chave, as vendas ficam desligadas em produção).
 3. Antes do primeiro deploy (e sempre que houver migração nova), aplique as migrações no banco
    de produção: `DIRECT_URL="<url direta de produção>" npm run db:deploy`.
 4. Se usar Google: cadastre `https://SEU-DOMINIO/api/auth/callback/google` como URI de

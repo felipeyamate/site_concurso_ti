@@ -388,7 +388,7 @@ describe("matrículas manuais (mesma regra do script e dos pagamentos)", () => {
     const again = await grantEnrollment(prisma, { userId: "aluno", courseId: course.id, days: 30, now: later });
     expect(again.period.startsAt).toEqual(later);
     const row = await prisma.enrollment.findUniqueOrThrow({
-      where: { userId_courseId: { userId: "aluno", courseId: course.id } },
+      where: { userId_courseId_source: { userId: "aluno", courseId: course.id, source: "MANUAL" } },
     });
     expect(row.revokedAt).toBeNull();
     expect(row.source).toBe("MANUAL");
@@ -411,7 +411,7 @@ describe("matrículas manuais (mesma regra do script e dos pagamentos)", () => {
     ]);
 
     const row = await prisma.enrollment.findUniqueOrThrow({
-      where: { userId_courseId: { userId: "aluno", courseId: course.id } },
+      where: { userId_courseId_source: { userId: "aluno", courseId: course.id, source: "MANUAL" } },
     });
     expect(row.expiresAt?.getTime()).toBe(now.getTime() + 80 * DAY);
   });
