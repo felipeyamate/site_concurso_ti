@@ -14,6 +14,8 @@ import "server-only";
 
 import { prisma } from "@/lib/db";
 
+import { limitRequestMetadata } from "./request-metadata";
+
 /**
  * Grava um acesso. Uma falha aqui NÃO impede o login (o aluno entra do mesmo jeito): o erro vai
  * para o log (e para o Sentry, quando configurado) para alguém olhar.
@@ -21,13 +23,8 @@ import { prisma } from "@/lib/db";
 export async function recordAccessLog(input: { userId: string; ipAddress?: string | null; userAgent?: string | null; at?: Date }): Promise<void> {
   try {
     await prisma.accessLog.create({
-      data: {
-        userId: input.userId,
-        // Mesmos limites de tamanho do registro de aceite: um cabeçalho gigante não vai para o banco.
-        ipAddress: input.ipAddress?.slice(0, 100) || null,
-        userAgent: input.userAgent?.slice(0, 500) || null,
-        createdAt: input.at ?? new Date(),
-      },
+      // Mesmos limites de tamanho do registro de aceite: um cabeçalho gigante não vai para o banco.
+      data: { userId: input.userId, ...limitRequestMetadata(input), createdAt: input.at ?? new Date() },
     });
   } catch (error) {
     console.error("[registro de acesso] Falha ao gravar o acesso do usuário", input.userId, error);

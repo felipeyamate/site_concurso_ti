@@ -368,7 +368,7 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 |---|---|---|
 | 1 | `/cadastro`: preencha tudo **sem** marcar "Li e aceito os Termos de uso e a Política de privacidade" → Criar conta | "Para criar a conta, aceite os Termos de uso e a Política de privacidade." (a conta não é criada) |
 | 2 | Marque a caixa e crie a conta; na área do aluno, clique em **Minha conta e privacidade** | "Você já aceitou esta versão." e a lista de aceites com a data e "(no cadastro)" |
-| 3 | Com uma conta **antiga** (ou, no `npm run db:studio`, apague o `legal_version` de um usuário), abra `/area-do-aluno/compras` | Vai para "Antes de continuar" (`/aceitar-termos`). Sem marcar → "Marque para continuar."; marcando → volta para "Minhas compras" e o aceite aparece na conta como "(na tela de aceite)" |
+| 3 | Com uma conta **antiga** (ou, no `npm run db:studio`, apague o `legal_version` de um usuário), abra `/area-do-aluno/desempenho` | Vai para "Antes de continuar" (`/aceitar-termos`). Sem marcar → "Marque para continuar."; marcando → volta para "Meu desempenho" e o aceite aparece na conta como "(na tela de aceite)". **"Minhas compras"**, a página de um pagamento e "Minha conta" abrem sem o aceite (cancelar, pedir reembolso, pagar o que já foi gerado e excluir a conta não dependem dele) |
 | 4 | `/termos` e `/privacidade` | "Versão de 1º de outubro de 2026". Os dados da empresa aparecem entre [colchetes] até você preencher as variáveis `LEGAL_*` |
 
 **LGPD: meus dados e excluir a conta**
@@ -377,7 +377,7 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 |---|---|---|
 | 5 | Minha conta → troque o **nome** → Salvar | "Nome atualizado." (o topo da área do aluno muda) |
 | 6 | **Baixar meus dados** | Baixa `meus-dados-concurso-ti-AAAA-MM-DD.json`: conta, aceites, dispositivos, **registros de acesso** (cada login: data, IP e navegador — o Marco Civil manda guardar por 6 meses), matrículas, progresso, respostas, simulados, compras e afiliado. Sem senha nem tokens |
-| 7 | Com um aluno que tem **assinatura ativa** ou um **Pix aguardando** | "Ainda não dá para excluir" com o motivo (cancelar a assinatura / pagar ou esperar vencer). Conta de professor/admin também não se exclui por aqui |
+| 7 | Com um aluno que tem **assinatura ativa**, um **Pix aguardando**, um **boleto vencido há menos de 30 dias** ou um **reembolso em andamento** | "Ainda não dá para excluir" com o motivo (cancelar a assinatura / pagar ou esperar vencer / esperar 30 dias do vencimento / esperar o reembolso). Conta de professor/admin também não se exclui por aqui |
 | 8 | Com uma conta que entrou há **mais de 15 minutos** | "Entre de novo para confirmar" (botão para sair e entrar de novo) |
 | 9 | Logo depois de entrar: digite `excluir` → Excluir minha conta | "Para confirmar, digite exatamente: EXCLUIR MINHA CONTA" |
 | 10 | Digite `EXCLUIR MINHA CONTA` → Excluir → confirme a janela | Volta para a página inicial com "Sua conta foi excluída". Entrar com o e-mail e a senha antigos: "E-mail ou senha incorretos". O **mesmo e-mail** pode criar uma conta nova |
@@ -389,7 +389,7 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 |---|---|---|
 | 12 | Sem `NEXT_PUBLIC_POSTHOG_KEY` | Nenhum aviso de cookies (não há cookies de análise) |
 | 13 | Com a chave no `.env.local` (a de um projeto grátis do PostHog), reinicie o `npm run dev` e abra o site num navegador anônimo | O aviso "Usamos cookies essenciais..." com **Só os essenciais** e **Aceitar análise**. Antes de escolher, nada do PostHog carrega (F12 → Rede) |
-| 14 | **Aceitar análise** e navegue por 2 páginas | No PostHog (Activity), as visitas aparecem. **Preferências de cookies** (rodapé) reabre o aviso; "Só os essenciais" para de enviar |
+| 14 | **Aceitar análise** e navegue por 2 páginas (uma delas com `?cupom=TESTE` no endereço) | No PostHog (Activity), as visitas aparecem — os endereços **sem** o `?...` (o link de redefinir a senha, por exemplo, leva um código secreto). **Preferências de cookies** (rodapé) reabre o aviso; "Só os essenciais" para de enviar |
 
 **Avisos de erro (Sentry) e página de erro**
 
@@ -404,7 +404,7 @@ Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwrigh
 |---|---|---|
 | 17 | `curl -I http://localhost:3000/` | Cabeçalhos `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy: frame-ancestors 'none'`, `Strict-Transport-Security` |
 | 18 | `http://localhost:3000/api/health` | `{"status":"ok"}` (com o banco fora do ar: status 503 — é o que o monitor de disponibilidade vai olhar) |
-| 19 | Com `CRON_SECRET` no `.env.local`: `curl http://localhost:3000/api/cron/limpeza` e depois com `-H "Authorization: Bearer <CRON_SECRET>"` | Sem o segredo: `{"error":"não autorizado"}` (401). Com ele: quantos logins/códigos vencidos e registros de acesso com mais de 6 meses foram apagados |
+| 19 | Com `CRON_SECRET` no `.env.local`: `curl http://localhost:3000/api/cron/limpeza` e depois com `-H "Authorization: Bearer <CRON_SECRET>"` | Sem o segredo: `{"error":"não autorizado"}` (401). Com ele: quantos logins/códigos vencidos, registros de acesso com mais de 6 meses e dados de estudo de contas excluídas foram apagados |
 | 20 | Com o segredo: `curl -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/conferir-pagamentos` | `{"checked":0,"failed":0,...}` sem cobranças abertas. No modo **simulado**, cada Pix/boleto aguardando conta em `failed` (o simulador não responde a consultas, como no botão "Conferir no Asaas"); a conferência de verdade roda com o Asaas e está coberta pelos testes de integração (`operations.test.ts`) |
 
 **Testes de ponta a ponta (navegador de verdade)**

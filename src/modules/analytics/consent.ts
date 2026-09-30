@@ -33,3 +33,37 @@ export function analyticsChoiceCookie(choice: AnalyticsChoice, secure: boolean):
 
 /** Evento que o link "Preferências de cookies" (rodapé) dispara para reabrir o aviso. */
 export const OPEN_COOKIE_PREFERENCES_EVENT = "ct:abrir-preferencias-de-cookies";
+
+/**
+ * Tira de um endereço os parâmetros (`?token=...`) e o `#...`: "https://site/redefinir-senha?token=abc"
+ * → "https://site/redefinir-senha". Textos que não são endereços http(s) voltam iguais.
+ * Por que: alguns endereços do site carregam segredos (o link de redefinir a senha, o `?cupom=` de
+ * um afiliado, o `?voltar=`...) e o PostHog guarda o endereço de cada página visitada.
+ */
+export function stripUrlQuery(value: string): string {
+  if (!/^https?:\/\//i.test(value)) return value;
+  const cut = value.search(/[?#]/);
+  return cut === -1 ? value : value.slice(0, cut);
+}
+
+type AnalyticsEvent = { properties?: Record<string, unknown>; $set?: Record<string, unknown>; $set_once?: Record<string, unknown> };
+
+function stripUrlsIn(properties: Record<string, unknown> | undefined): void {
+  if (!properties) return;
+  for (const [key, value] of Object.entries(properties)) {
+    if (typeof value === "string") properties[key] = stripUrlQuery(value);
+  }
+}
+
+/**
+ * Limpa um evento do PostHog antes do envio (`before_send`): todo endereço — a página atual, a
+ * anterior, a de entrada, o "referrer" — vai sem os parâmetros. Devolve o mesmo evento, alterado.
+ * Paralelo em Python: é uma função "antes de enviar" que passa por um dicionário trocando valores.
+ */
+export function sanitizeAnalyticsEvent<T extends AnalyticsEvent>(event: T | null): T | null {
+  if (!event) return event;
+  stripUrlsIn(event.properties);
+  stripUrlsIn(event.$set);
+  stripUrlsIn(event.$set_once);
+  return event;
+}

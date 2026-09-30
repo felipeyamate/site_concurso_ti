@@ -140,6 +140,22 @@ describe("conferência automática das cobranças (aviso perdido)", () => {
     await reconcileOpenPayments({ now: at(2.5) });
     expect(spy).toHaveBeenCalledTimes(2);
   });
+
+  it("vencidas: o boleto continua na fila; Pix vencido só nos primeiros dias (o abandonado não ocupa vaga)", async () => {
+    const abandoned = await setupPendingOrder("op-abandonado");
+    const recent = await setupPendingOrder("op-recente");
+    const boleto = await setupPendingOrder("op-boleto");
+    const day = (days: number) => new Date(Date.UTC(2026, 9, 1 + days));
+    await prisma.payment.update({ where: { id: abandoned.payment.id }, data: { status: "OVERDUE", dueDate: day(-10) } });
+    await prisma.payment.update({ where: { id: recent.payment.id }, data: { status: "OVERDUE", dueDate: day(-1) } });
+    await prisma.payment.update({ where: { id: boleto.payment.id }, data: { status: "OVERDUE", method: "BOLETO", dueDate: day(-30) } });
+    const spy = vi.spyOn(fakeProvider(), "getCharge").mockRejectedValue(new Error("só contando as consultas"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await reconcileOpenPayments({ now: at(1) });
+    const asked = spy.mock.calls.map(([providerPaymentId]) => providerPaymentId).sort();
+    expect(asked).toEqual([recent.payment.providerPaymentId, boleto.payment.providerPaymentId].sort());
+  });
 });
 
 describe("limpeza diária", () => {
@@ -176,6 +192,28 @@ describe("limpeza diária", () => {
     expect(await prisma.session.findMany({ where: { userId: "op-aluna" }, select: { id: true } })).toEqual([{ id: "op-valida" }]);
     expect(await prisma.verification.findMany({ where: { identifier: { startsWith: "op-" } }, select: { id: true } })).toEqual([{ id: "op-v2" }]);
     expect(await prisma.rateLimit.findMany({ where: { key: { startsWith: "op-" } }, select: { id: true } })).toEqual([{ id: "op-r2" }]);
+  });
+
+  it("apaga o estudo que chegou DEPOIS da exclusão da conta (e só o de contas excluídas)", async () => {
+    await prisma.user.createMany({
+      data: [
+        { id: "op-excluida", name: "Conta excluída", email: "op-excluida@excluida.invalid", deletedAt: at(-2) },
+        { id: "op-ativa", name: "Aluna", email: "op-ativa@exemplo.com" },
+      ],
+    });
+    const course = await prisma.course.create({ data: { slug: "teste-operacoes-curso", title: "Curso", description: "" } });
+    const courseModule = await prisma.module.create({ data: { courseId: course.id, title: "Módulo", position: 1 } });
+    const lesson = await prisma.lesson.create({ data: { courseId: course.id, moduleId: courseModule.id, slug: "op-aula", title: "Aula", position: 1 } });
+    // Um progresso gravado depois da exclusão (estava "a caminho") e um de uma conta normal.
+    await prisma.lessonProgress.createMany({
+      data: [
+        { userId: "op-excluida", lessonId: lesson.id, positionSeconds: 10, lastWatchedAt: at(-1) },
+        { userId: "op-ativa", lessonId: lesson.id, positionSeconds: 20, lastWatchedAt: at(-1) },
+      ],
+    });
+    const result = await cleanupExpiredRecords(T0);
+    expect(result.deletedAccountsStudy).toBe(1);
+    expect(await prisma.lessonProgress.findMany({ where: { lessonId: lesson.id }, select: { userId: true } })).toEqual([{ userId: "op-ativa" }]);
   });
 });
 

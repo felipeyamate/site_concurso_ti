@@ -20,9 +20,26 @@ export function scrubText(text: string): string {
   return text.replace(EMAIL_PATTERN, "[e-mail]").replace(CPF_PATTERN, "[cpf]");
 }
 
+/**
+ * Limpa qualquer valor "de dentro para fora": textos têm e-mails/CPFs trocados; listas e objetos são
+ * percorridos (até 8 níveis — o Sentry já corta os objetos mais fundos antes de enviar).
+ * Serve para os `extra` (ex.: os argumentos de um `console.error(mensagem, erro)` capturado) e `contexts`.
+ */
+export function scrubDeep(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") return scrubText(value);
+  if (depth >= 8 || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => scrubDeep(item, depth + 1));
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) result[key] = scrubDeep(item, depth + 1);
+  return result;
+}
+
 // Só os campos que usamos (o formato completo do evento do Sentry é bem maior).
 export type ScrubbableEvent = {
   message?: string;
+  logentry?: { message?: string; params?: unknown[] };
+  extra?: Record<string, unknown>;
+  contexts?: Record<string, unknown>;
   user?: Record<string, unknown>;
   request?: { cookies?: unknown; headers?: Record<string, string>; data?: unknown; query_string?: unknown; url?: string };
   exception?: { values?: Array<{ value?: string }> };
@@ -35,7 +52,8 @@ const SENSITIVE_HEADERS = ["cookie", "authorization", "x-forwarded-for", "x-real
 /**
  * Limpa um evento do Sentry (devolve o mesmo objeto, alterado).
  * Passos: 1. tira o usuário e o IP; 2. tira cookies, corpo e parâmetros da requisição e os
- * cabeçalhos sensíveis; 3. troca e-mails/CPFs nas mensagens, nos erros e no "rastro" (breadcrumbs).
+ * cabeçalhos sensíveis; 3. troca e-mails/CPFs nas mensagens, nos erros, nos dados extras (ex.: os
+ * argumentos de um `console.error` capturado), nos contextos e no "rastro" (breadcrumbs).
  */
 export function scrubSentryEvent<T extends ScrubbableEvent>(event: T): T {
   delete event.user;
@@ -51,6 +69,12 @@ export function scrubSentryEvent<T extends ScrubbableEvent>(event: T): T {
     }
   }
   if (event.message) event.message = scrubText(event.message);
+  if (event.logentry) {
+    if (event.logentry.message) event.logentry.message = scrubText(event.logentry.message);
+    if (event.logentry.params) event.logentry.params = scrubDeep(event.logentry.params) as unknown[];
+  }
+  if (event.extra) event.extra = scrubDeep(event.extra) as Record<string, unknown>;
+  if (event.contexts) event.contexts = scrubDeep(event.contexts) as Record<string, unknown>;
   for (const value of event.exception?.values ?? []) {
     if (value.value) value.value = scrubText(value.value);
   }

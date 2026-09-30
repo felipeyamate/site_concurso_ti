@@ -35,4 +35,15 @@ describe("scrubSentryEvent", () => {
     expect(event.exception?.values?.[0].value).toBe("CPF [cpf] já usado");
     expect(event.breadcrumbs).toEqual([{ message: "fetch [e-mail]" }]);
   });
+
+  it("limpa também os dados extras (argumentos de um console.error capturado), o logentry e os contextos", () => {
+    const event = scrubSentryEvent({
+      logentry: { message: "falhou para %s", params: ["maria@exemplo.com"] },
+      extra: { arguments: ["[checkout] Falha:", { name: "Error", message: "CPF 52998224725 inválido", nested: [["joao@x.com.br"]] }], count: 2 },
+      contexts: { cobranca: { cliente: "maria@exemplo.com" } },
+    });
+    expect(event.logentry).toEqual({ message: "falhou para %s", params: ["[e-mail]"] });
+    expect(event.extra).toEqual({ arguments: ["[checkout] Falha:", { name: "Error", message: "CPF [cpf] inválido", nested: [["[e-mail]"]] }], count: 2 });
+    expect(event.contexts).toEqual({ cobranca: { cliente: "[e-mail]" } });
+  });
 });

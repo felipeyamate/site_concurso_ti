@@ -20,7 +20,8 @@
 - Código de servidor que acessa banco/segredos começa com `import "server-only"`.
 - Toda página protegida chama `requireSession`/`requireRole` (`src/modules/auth/session.ts`);
   o `proxy.ts` sozinho não basta. O `requireSession` também exige o aceite da versão atual dos Termos/Privacidade
-  (`LEGAL_VERSION`, `src/modules/legal/version.ts`); só a tela `/aceitar-termos` usa `allowPendingLegal`.
+  (`LEGAL_VERSION`, `src/modules/legal/version.ts`); `allowPendingLegal` só em `/aceitar-termos`, "Minha conta", "Minhas compras"
+  e a página de um pagamento (direitos de quem já comprou não dependem do aceite novo).
   Aceite só se grava com `recordLegalConsent` (`src/modules/privacy/consent.server.ts`). Mudança relevante nos textos → nova `LEGAL_VERSION`.
 - Sessão: Server Components só LEEM a sessão (`getCurrentSession` usa `disableRefresh`); quem renova o login
   é o `SessionRefresher`. Toda nova área logada precisa de um `layout.tsx` que inclua o `SessionRefresher`.
@@ -69,7 +70,7 @@
   Registro de acesso (Marco Civil): `access_logs`, gravado no login (`recordAccessLog`), 6 meses, apagado pela limpeza diária.
 - Sentry sem dado pessoal: tudo passa por `scrubSentryEvent` (`src/lib/observability/scrub.ts`); nada de `sendDefaultPii`,
   gravação de tela ou tracing sem decisão registrada. PostHog (ou outro script de análise) só depois do aceite dos cookies
-  (`AnalyticsConsent`, `src/modules/analytics/`), nunca carregado direto no layout.
+  (`AnalyticsConsent`, `src/modules/analytics/`), nunca carregado direto no layout, e com `sanitizeAnalyticsEvent` (endereços sem `?...`).
 - Tarefa agendada: rota em `src/app/api/cron/...` que confere `isAuthorizedCronRequest` (`src/lib/cron-auth.ts`) antes de tudo,
   registrada no `vercel.json`; a lógica fica num `*.server.ts` que os testes chamam direto.
 - Migrações rodam sozinhas no deploy de PRODUÇÃO (`scripts/vercel-build.sh`); preview nunca migra o banco de produção.

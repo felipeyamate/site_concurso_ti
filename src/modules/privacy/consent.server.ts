@@ -16,18 +16,6 @@ import { prisma } from "@/lib/db";
 import { LEGAL_VERSION } from "@/modules/legal/version";
 
 /**
- * IP e navegador de quem fez a requisição, lidos dos cabeçalhos.
- * Na Vercel, o IP real do visitante vem em `x-forwarded-for` (o primeiro da lista); o resto são
- * os servidores do caminho. Limitamos o tamanho para um cabeçalho gigante não ir para o banco.
- */
-export function requestMetadata(headers: Headers): { ipAddress: string | null; userAgent: string | null } {
-  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ipAddress = (forwarded || headers.get("x-real-ip") || "").slice(0, 100) || null;
-  const userAgent = (headers.get("user-agent") ?? "").slice(0, 500) || null;
-  return { ipAddress, userAgent };
-}
-
-/**
  * Registra que a pessoa aceitou a versão ATUAL dos textos.
  * Se ela já tinha aceitado esta mesma versão, não duplica (ex.: duplo clique no botão).
  */
@@ -68,3 +56,23 @@ export async function listLegalConsents(userId: string) {
     select: { id: true, version: true, source: true, acceptedAt: true },
   });
 }
+
+/** Até quantos minutos depois de criar a conta o aceite vale como "no cadastro". */
+export const SIGN_UP_CONSENT_MINUTES = 10;
+
+/**
+ * O aceite marcado no formulário de cadastro, gravado logo depois de a conta nascer.
+ * Só vale para uma conta criada há até 10 minutos que nunca aceitou nada: a ação pode ser chamada
+ * direto por HTTP, e o registro "no cadastro" não pode aparecer para quem nunca viu a caixa do
+ * cadastro (ex.: conta antiga com a versão velha — essa passa pela tela /aceitar-termos).
+ * Devolve se gravou.
+ */
+export async function recordSignUpConsent(input: { userId: string; ipAddress: string | null; userAgent: string | null; now?: Date }): Promise<boolean> {
+  const now = input.now ?? new Date();
+  const user = await prisma.user.findUnique({ where: { id: input.userId }, select: { createdAt: true, legalVersion: true } });
+  if (!user || user.legalVersion !== null) return false;
+  if (now.getTime() - user.createdAt.getTime() > SIGN_UP_CONSENT_MINUTES * 60 * 1000) return false;
+  await recordLegalConsent({ ...input, source: "SIGN_UP", now });
+  return true;
+}
+

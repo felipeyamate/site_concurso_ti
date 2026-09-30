@@ -9,7 +9,7 @@
  * recebeu o acesso. Antes, só o admin resolvia ("Conferir no Asaas"); agora a tarefa faz a mesma
  * conferência (`syncPaymentWithProvider`) automaticamente.
  *
- * Quais cobranças: aguardando pagamento, vencidas (boleto pago atrasado) e com estorno em andamento,
+ * Quais cobranças: aguardando pagamento, vencidas (o boleto por 90 dias; Pix e cartão por 3 dias) e com estorno em andamento,
  * dos últimos 90 dias — começando pelas que estão há mais tempo sem conferir, no máximo `limit` por
  * rodada e parando antes do tempo limite da função. Cada cobrança é conferida de novo só depois de 1 hora.
  */
@@ -23,6 +23,8 @@ import { getProviderForRecord } from "./provider/provider.server";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+// Pix/cartão vencidos continuam sendo conferidos por estes dias (um pagamento de última hora cujo aviso se perdeu).
+const RECENTLY_OVERDUE_DAYS = 3;
 
 export type ReconcileResult = { checked: number; failed: number; skippedForTime: boolean };
 
@@ -38,9 +40,16 @@ export async function reconcileOpenPayments(input: { now?: Date; limit?: number;
   const candidates = await prisma.payment.findMany({
     where: {
       provider: { in: providers },
-      status: { in: ["PENDING", "OVERDUE", "REFUND_REQUESTED"] },
+      // Vencidas: o BOLETO pode ser pago com atraso (fica na lista pelos 90 dias); Pix e cartão, só nos
+      // primeiros dias depois do vencimento. Senão os Pix abandonados (que nunca serão pagos) ocupariam,
+      // de hora em hora, as 25 vagas de cada rodada no lugar das cobranças que importam.
+      OR: [
+        { status: { in: ["PENDING", "REFUND_REQUESTED"] } },
+        { status: "OVERDUE", method: "BOLETO" },
+        { status: "OVERDUE", dueDate: { gte: new Date(now.getTime() - RECENTLY_OVERDUE_DAYS * DAY_MS) } },
+      ],
       createdAt: { gte: new Date(now.getTime() - 90 * DAY_MS) },
-      OR: [{ providerCheckedAt: null }, { providerCheckedAt: { lt: new Date(now.getTime() - HOUR_MS) } }],
+      AND: [{ OR: [{ providerCheckedAt: null }, { providerCheckedAt: { lt: new Date(now.getTime() - HOUR_MS) } }] }],
     },
     orderBy: [{ providerCheckedAt: { sort: "asc", nulls: "first" } }, { createdAt: "asc" }],
     take: limit,

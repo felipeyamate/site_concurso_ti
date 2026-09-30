@@ -25,17 +25,19 @@ import { DEFAULT_AFTER_LOGIN_PATH, safeRedirectPath } from "@/modules/auth/redir
 import { getCurrentSession } from "@/modules/auth/session";
 
 import { adminDeleteAccount, deleteOwnAccount } from "./account-deletion.server";
-import { recordLegalConsent, requestMetadata } from "./consent.server";
+import { recordLegalConsent, recordSignUpConsent } from "./consent.server";
+import { requestMetadata } from "./request-metadata";
 
 /**
  * Logo depois do cadastro com e-mail e senha: a pessoa marcou "Li e aceito" no formulário, então
- * gravamos o aceite (com IP e navegador). Se falhar, nada se perde: a área logada pede o aceite de novo.
+ * gravamos o aceite (com IP e navegador) — só se a conta acabou de nascer (`recordSignUpConsent`).
+ * Se não gravar, nada se perde: a área logada pede o aceite na tela /aceitar-termos.
  */
 export async function recordSignUpConsentAction(): Promise<{ ok: boolean }> {
   const session = await getCurrentSession();
   if (!session) return { ok: false };
-  await recordLegalConsent({ userId: session.user.id, source: "SIGN_UP", ...requestMetadata(await headers()) });
-  return { ok: true };
+  const ok = await recordSignUpConsent({ userId: session.user.id, ...requestMetadata(await headers()) });
+  return { ok };
 }
 
 /** Tela /aceitar-termos: grava o aceite e volta para a página que a pessoa queria abrir. */

@@ -12,7 +12,8 @@
  *    ("Preferências de cookies"), que reabre este aviso.
  *
  * Privacidade do PostHog: sem gravação de tela, sem captura automática de cliques e textos, sem
- * identificar a pessoa (nada de nome ou e-mail) — só as páginas visitadas.
+ * identificar a pessoa (nada de nome ou e-mail) — só as páginas visitadas, e sem os ?parâmetros do
+ * endereço (`sanitizeAnalyticsEvent`: o link de redefinir a senha, por exemplo, leva um token secreto).
  * O PostHog é carregado "sob demanda" (`import()`): quem recusa nem baixa o código dele.
  */
 import Link from "next/link";
@@ -22,7 +23,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
 
-import { OPEN_COOKIE_PREFERENCES_EVENT, analyticsChoiceCookie, readAnalyticsChoice, type AnalyticsChoice } from "../consent";
+import { OPEN_COOKIE_PREFERENCES_EVENT, analyticsChoiceCookie, readAnalyticsChoice, sanitizeAnalyticsEvent, type AnalyticsChoice } from "../consent";
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY;
 const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com";
@@ -46,6 +47,8 @@ export function AnalyticsConsent() {
   // O rodapé ("Preferências de cookies") pode reabrir o aviso mesmo depois da escolha.
   const [reopened, setReopened] = useState(false);
   const posthogRef = useRef<PostHog | null>(null);
+  // O PostHog está sendo baixado agora (evita baixar/ligar duas vezes).
+  const loadingRef = useRef(false);
   const pathname = usePathname();
 
   // 1. Escuta o "Preferências de cookies" do rodapé.
@@ -58,20 +61,32 @@ export function AnalyticsConsent() {
   // 2. Liga/desliga o PostHog conforme a escolha.
   useEffect(() => {
     if (!POSTHOG_KEY) return;
-    if (stored === "analytics" && !posthogRef.current) {
-      void import("posthog-js").then(({ default: posthog }) => {
-        posthog.init(POSTHOG_KEY, {
-          api_host: POSTHOG_HOST,
-          capture_pageview: false, // contamos as páginas "à mão" (navegação sem recarregar)
-          autocapture: false,
-          disable_session_recording: true,
-          person_profiles: "identified_only",
-          respect_dnt: true,
+    if (stored === "analytics" && !posthogRef.current && !loadingRef.current) {
+      loadingRef.current = true;
+      import("posthog-js")
+        .then(({ default: posthog }) => {
+          // A pessoa pode ter voltado atrás enquanto o PostHog carregava ("Só os essenciais"):
+          // confere a escolha de novo AGORA, antes de ligar qualquer coisa.
+          if (readStoredChoice() !== "analytics") return;
+          posthog.init(POSTHOG_KEY, {
+            api_host: POSTHOG_HOST,
+            capture_pageview: false, // contamos as páginas "à mão" (navegação sem recarregar)
+            autocapture: false,
+            disable_session_recording: true,
+            person_profiles: "identified_only",
+            respect_dnt: true,
+            // Endereços sem ?parâmetros (ex.: o link de redefinir a senha leva um token secreto).
+            before_send: (event) => sanitizeAnalyticsEvent(event),
+          });
+          posthog.opt_in_capturing();
+          posthogRef.current = posthog;
+          posthog.capture("$pageview");
+        })
+        // Sem internet ou bloqueador de anúncios: o site segue normal, só sem a análise.
+        .catch(() => undefined)
+        .finally(() => {
+          loadingRef.current = false;
         });
-        posthog.opt_in_capturing();
-        posthogRef.current = posthog;
-        posthog.capture("$pageview");
-      });
     }
     if (stored === "essential" && posthogRef.current) {
       // Retirou o consentimento: para de coletar e apaga o identificador guardado no navegador.

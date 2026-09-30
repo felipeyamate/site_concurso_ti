@@ -7,7 +7,7 @@
  * O que acontece (numa transação, com a MESMA trava do checkout — uma compra em andamento termina
  * antes, e a conferência já a enxerga):
  *  1. Confere o que impede excluir agora (`deletionBlockers`: perfil, assinatura ativa, pagamento
- *     aguardando).
+ *     aguardando, boleto vencido há pouco, reembolso em andamento).
  *  2. Apaga o que é só dela e não precisa ser guardado: logins (sessões), formas de entrar (senha,
  *     Google), progresso nas aulas, respostas de questões e simulados.
  *  3. Guarda, por obrigação legal, o que é financeiro/fiscal: pedidos, pagamentos, notas, matrículas
@@ -16,6 +16,9 @@
  *  4. Anonimiza a linha do usuário: nome "Conta excluída", e-mail inventado (o verdadeiro fica livre
  *     para um novo cadastro), sem foto, sem aceite — e marca `deletedAt`.
  *  5. Afiliado: desativado e sem a chave Pix (as vendas indicadas continuam no histórico).
+ *
+ * Uma resposta/progresso que estava "a caminho" no instante da exclusão e foi gravado logo depois é
+ * apagado pela limpeza diária (`maintenance/cleanup.server.ts`).
  *
  * O registro dos aceites (`legal_consents`) fica: é a prova de que o consentimento existiu. O registro
  * de acesso (`access_logs`, Marco Civil) também fica, até completar os 6 meses da lei (a limpeza diária apaga).
@@ -27,21 +30,26 @@ import { withAdvisoryLock } from "@/lib/db-locks";
 import { prisma } from "@/lib/db";
 import { UserFacingError } from "@/lib/form-state";
 
-import { DELETED_ACCOUNT_NAME, anonymizedEmail, deletionBlockers, isDeleteConfirmation, isFreshLogin } from "./rules";
+import { DELETED_ACCOUNT_NAME, LATE_BOLETO_DAYS, anonymizedEmail, deletionBlockers, isDeleteConfirmation, isFreshLogin } from "./rules";
 
 type Tx = Prisma.TransactionClient;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /** Conta o que impede excluir (ver `deletionBlockers`) e devolve as frases para a tela. */
-export async function findDeletionBlockers(db: Tx, userId: string): Promise<string[]> {
+export async function findDeletionBlockers(db: Tx, userId: string, now: Date = new Date()): Promise<string[]> {
   const user = await db.user.findUnique({ where: { id: userId }, select: { role: true, deletedAt: true } });
   if (!user) return ["Conta não encontrada."];
-  const [openSubscriptions, pendingPayments] = await Promise.all([
+  const ofUser = { OR: [{ order: { userId } }, { subscription: { userId } }] };
+  const lateBoletoSince = new Date(now.getTime() - LATE_BOLETO_DAYS * DAY_MS);
+  const [openSubscriptions, pendingPayments, lateBoletos, refundsInProgress] = await Promise.all([
     db.subscription.count({ where: { userId, status: { in: ["PENDING", "ACTIVE"] }, failureReason: null } }),
-    db.payment.count({
-      where: { status: "PENDING", OR: [{ order: { userId } }, { subscription: { userId } }] },
-    }),
+    db.payment.count({ where: { status: "PENDING", ...ofUser } }),
+    // Boleto vencido há pouco: ainda pode ser pago com atraso (a conferência automática também o acompanha).
+    db.payment.count({ where: { status: "OVERDUE", method: "BOLETO", dueDate: { gte: lateBoletoSince }, ...ofUser } }),
+    db.payment.count({ where: { status: "REFUND_REQUESTED", ...ofUser } }),
   ]);
-  return deletionBlockers({ role: user.role, deletedAt: user.deletedAt, openSubscriptions, pendingPayments });
+  return deletionBlockers({ role: user.role, deletedAt: user.deletedAt, openSubscriptions, pendingPayments, lateBoletos, refundsInProgress });
 }
 
 /**
@@ -54,7 +62,7 @@ async function anonymizeAccount(userId: string, now: Date): Promise<void> {
     prisma,
     `checkout:${userId}`,
     async (tx) => {
-      const blockers = await findDeletionBlockers(tx, userId);
+      const blockers = await findDeletionBlockers(tx, userId, now);
       if (blockers.length > 0) throw new UserFacingError(blockers.join(" "));
 
       // 2. Dados que não precisam ser guardados.

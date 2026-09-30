@@ -36,7 +36,8 @@ export const metadata: Metadata = {
 
 export default async function PaymentPage({ params }: PageProps<"/area-do-aluno/pagamentos/[paymentId]">) {
   const { paymentId } = await params;
-  const { user } = await requireSession(`/area-do-aluno/pagamentos/${paymentId}`);
+  // Como "Minhas compras": pagar (ou ver) uma cobrança já gerada não depende do aceite da versão nova dos Termos.
+  const { user } = await requireSession(`/area-do-aluno/pagamentos/${paymentId}`, { allowPendingLegal: true });
   const payment = await getPaymentForViewer({
     paymentId,
     userId: user.id,

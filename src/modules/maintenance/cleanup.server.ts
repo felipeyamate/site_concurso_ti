@@ -7,7 +7,10 @@
  *  - códigos de verificação/link mágico/redefinição de senha vencidos;
  *  - contadores de tentativas de login (proteção contra força bruta) parados há mais de 1 dia;
  *  - registros de acesso (Marco Civil) com mais de 6 meses — o prazo da lei já passou, e a LGPD pede
- *    para não guardar dado pessoal além do necessário (ver `privacy/access-log.ts`).
+ *    para não guardar dado pessoal além do necessário (ver `privacy/access-log.ts`);
+ *  - dados de estudo (respostas, simulados, progresso) de contas EXCLUÍDAS: a exclusão apaga tudo
+ *    isso, mas uma resposta ou um progresso que estava "a caminho" no mesmo instante pode ser gravado
+ *    logo depois. A limpeza do dia seguinte garante que nada fica.
  * Nunca toca em dados de aluno, vendas ou avisos de pagamento.
  */
 import "server-only";
@@ -17,7 +20,7 @@ import { accessLogCutoff } from "@/modules/privacy/access-log";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type CleanupResult = { sessions: number; verifications: number; rateLimits: number; accessLogs: number };
+export type CleanupResult = { sessions: number; verifications: number; rateLimits: number; accessLogs: number; deletedAccountsStudy: number };
 
 export async function cleanupExpiredRecords(now: Date = new Date()): Promise<CleanupResult> {
   const oneDayAgo = new Date(now.getTime() - DAY_MS);
@@ -28,5 +31,18 @@ export async function cleanupExpiredRecords(now: Date = new Date()): Promise<Cle
     prisma.rateLimit.deleteMany({ where: { lastRequest: { lt: BigInt(oneDayAgo.getTime()) } } }),
     prisma.accessLog.deleteMany({ where: { createdAt: { lt: accessLogCutoff(now) } } }),
   ]);
-  return { sessions: sessions.count, verifications: verifications.count, rateLimits: rateLimits.count, accessLogs: accessLogs.count };
+  // Estudo de contas excluídas (a ordem importa: as respostas de simulado apontam para o simulado).
+  const ofDeletedAccount = { user: { deletedAt: { not: null } } };
+  const study = await prisma.$transaction([
+    prisma.questionAttempt.deleteMany({ where: ofDeletedAccount }),
+    prisma.mockExam.deleteMany({ where: ofDeletedAccount }),
+    prisma.lessonProgress.deleteMany({ where: ofDeletedAccount }),
+  ]);
+  return {
+    sessions: sessions.count,
+    verifications: verifications.count,
+    rateLimits: rateLimits.count,
+    accessLogs: accessLogs.count,
+    deletedAccountsStudy: study.reduce((total, result) => total + result.count, 0),
+  };
 }

@@ -45,15 +45,19 @@ test("textos novos: a área logada pede o aceite antes e depois volta para onde 
   // Simula que ele tinha aceitado uma versão antiga dos textos.
   await sql(`UPDATE users SET legal_version = '2020-01-01' WHERE email = $1`, [email]);
 
+  // "Minhas compras" abre mesmo sem o aceite (cancelar e pedir reembolso são direitos de quem já comprou).
   await page.goto("/area-do-aluno/compras");
-  await page.waitForURL(/\/aceitar-termos\?voltar=%2Farea-do-aluno%2Fcompras/);
+  await expect(page.getByRole("heading", { level: 1, name: "Minhas compras" })).toBeVisible();
+
+  await page.goto("/area-do-aluno/desempenho");
+  await page.waitForURL(/\/aceitar-termos\?voltar=%2Farea-do-aluno%2Fdesempenho/);
   await expect(page.getByText(/Atualizamos os Termos de uso e a Política de privacidade/)).toBeVisible();
   await page.getByRole("button", { name: "Aceitar e continuar" }).click();
   await expect(page.getByText("Marque para continuar.")).toBeVisible();
 
   await page.getByRole("checkbox", { name: /Li e aceito/ }).check();
   await page.getByRole("button", { name: "Aceitar e continuar" }).click();
-  await page.waitForURL("**/area-do-aluno/compras");
+  await page.waitForURL("**/area-do-aluno/desempenho");
   const consents = await sql(`SELECT c.source FROM legal_consents c JOIN users u ON u.id = c.user_id WHERE u.email = $1 ORDER BY c.accepted_at`, [
     email,
   ]);

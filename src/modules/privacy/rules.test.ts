@@ -41,11 +41,13 @@ describe("exclusão de conta", () => {
   });
 
   it("o que impede excluir: perfil, assinatura ativa, pagamento aguardando; conta já excluída", () => {
-    const ok = { role: "STUDENT", deletedAt: null, openSubscriptions: 0, pendingPayments: 0 };
+    const ok = { role: "STUDENT", deletedAt: null, openSubscriptions: 0, pendingPayments: 0, lateBoletos: 0, refundsInProgress: 0 };
     expect(deletionBlockers(ok)).toEqual([]);
     expect(deletionBlockers({ ...ok, role: "TEACHER" })[0]).toMatch(/professor ou administrador/);
     expect(deletionBlockers({ ...ok, openSubscriptions: 1 })[0]).toMatch(/assinatura ativa/);
     expect(deletionBlockers({ ...ok, pendingPayments: 2 })[0]).toMatch(/pagamento aguardando/);
+    expect(deletionBlockers({ ...ok, lateBoletos: 1 })[0]).toMatch(/boleto vencido há menos de 30 dias/);
+    expect(deletionBlockers({ ...ok, refundsInProgress: 1 })[0]).toMatch(/reembolso em andamento/);
     expect(deletionBlockers({ ...ok, role: "ADMIN", openSubscriptions: 1, pendingPayments: 1 })).toHaveLength(3);
     expect(deletionBlockers({ ...ok, deletedAt: NOW })).toEqual(["Esta conta já foi excluída."]);
   });

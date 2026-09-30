@@ -15,7 +15,7 @@ import { cancelSubscription } from "@/modules/payments/refunds.server";
 import { simulatePaymentAction } from "@/modules/payments/simulator.server";
 import { recordAccessLog } from "@/modules/privacy/access-log.server";
 import { adminDeleteAccount, deleteOwnAccount } from "@/modules/privacy/account-deletion.server";
-import { recordLegalConsent } from "@/modules/privacy/consent.server";
+import { recordLegalConsent, recordSignUpConsent } from "@/modules/privacy/consent.server";
 import { buildPersonalDataExport } from "@/modules/privacy/data-export.server";
 import { seedQuestionBank } from "../../prisma/seed-questions";
 
@@ -95,6 +95,22 @@ describe("aceite dos termos (registro de consentimento)", () => {
     await prisma.user.update({ where: { id: "pv-aluna" }, data: { legalVersion: "2020-01-01" } });
     await recordLegalConsent({ userId: "pv-aluna", source: "REVIEW", ipAddress: null, userAgent: null, now: minutesAfter(2) });
     expect(await prisma.legalConsent.count({ where: { userId: "pv-aluna" } })).toBe(2);
+  });
+
+  it("o aceite 'no cadastro' só vale para conta recém-criada que nunca aceitou nada", async () => {
+    const user = await createUser("pv-aluna");
+    const minutesAfterSignUp = (minutes: number) => new Date(user.createdAt.getTime() + minutes * 60 * 1000);
+    const meta = { ipAddress: "200.1.2.3", userAgent: "Firefox" };
+    // 11 minutos depois do cadastro: não conta como "no cadastro" (a tela de aceite pede de novo).
+    expect(await recordSignUpConsent({ userId: user.id, ...meta, now: minutesAfterSignUp(11) })).toBe(false);
+    // Conta que já tinha aceitado uma versão antiga: também não (essa passa pela tela de aceite).
+    await createUser("pv-antiga");
+    await prisma.user.update({ where: { id: "pv-antiga" }, data: { legalVersion: "2020-01-01" } });
+    expect(await recordSignUpConsent({ userId: "pv-antiga", ...meta, now: new Date() })).toBe(false);
+    expect(await prisma.legalConsent.count()).toBe(0);
+    // Logo depois do cadastro: grava, como "no cadastro".
+    expect(await recordSignUpConsent({ userId: user.id, ...meta, now: minutesAfterSignUp(1) })).toBe(true);
+    expect(await prisma.legalConsent.findMany({ where: { userId: user.id }, select: { source: true } })).toEqual([{ source: "SIGN_UP" }]);
   });
 
   it("dois cliques ao mesmo tempo gravam UM aceite", async () => {
@@ -185,6 +201,22 @@ describe("exclusão de conta", () => {
     await expect(deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: minutesAfter(10), now: minutesAfter(11) })).rejects.toThrow(
       /já foi excluída/,
     );
+  });
+
+  it("boleto vencido há pouco (pode ser pago com atraso) e reembolso em andamento também impedem", async () => {
+    await setupCatalog();
+    await createUser("pv-aluna");
+    const order = await buy("pv-aluna");
+    // O boleto venceu ontem: o banco ainda aceita pagar. Não dá para excluir.
+    await prisma.payment.update({ where: { id: order.paymentId as string }, data: { status: "OVERDUE", method: "BOLETO", dueDate: minutesAfter(-24 * 60) } });
+    await expect(deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: T0, now: minutesAfter(1) })).rejects.toThrow(/boleto vencido/);
+    // Reembolso pedido e ainda não concluído: também não.
+    await prisma.payment.update({ where: { id: order.paymentId as string }, data: { status: "REFUND_REQUESTED" } });
+    await expect(deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: T0, now: minutesAfter(1) })).rejects.toThrow(/reembolso em andamento/);
+    // Boleto vencido há mais de 30 dias: o banco não aceita mais; pode excluir.
+    await prisma.payment.update({ where: { id: order.paymentId as string }, data: { status: "OVERDUE", dueDate: minutesAfter(-31 * 24 * 60) } });
+    await deleteOwnAccount({ userId: "pv-aluna", confirmation: PHRASE, sessionCreatedAt: T0, now: minutesAfter(1) });
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: "pv-aluna" } })).toMatchObject({ name: "Conta excluída" });
   });
 
   it("sem nenhuma compra, os dados de cobrança também saem", async () => {
