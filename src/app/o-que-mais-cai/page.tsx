@@ -21,6 +21,7 @@ import { getIncidenceMap } from "@/modules/questions/incidence.server";
 import { questionsCountLabel } from "@/modules/questions/labels";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/o-que-mais-cai" },
   title: "O que mais cai de TI nos concursos, por banca",
   description:
     "Os assuntos de Informática e TI mais cobrados pela Cesgranrio, Cebraspe, FGV e outras bancas, calculados a partir das provas analisadas.",

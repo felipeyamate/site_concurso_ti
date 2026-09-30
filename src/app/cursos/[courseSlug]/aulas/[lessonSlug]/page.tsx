@@ -18,7 +18,6 @@ import "server-only";
 import { ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -37,6 +36,7 @@ import { CompletionToggle } from "@/modules/progress/components/completion-toggl
 import { LessonPlayer } from "@/modules/progress/components/lesson-player";
 import { getCourseView } from "@/modules/progress/course-view.server";
 import { getResumePosition } from "@/modules/progress/rules";
+import { redirectOldCatalogPathOrNotFound } from "@/modules/seo/redirects.server";
 import { getLessonPlayback } from "@/modules/video/provider";
 import type { VideoPlayback } from "@/modules/video/types";
 
@@ -61,11 +61,12 @@ export default async function LessonPage({ params }: LessonPageProps) {
   // 1. Login + visão do curso.
   const { user } = await requireSession(pagePath);
   const view = await getCourseView(courseSlug, { userId: user.id, role: user.role });
-  if (!view) notFound();
+  // Não achou: pode ser um endereço ANTIGO (curso ou aula mudou de slug) → redireciona (Fase 6).
+  if (!view) return redirectOldCatalogPathOrNotFound(courseSlug, lessonSlug);
 
   // 2. A aula.
   const lesson = view.orderedLessons.find((item) => item.slug === lessonSlug);
-  if (!lesson) notFound();
+  if (!lesson) return redirectOldCatalogPathOrNotFound(courseSlug, lessonSlug);
 
   const courseModule = view.curriculum.modules.find((item) => item.lessons.some((l) => l.id === lesson.id));
   const moduleNumber = courseModule ? view.curriculum.modules.indexOf(courseModule) + 1 : null;

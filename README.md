@@ -4,12 +4,12 @@ Plataforma de cursos que ensina Informática/TI para candidatos de concursos que
 área de TI**. Visão, regras de negócio, stack e roteiro estão em **[PROJECT.md](./PROJECT.md)**
 (leia primeiro).
 
-**Estado atual:** Fase 5 concluída — banco de questões: questões comentadas com filtros (banca, assunto,
-prova, tipo), simulados com tempo de prova, "meu desempenho" por assunto e o mapa público "o que mais
-cai" por banca; o professor cadastra questões pelo painel ou importa uma planilha (CSV). Quem não tem
-curso nem assinatura resolve 10 questões grátis por dia. (Fase 1: projeto, banco, login e perfis. Fase 2:
-catálogo, player, matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs. Fase 4: vendas com o
-Asaas — Pix, boleto, cartão, assinaturas, reembolso e nota fiscal.)
+**Estado atual:** Fase 6 concluída — marketing: páginas por concurso (edital) com a oferta e o cupom já
+aplicado, blog com posts em Markdown, SEO (endereço canônico, sitemap, robots, dados estruturados, RSS e
+redirecionamento de endereços antigos), cupons de desconto e programa de afiliados (link de divulgação,
+comissão e registro de pagamento). (Fase 1: projeto, banco, login e perfis. Fase 2: catálogo, player,
+matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs. Fase 4: vendas com o Asaas — Pix, boleto,
+cartão, assinaturas, reembolso e nota fiscal. Fase 5: banco de questões, simulados e "o que mais cai".)
 
 ---
 
@@ -288,7 +288,67 @@ completo à 2ª conta com uma matrícula: `npm run enroll -- email-do-aluno-2 in
 
 ---
 
-## 7. Comandos do dia a dia
+## 7. Como testar a Fase 6 (passo a passo)
+
+Pré-requisitos: rode `npm run db:seed` de novo (agora ele grava também **3 posts do blog** e uma página de
+concurso **fictícia**, "Exemplo — Banco (Escriturário) 2026" — pode rodar várias vezes, não duplica), uma conta
+ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegadores anônimos). Tenha um
+**produto ativo** (Fase 4, `/admin/vendas/produtos`) com o Curso Base.
+
+**Cupons (ADMIN)**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 1 | `/admin/vendas` → **Cupons** → crie `bemvindo20` com 20%, "Usos por aluno" = 1 | O cupom aparece como **BEMVINDO20** (maiúsculas), "20% de desconto · compras avulsas · 0 uso(s)" |
+| 2 | Com a 1ª conta de aluno: abra `/comprar/<produto>?cupom=NAOEXISTE` | "O cupom NAOEXISTE não existe. Confira as letras e os números." |
+| 3 | Digite `bemvindo20` no campo **"Tem um cupom de desconto?"** → Aplicar | "Cupom BEMVINDO20 aplicado: −R$ ..."; o preço antigo riscado e o novo (as parcelas também mudam) |
+| 4 | Pague com Pix e aprove no simulador (como na Fase 4) | Em "Minhas compras": "(cupom BEMVINDO20: −R$ ...)". No painel, o pedido mostra o cupom e o desconto |
+| 5 | Abra de novo `/comprar/<produto>?cupom=BEMVINDO20` | "Você já usou o cupom BEMVINDO20." Na lista de cupons: "1 uso(s)" |
+| 6 | Crie um cupom de R$ 500,00 e aplique num produto mais barato | "...deixaria o valor abaixo do mínimo de cobrança (R$ 5,00)." |
+
+**Afiliados (ADMIN + a 2ª conta de aluno como afiliada)**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 7 | `/admin/vendas/afiliados` → e-mail da 2ª conta, código `parceira`, comissão `12,5` → Cadastrar | Abre a ficha da afiliada. (Com um e-mail sem conta: "Nenhuma conta com este e-mail...") |
+| 8 | Com a 2ª conta: Área do aluno → **Programa de afiliados** | O link `.../r/parceira`, o campo para escolher a página de destino, cliques, vendas e comissões |
+| 9 | Num navegador anônimo NOVO, abra `http://localhost:3000/r/parceira?para=/cursos` | Cai em `/cursos`. Crie uma conta nesse navegador e compre o produto (pague no simulador) |
+| 10 | Volte à afiliada | 1 clique, 1 venda e a comissão (12,5% do valor pago) **"Em carência"**: fica 7 dias esperando (o aluno pode pedir reembolso) |
+| 11 | Na ficha da afiliada (admin) | A comissão aparece; o botão "Registrar pagamento" só libera depois dos 7 dias. Reembolse a compra: a comissão vira "Cancelada (estorno)" |
+| 12 | Abra `/r/parceira?para=https://google.com` | Cai na página inicial do site (o link nunca leva para fora) |
+
+> Para testar o pagamento da comissão sem esperar 7 dias, no `npm run db:studio` mude a data "paid_at" do pagamento
+> para 8 dias antes. Na ficha: "Liberada" → "Registrar pagamento de R$ X" → vira "Paga" (e "Já recebido" para a afiliada).
+> O dinheiro é pago **fora do site** (Pix); o botão só registra que foi pago.
+
+**Blog e páginas de concurso (PROFESSOR)**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 13 | `/blog` (também no menu e no rodapé) | Os 3 posts de exemplo; o post abre com o texto formatado e o atalho "Questões de <assunto>" no fim |
+| 14 | `/admin` → **Conteúdo do site** → Blog → **Novo post**; escreva com `## Título`, `**negrito**` e um link; clique em **Prévia** | A prévia mostra o texto formatado. Um link `javascript:` NÃO vira link |
+| 15 | Crie o post (nasce **rascunho**); abra "Ver no site" | Você vê com o aviso "Rascunho"; num navegador anônimo, o mesmo endereço dá "Página não encontrada" |
+| 16 | Clique em **Publicar** | O post aparece em `/blog`, na página inicial ("Do blog") e em `/blog/rss.xml` |
+| 17 | Troque o **endereço (slug)** do post e salve; abra o endereço antigo | Leva para o novo (redirecionamento permanente, bom para o Google). O mesmo vale para cursos, aulas e páginas de concurso |
+| 18 | `/concursos` e a página "Exemplo — Banco (Escriturário) 2026" | Situação, banca, datas, os assuntos com "Treinar questões", "O que mais cai na Cesgranrio" |
+| 19 | Conteúdo do site → Concursos → **Nova página**; escolha o produto e o cupom `BEMVINDO20`; marque "Publicada" | Na página pública: "Com o cupom BEMVINDO20 já aplicado" e o botão "Quero me preparar" abre a compra já com o desconto. (Um cupom que não existe é recusado ao salvar) |
+| 20 | Desative o produto e recarregue a página do concurso | A oferta some (a página continua) |
+
+**SEO**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 21 | Abra `/sitemap.xml` e `/robots.txt` | O sitemap lista as páginas públicas, cursos, posts e concursos **publicados** (nada de rascunho, painel ou área do aluno); o robots bloqueia `/admin`, `/area-do-aluno`, checkout e aponta o sitemap |
+| 22 | Na página de um curso ou post, veja o código (Ctrl+U) e procure `canonical` e `application/ld+json` | O endereço canônico e os dados estruturados (curso, artigo, trilha) que o Google usa |
+| 23 | Com um aluno, abra `/admin/vendas/cupons` e `/admin/conteudo/blog`; com o PROFESSOR, `/admin/vendas/cupons` | "Página não encontrada" (cupons e afiliados são só do ADMIN; conteúdo, do PROFESSOR em diante) |
+
+> A página de concurso e os posts do seed são **fictícios**, só para testar. As páginas reais (com o edital de
+> verdade) entram pelo painel. O endereço do site nos links (canonical, sitemap, RSS, link de afiliado) vem de
+> `BETTER_AUTH_URL`: em produção, precisa ser o domínio real.
+
+---
+
+## 8. Comandos do dia a dia
 
 | Comando | Para que serve |
 |---|---|
@@ -297,17 +357,17 @@ completo à 2ª conta com uma matrícula: `npm run enroll -- email-do-aluno-2 in
 | `npm run lint` | Procura problemas comuns no código |
 | `npm run typecheck` | Checa os tipos do TypeScript (como o `mypy`) |
 | `npm test` | Testes unitários (rápidos, sem banco) |
-| `npm run test:integration` | Testes com banco de verdade (ver seção 8) |
+| `npm run test:integration` | Testes com banco de verdade (ver seção 9) |
 | `npm run db:migrate -- --name descricao` | Depois de **alterar** `prisma/schema.prisma`: cria e aplica uma nova migração |
 | `npm run db:deploy` | Aplica migrações já existentes (primeira vez, produção) |
 | `npm run db:studio` | Abre uma interface visual para ver/editar os dados do banco |
-| `npm run db:seed` | Grava o curso e as questões de exemplo (só desenvolvimento; pode rodar várias vezes) |
+| `npm run db:seed` | Grava o curso, as questões, os posts e a página de concurso de exemplo (só desenvolvimento; pode rodar várias vezes) |
 | `npm run user:set-role -- email PERFIL` | Muda o perfil de um usuário (STUDENT, TEACHER, ADMIN). No dia a dia, use o painel (/admin/usuarios); o script serve para criar o primeiro ADMIN |
 | `npm run enroll -- email curso [dias \| --revogar]` | Matrícula MANUAL num curso (sem data de fim ou por N dias), renova, ou revoga — o mesmo que o painel faz. Compras e assinaturas não mudam (acesso pago sai pelo reembolso) |
 
 ---
 
-## 8. Testes automáticos
+## 9. Testes automáticos
 
 - **Unitários** (`npm test`): regras puras — perfis, limite de sessões, proteção de redirecionamento,
   validação de formulários, variáveis de ambiente, e-mails, **acesso às aulas** (matrícula),
@@ -316,13 +376,16 @@ completo à 2ª conta com uma matrícula: `npm run enroll -- email-do-aluno-2 in
   centavos, parcelas, CPF, datas de cobrança (fuso de Brasília), situação do pedido, prazo de reembolso,
   recálculo do acesso pago, tradução dos dados do Asaas e o provedor do Asaas com um `fetch` falso; e o
   **banco de questões**: letras e gabarito, cota grátis do dia, sorteio e nota do simulado, desempenho por
-  assunto, mapa "o que mais cai", leitura de planilha CSV e importação.
+  assunto, mapa "o que mais cai", leitura de planilha CSV e importação; e o **marketing**: regras do cupom
+  (desconto, validade, limites), comissão dos afiliados (carência, estorno), o Markdown seguro do blog, os dados
+  estruturados (JSON-LD) e o RSS.
 - **Integração** (`npm run test:integration`): cadastro, login, limite de sessões, seed do catálogo,
   acesso às aulas, progresso, painel de cursos (criar, reordenar, apagar com proteção), envio e
   download de PDFs, matrículas e perfis, e as vendas (compra, avisos repetidos/atrasados, reembolso,
   contestação, assinatura, concorrência e a rota do webhook) e o banco de questões (responder, cota grátis com
-  respostas simultâneas, simulados, mapa, painel com a proteção do histórico, importação e o seed), gravando
-  num PostgreSQL de verdade.
+  respostas simultâneas, simulados, mapa, painel com a proteção do histórico, importação e o seed) e o marketing
+  (compra com cupom, cupom disputado por duas compras ao mesmo tempo, venda indicada, comissão e repasse, blog,
+  páginas de concurso, redirecionamento de endereços antigos, sitemap e RSS), gravando num PostgreSQL de verdade.
   Os pagamentos nos testes são sempre SIMULADOS (a chave do Asaas é ignorada). **Os testes apagam os dados do banco que usam**, por isso exigem um banco
   SEPARADO na variável `TEST_DATABASE_URL`:
   1. Na Neon, crie uma branch chamada `test` (Branches → New branch).
@@ -334,30 +397,34 @@ completo à 2ª conta com uma matrícula: `npm run enroll -- email-do-aluno-2 in
 
 ---
 
-## 9. Onde fica cada coisa
+## 10. Onde fica cada coisa
 
 ```
 prisma/
   schema.prisma          Tabelas do banco (como os models.py do Django/SQLAlchemy)
   migrations/            Histórico de alterações do banco (SQL gerado pelo Prisma)
-  seed.ts, seed-catalog.ts, seed-questions.ts  Curso e questões de EXEMPLO para desenvolvimento (npm run db:seed)
+  seed.ts, seed-catalog.ts, seed-questions.ts, seed-marketing.ts  Curso, questões, posts e concurso de EXEMPLO (npm run db:seed)
 scripts/                 set-role.ts (perfil) e enroll.ts (matrícula)
 src/
   app/                   Páginas e rotas (cada pasta = um endereço do site)
     (auth)/              /entrar, /cadastro, /esqueci-senha, /redefinir-senha
-    area-do-aluno/       Área do aluno: meus cursos, dispositivos, compras/, pagamentos/[id] e desempenho/ (exige login)
+    area-do-aluno/       Área do aluno: meus cursos, dispositivos, compras/, pagamentos/[id], desempenho/ e afiliado/ (exige login)
+    blog/, concursos/    Blog (posts e rss.xml) e páginas por concurso/edital (públicos)
+    r/[codigo]/          Link de divulgação do afiliado (conta o clique, guarda o cookie e redireciona)
+    sitemap.ts, robots.ts  Mapa do site e regras para o Google
     questoes/, simulados/  Resolver questões e simulados (exige login); o-que-mais-cai/ = mapa público por banca
     comprar/, assinar/   Checkout de produto e de assinatura (exige login); planos/ = vitrine da assinatura
     dev/pagamentos/      SIMULADOR de pagamento (só desenvolvimento, sem conta no Asaas)
     cursos/              /cursos (catálogo), /cursos/[curso], /cursos/[curso]/aulas/[aula] (player)
                          e .../materiais/[id] (download do PDF, confere o acesso a cada clique)
-    admin/               Painel: visão geral, cursos/[id]/aulas/[id] e questoes/ (TEACHER+), usuarios/[id] e vendas/ (ADMIN)
+    admin/               Painel: visão geral, cursos/[id]/aulas/[id], questoes/ e conteudo/ (blog e concursos) (TEACHER+),
+                         usuarios/[id] e vendas/ (com cupons/ e afiliados/) (ADMIN)
     api/auth/[...all]/   API de autenticação (/api/auth/*)
     api/dev-storage/     Envio/download de PDFs SEM o R2 (só desenvolvimento)
     api/webhooks/asaas/  Onde o Asaas avisa os pagamentos (confere o token)
   components/ui/         Componentes visuais (shadcn/ui)
   components/admin/      Peças comuns do painel (menu, botões de ação, mensagens dos formulários)
-  lib/                   Utilidades gerais: banco (db.ts), configurações (env.ts), formulários (form-state.ts)
+  lib/                   Utilidades gerais: banco (db.ts), configurações (env.ts), formulários (form-state.ts), markdown/ (texto do blog)
   modules/               Domínios do sistema ("monolito modular")
     auth/                Contas: login, perfis, sessões; perfis pelo painel (admin-*)
     catalog/             Cursos, módulos e aulas; admin/ = cadastro pelo painel
@@ -369,6 +436,10 @@ src/
                          reembolsos, notas fiscais; provider/ = Asaas e o simulado; admin/ = painel de vendas
     questions/           Banco de questões: acesso e cota grátis (access.ts), respostas, simulados, desempenho,
                          mapa de incidência, planilha CSV; admin/ = cadastro e importação pelo painel
+    coupons/             Cupons de desconto: regras (rules.ts), conferência no checkout, painel
+    affiliates/          Afiliados: link e cookie, quem indicou a venda, comissões e repasses
+    blog/, notices/      Posts do blog e páginas de concurso (edital)
+    seo/                 Endereço do site, dados estruturados (JSON-LD), RSS, sitemap e endereços antigos (redirects)
     storage/             Armazenamento de arquivos: Cloudflare R2 ou pasta local (desenvolvimento)
     email/               Envio de e-mails e modelos de texto
   proxy.ts               Barreira rápida das áreas protegidas
@@ -378,7 +449,7 @@ tests/integration/       Testes que usam o banco de verdade
 
 ---
 
-## 10. Publicando na Vercel (quando for a hora)
+## 11. Publicando na Vercel (quando for a hora)
 
 1. Na Vercel: **Add New → Project** e importe este repositório do GitHub.
 2. Em **Settings → Environment Variables**, cadastre as mesmas variáveis do `.env.example`,

@@ -15,6 +15,7 @@ import { ActionButton } from "@/components/admin/action-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
+import { formatCommissionRate } from "@/modules/affiliates/rules";
 import { requireRole } from "@/modules/auth/session";
 import { adminRefundOrderAction } from "@/modules/payments/admin/actions";
 import { PaymentsTable } from "@/modules/payments/admin/components/payments-table";
@@ -89,6 +90,20 @@ export default async function AdminOrderPage({ params }: PageProps<"/admin/venda
           </CardHeader>
           <CardContent className="grid gap-1 text-sm">
             <p>Cursos: {order.courses.map((item) => item.course.title).join(", ")}</p>
+            {order.couponCode ? (
+              <p>
+                Cupom {order.couponCode}: −{formatBRL(order.discountCents)} (preço de tabela {formatBRL(order.priceCents + order.discountCents)})
+              </p>
+            ) : null}
+            {order.affiliate ? (
+              <p>
+                Afiliado:{" "}
+                <Link href={`/admin/vendas/afiliados/${order.affiliate.id}`} className="underline">
+                  {order.affiliate.user.name} ({order.affiliate.code})
+                </Link>{" "}
+                · comissão de {formatCommissionRate(order.affiliateCommissionBps ?? 0)}
+              </p>
+            ) : null}
             {order.paidAt ? <p>Pago em {formatDateTime(order.paidAt)}</p> : null}
             {order.refundRequestedAt ? (
               <p>

@@ -11,7 +11,6 @@ import "server-only";
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +24,11 @@ import { CourseOffers } from "@/modules/payments/components/course-offers";
 import { getOffersForCourse } from "@/modules/payments/storefront.server";
 import type { CourseView } from "@/modules/progress/course-view";
 import { getCourseView } from "@/modules/progress/course-view.server";
+import { breadcrumbJsonLd, courseJsonLd } from "@/modules/seo/json-ld";
+import { JsonLd } from "@/modules/seo/json-ld-script";
+import { redirectOldCatalogPathOrNotFound } from "@/modules/seo/redirects.server";
+import { SITE_NAME } from "@/modules/seo/site";
+import { absoluteUrl, siteUrl } from "@/modules/seo/site.server";
 
 /**
  * Texto do quadro de quem NÃO tem acesso ao curso, conforme a situação da matrícula.
@@ -57,7 +61,13 @@ export async function generateMetadata({ params }: PageProps<"/cursos/[courseSlu
   const { courseSlug } = await params;
   const course = await getCourseCurriculum(courseSlug);
   if (!course || !course.isPublished) return { title: "Curso" };
-  return { title: course.title, description: course.subtitle ?? undefined };
+  const description = course.subtitle ?? undefined;
+  return {
+    title: course.title,
+    description,
+    alternates: { canonical: `/cursos/${course.slug}` },
+    openGraph: { title: course.title, description, url: `/cursos/${course.slug}` },
+  };
 }
 
 export default async function CoursePage({ params }: PageProps<"/cursos/[courseSlug]">) {
@@ -68,7 +78,8 @@ export default async function CoursePage({ params }: PageProps<"/cursos/[courseS
     session ? { userId: session.user.id, role: session.user.role } : null,
   );
   if (!view) {
-    notFound();
+    // Pode ser um endereço ANTIGO (o curso mudou de slug) → redireciona para o atual (Fase 6).
+    return redirectOldCatalogPathOrNotFound(courseSlug);
   }
 
   const { curriculum, orderedLessons, summary } = view;
@@ -78,8 +89,29 @@ export default async function CoursePage({ params }: PageProps<"/cursos/[courseS
     !view.hasCourseAccess && curriculum.isPublished ? await getOffersForCourse(curriculum.id) : { products: [], plans: [] };
   const hasOffers = offers.products.length > 0 || offers.plans.length > 0;
 
+  const courseUrl = absoluteUrl(`/cursos/${curriculum.slug}`);
+
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-8 px-4 py-10">
+      {/* Dados estruturados para o Google (Fase 6): o curso e a trilha de navegação. */}
+      {curriculum.isPublished ? (
+        <JsonLd
+          data={[
+            courseJsonLd({
+              name: curriculum.title,
+              description: curriculum.subtitle ?? curriculum.description.slice(0, 300),
+              url: courseUrl,
+              providerName: SITE_NAME,
+              providerUrl: siteUrl(),
+            }),
+            breadcrumbJsonLd([
+              { name: "Início", url: absoluteUrl("/") },
+              { name: "Cursos", url: absoluteUrl("/cursos") },
+              { name: curriculum.title, url: courseUrl },
+            ]),
+          ]}
+        />
+      ) : null}
       <section className="grid gap-4">
         <div className="flex flex-wrap items-center gap-2">
           <Link href="/cursos" className="text-muted-foreground text-sm hover:underline">

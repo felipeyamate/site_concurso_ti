@@ -38,11 +38,16 @@ const at = (days: number, hours = 0) => new Date(T0.getTime() + days * DAY + hou
 const WEBHOOK_TOKEN = "token-do-webhook-apenas-para-os-testes-0123456789";
 
 async function resetSales() {
+  // Fase 6: pagamentos a afiliados apontam para cobranças; cupons e afiliados, para pedidos/usuários.
+  await prisma.affiliatePayoutItem.deleteMany();
+  await prisma.affiliatePayout.deleteMany();
   await prisma.fiscalInvoice.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.webhookEvent.deleteMany();
   await prisma.order.deleteMany();
   await prisma.subscription.deleteMany();
+  await prisma.coupon.deleteMany();
+  await prisma.affiliate.deleteMany();
   await prisma.billingProfile.deleteMany();
   await prisma.product.deleteMany();
   await prisma.plan.deleteMany();

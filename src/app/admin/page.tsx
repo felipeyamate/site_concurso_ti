@@ -93,6 +93,21 @@ export default async function AdminPage() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle>Conteúdo do site</CardTitle>
+            <CardDescription>Posts do blog e páginas de concurso (edital): atraem alunos pelo Google.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/admin/conteudo/blog">Blog</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/admin/conteudo/concursos">Concursos</Link>
+            </Button>
+          </CardContent>
+        </Card>
+
         {isAdmin ? (
           <Card>
             <CardHeader>

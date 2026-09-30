@@ -264,6 +264,8 @@ export async function getOrderForAdmin(orderId: string) {
       user: { select: { id: true, name: true, email: true } },
       courses: { select: { course: { select: { id: true, title: true } } } },
       payments: { orderBy: { createdAt: "asc" }, include: { fiscalInvoice: true } },
+      // Fase 6: afiliado da venda (o cupom já vem no próprio pedido: couponCode/discountCents).
+      affiliate: { select: { id: true, code: true, user: { select: { name: true } } } },
     },
   });
 }
@@ -312,6 +314,7 @@ export async function getSubscriptionForAdmin(subscriptionId: string) {
     include: {
       user: { select: { id: true, name: true, email: true } },
       payments: { orderBy: { dueDate: "asc" }, include: { fiscalInvoice: true } },
+      affiliate: { select: { id: true, code: true, user: { select: { name: true } } } },
     },
   });
 }

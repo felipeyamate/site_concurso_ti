@@ -4,8 +4,9 @@
  * checkout-form.tsx — Formulário de compra (produto) ou de assinatura (plano).
  *
  * Quem chama: /comprar/[produto] e /assinar/[plano].
- * O que envia: forma de pagamento, parcelas (só cartão, compra avulsa), CPF, celular e o aceite
- * dos termos. O PREÇO não vai no formulário: o servidor busca no banco.
+ * O que envia: forma de pagamento, parcelas (só cartão, compra avulsa), CPF, celular, o aceite
+ * dos termos e o cupom já aplicado na página (se houver). O PREÇO não vai no formulário: o servidor
+ * busca no banco e confere o cupom de novo.
  *
  * Os dados do cartão NUNCA são digitados aqui: no cartão, o aluno paga na página segura do
  * provedor (Asaas), para onde é levado depois de criar o pedido.
@@ -37,9 +38,11 @@ type CheckoutFormProps = {
   installmentOptions: Array<{ count: number; label: string }>;
   defaults: { cpf: string; phone: string; cpfLocked: boolean };
   submitLabel: string;
+  // Cupom aplicado na página (já conferido na prévia) ou null.
+  couponCode: string | null;
 };
 
-export function CheckoutForm({ kind, slug, installmentOptions, defaults, submitLabel }: CheckoutFormProps) {
+export function CheckoutForm({ kind, slug, installmentOptions, defaults, submitLabel, couponCode }: CheckoutFormProps) {
   const { state, onSubmit, pending } = useAdminForm(kind === "product" ? checkoutAction : subscribeAction);
   const [method, setMethod] = useState<Method>("PIX");
   const errors = state.fieldErrors;
@@ -48,6 +51,8 @@ export function CheckoutForm({ kind, slug, installmentOptions, defaults, submitL
   return (
     <form onSubmit={onSubmit} className="grid gap-5">
       <input type="hidden" name={kind === "product" ? "productSlug" : "planSlug"} value={slug} />
+      {couponCode ? <input type="hidden" name="couponCode" value={couponCode} /> : null}
+      <FieldError id="checkout-coupon-error" message={errors.couponCode} />
 
       <fieldset className="grid gap-2">
         <legend className="mb-1 text-sm font-medium">Forma de pagamento</legend>

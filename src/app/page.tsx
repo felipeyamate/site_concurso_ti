@@ -2,11 +2,30 @@
  * page.tsx — Página inicial: /
  *
  * Quem chama: o Next.js, na raiz do site.
- * PROVISÓRIA: a página de vendas de verdade (com SEO e landing pages por edital) é da Fase 6.
+ * Mostra: a proposta (TI para concursos, do zero), os diferenciais, os concursos com inscrições
+ * abertas/previstos (páginas de edital) e os últimos posts do blog (Fase 6).
+ * SEO: endereço canônico e dados estruturados da escola e do site (JSON-LD).
+ * `await connection()`: consulta o banco sem ler cookies (regra do CLAUDE.md).
  */
-import Link from "next/link";
+import "server-only";
 
+import type { Metadata } from "next";
+import Link from "next/link";
+import { connection } from "next/server";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { listLatestPosts } from "@/modules/blog/blog.server";
+import { PostCard } from "@/modules/blog/components/post-card";
+import { NOTICE_STATUS_LABELS } from "@/modules/notices/labels";
+import { listPublishedNotices } from "@/modules/notices/notices.server";
+import { formatDateOnly } from "@/modules/payments/dates";
+import { organizationJsonLd, websiteJsonLd } from "@/modules/seo/json-ld";
+import { JsonLd } from "@/modules/seo/json-ld-script";
+import { SITE_DESCRIPTION, SITE_NAME } from "@/modules/seo/site";
+import { siteUrl } from "@/modules/seo/site.server";
+
+export const metadata: Metadata = { alternates: { canonical: "/" } };
 
 const HIGHLIGHTS: Array<{ title: string; text: string; link?: { href: string; label: string } }> = [
   {
@@ -25,9 +44,20 @@ const HIGHLIGHTS: Array<{ title: string; text: string; link?: { href: string; la
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  await connection();
+  const [notices, posts] = await Promise.all([listPublishedNotices(), listLatestPosts(3)]);
+  // Concursos que o aluno ainda pode fazer (inscrições abertas ou previstos), até 3.
+  const upcoming = notices.filter((notice) => notice.status === "OPEN" || notice.status === "EXPECTED").slice(0, 3);
+
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-12 px-4 py-16">
+      <JsonLd
+        data={[
+          organizationJsonLd({ siteUrl: siteUrl(), name: SITE_NAME, description: SITE_DESCRIPTION }),
+          websiteJsonLd({ siteUrl: siteUrl(), name: SITE_NAME }),
+        ]}
+      />
       <section className="grid gap-6 text-center">
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
           Informática e TI para concursos, do zero
@@ -59,6 +89,47 @@ export default function HomePage() {
           </div>
         ))}
       </section>
+
+      {upcoming.length > 0 ? (
+        <section className="grid gap-4">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <h2 className="text-2xl font-semibold tracking-tight">Concursos com TI no edital</h2>
+            <Link href="/concursos" className="text-sm underline">
+              Ver todos
+            </Link>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {upcoming.map((notice) => (
+              <Link key={notice.id} href={`/concursos/${notice.slug}`} className="hover:bg-muted/50 grid gap-2 rounded-xl border p-5">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={notice.status === "OPEN" ? "default" : "secondary"}>{NOTICE_STATUS_LABELS[notice.status]}</Badge>
+                  {notice.board ? <Badge variant="outline">{notice.board.name}</Badge> : null}
+                </div>
+                <span className="font-semibold">{notice.title}</span>
+                <span className="text-muted-foreground text-sm">
+                  {notice.examDate ? `Prova em ${formatDateOnly(notice.examDate)}` : "Data da prova a definir"}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {posts.length > 0 ? (
+        <section className="grid gap-4">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <h2 className="text-2xl font-semibold tracking-tight">Do blog</h2>
+            <Link href="/blog" className="text-sm underline">
+              Ver todos os posts
+            </Link>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {posts.map((post) => (
+              <PostCard key={post.id} post={post} />
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { formatBRL } from "@/modules/payments/money";
 import { listPlansPage } from "@/modules/payments/storefront.server";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/planos" },
   title: "Planos de assinatura",
   description: "Assine e estude todos os cursos incluídos na assinatura enquanto ela estiver ativa.",
 };

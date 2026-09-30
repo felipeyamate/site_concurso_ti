@@ -11,6 +11,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { SITE_DESCRIPTION, SITE_NAME } from "@/modules/seo/site";
+import { siteUrl } from "@/modules/seo/site.server";
 
 import "./globals.css";
 
@@ -24,16 +26,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Título e descrição padrão (aparecem na aba do navegador e no Google).
-// Cada página pode sobrescrever com o seu próprio `metadata`.
-export const metadata: Metadata = {
-  title: {
-    default: "Concurso TI — Informática e TI para concursos, do zero",
-    template: "%s | Concurso TI",
-  },
-  description:
-    "Aprenda Informática, TI e Segurança da Informação para concursos públicos, em linguagem simples, focando no que mais cai nas provas.",
-};
+/**
+ * Título e descrição padrão (aba do navegador e Google) e o básico de SEO (Fase 6). Cada página
+ * pode sobrescrever com o seu próprio `metadata`.
+ *  - `metadataBase`: o endereço do site; com ele, os endereços relativos das páginas (canônico,
+ *    imagem de compartilhamento) viram completos (https://...).
+ *  - `openGraph`: como o link aparece ao ser compartilhado (WhatsApp, redes sociais).
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    metadataBase: new URL(siteUrl()),
+    title: {
+      default: "Concurso TI — Informática e TI para concursos, do zero",
+      template: `%s | ${SITE_NAME}`,
+    },
+    description: SITE_DESCRIPTION,
+    openGraph: { siteName: SITE_NAME, locale: "pt_BR", type: "website" },
+  };
+}
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

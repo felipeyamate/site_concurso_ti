@@ -104,7 +104,9 @@ Product ──< ProductCourse >── Course  (um produto pode liberar vários c
 Plan (assinatura) → libera todos os cursos marcados como "inclusos na assinatura"
 Question >── Subject (assunto), Board (banca), Exam (concurso/ano)   (Question ──< QuestionOption)
 User ──< MockExam ──< MockExamQuestion >── Question   (simulados; ao finalizar viram QuestionAttempt)
-Coupon, Affiliate, WebhookEvent (log de tudo que chega dos provedores)
+Coupon ──< Order/Subscription (desconto)   Affiliate ──< Order/Subscription (indicação), Affiliate ──< AffiliatePayout
+BlogPost, ExamNotice (página de concurso) ──< ExamNoticeSubject >── Subject, SlugRedirect (endereços antigos)
+WebhookEvent (log de tudo que chega dos provedores)
 ```
 
 ### Regras de negócio que não mudam
@@ -128,8 +130,8 @@ Coupon, Affiliate, WebhookEvent (log de tudo que chega dos provedores)
 | 3 | Admin: CRUD de cursos, upload de vídeos (Panda) e PDFs (R2) | ✅ concluída (ver seção 10) |
 | 4 | Checkout (Asaas), webhooks, matrículas, assinaturas, reembolso, NFS-e | ✅ concluída (ver seção 10) |
 | 5 | Banco de questões, simulados, mapa de incidência por banca | ✅ concluída (ver seção 10) |
-| 6 | Landing pages por edital, SEO, blog, cupons e afiliados | ⏳ próxima |
-| 7 | Testes E2E, Sentry, LGPD, deploy de produção | — |
+| 6 | Landing pages por edital, SEO, blog, cupons e afiliados | ✅ concluída (ver seção 10) |
+| 7 | Testes E2E, Sentry, LGPD, deploy de produção | ⏳ próxima |
 
 **Cada fase termina com:** código funcionando + testes + instruções de como testar + este arquivo
 atualizado.
@@ -225,6 +227,14 @@ atualizado.
 | 2026-09-30 | Planilha de importação com no máximo **900 KB** (conferido no navegador antes de enviar) | O Next aceita até 1 MB por envio numa Server Action; aumentar esse limite valeria para todas as ações do site |
 | 2026-09-30 | **Segunda revisão da Fase 5:** questão que está num simulado do aluno **em andamento** some de "Resolver questões" (e a resposta é recusada) até ele finalizar; a cota grátis conta só as respostas de "Resolver questões"; "X% dos alunos acertam" usa a **primeira resposta de cada aluno** (10+ alunos; professor testando não conta) | Achados da revisão: responder na prática entregava o gabarito do simulado aberto; quem perdia o acesso via a cota "gasta" pelo simulado; um aluno repetindo 10 vezes já gerava a porcentagem |
 | 2026-09-30 | Planilha aceita UTF-8 **e** Windows-1252 (o "CSV separado por ponto e vírgula" do Excel em português); gravar questão de prova trava a prova para leitura (a banca é lida com a prova travada); o relógio do simulado se acerta com o servidor ao abrir a página e ao voltar para a aba; a lista de simulados mostra sempre os em andamento | Achados da revisão: acentos viravam "�"; questão gravada durante a troca de banca da prova ficava com a banca antiga; o botão "Voltar" devolvia minutos ao relógio; simulado aberto antigo sumia da lista |
+| 2026-09-30 | **Fase 6 — cupons:** desconto em **%** (1 a 100) ou em **R$**; vale para compras avulsas e/ou assinaturas (com lista opcional de produtos/planos); validade por **dia de Brasília** (o último dia vale inteiro); limite de usos no total e **por aluno**. O preço final nunca fica abaixo de **R$ 5,00** (mínimo de cobrança) — o cupom é recusado. Na assinatura, o desconto vale para **todas as renovações** | Regras simples de explicar na divulgação; o mínimo evita cobrança que o Asaas recusaria |
+| 2026-09-30 | Cupom conferido **duas vezes**: na página (prévia com o preço riscado) e de novo no checkout, **com uma trava por cupom** (`coupon:<id>`) dentro da trava do checkout. Conta como uso: pedido que não foi cancelado (inclusive aguardando pagamento e reembolsado) e assinatura criada. O pedido guarda o código e o desconto ("foto") | Sem a trava, duas compras ao mesmo tempo passavam do limite (teste que falha sem ela); pedir reembolso não "devolve" o cupom para usar de novo |
+| 2026-09-30 | **Afiliados:** o admin cadastra (a pessoa precisa ter conta). Link `/r/<codigo>?para=/pagina` conta o clique e guarda um cookie de **30 dias** (vale o **último** link clicado); o destino só pode ser uma página do nosso site. Cupom ligado a um afiliado **ganha** do cookie; ninguém é afiliado de si mesmo; afiliado desativado não ganha vendas novas | Modelo comum de mercado; o cupom é a indicação mais explícita; o link nunca vira um redirecionador para sites de golpe |
+| 2026-09-30 | Comissão: a **taxa** é gravada no pedido/assinatura na hora da venda; a comissão é calculada **a cada pagamento pago** (na assinatura, todo mês/ano pago), fica **7 dias em carência** (prazo do reembolso) e é **cancelada** por reembolso/contestação. O pagamento ao afiliado é feito **fora do site** (Pix) e só **registrado** pelo admin (com trava); comissão já paga e depois estornada aparece marcada para acerto manual | Mudar a taxa não altera vendas antigas; nada de pagar comissão de venda devolvida; sem integrar split de pagamento por enquanto |
+| 2026-09-30 | **Blog e páginas de concurso** escritos em **Markdown** (títulos, negrito, itálico, links, listas, citações) com um leitor **nosso**: o texto vira elementos da página, nunca HTML cru; links só `https://`, `mailto:` e endereços do site. Nascem como **rascunho**; o professor vê a prévia no endereço real; a data de publicação é a da **primeira** publicação | Segurança (um texto colado não consegue rodar script) e ninguém precisa saber HTML |
+| 2026-09-30 | Página de concurso (`/concursos/<endereco>`): situação, banca, datas, vagas, texto, assuntos com "treinar questões", "o que mais cai na banca" e a oferta (produto e/ou plano) com um **cupom já aplicado** no botão. Oferta inativa some da página. O seed tem uma página **fictícia** | Landing page por edital (seção 1, Fase B do conteúdo) reaproveitando o banco de questões e o mapa |
+| 2026-09-30 | **SEO:** endereço canônico e OpenGraph em todas as páginas públicas, `sitemap.xml`, `robots.txt` (bloqueia painel, área do aluno, checkout e `/r/`), dados estruturados (escola, site, curso, artigo, trilha) e RSS do blog. Trocar o endereço (slug) de curso, aula, post ou página de concurso grava o antigo e ele **redireciona** para o novo (permanente) | Pendência da Fase 3 resolvida; o Google não perde as páginas já indexadas |
+| 2026-09-30 | Páginas públicas continuam montadas **a cada acesso** (sem cache): o `sitemap`, o RSS e as páginas usam `connection()` | Simples e sempre atualizado; cache entra quando o movimento pedir (Fase 7) |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -288,7 +298,7 @@ explicando o erro do Google para contas não confirmadas.
 **Pendências conhecidas (não bloqueiam a Fase 3):**
 - A conclusão olha a **posição** no vídeo, não o tempo realmente assistido (pular para o fim conclui). Rever se virar problema.
 - Progresso do player do Panda (dentro de um `<iframe>`) depende das mensagens do player deles → Fase 3.
-- Vitrine pública (`/cursos`) é montada a cada acesso; cache e SEO próprios na Fase 6.
+- Vitrine pública (`/cursos`) é montada a cada acesso; cache e SEO próprios na Fase 6. (*SEO feito na Fase 6; o cache ficou para a Fase 7.*)
 - A nossa marca d'água fica por cima do player e **não aparece em tela cheia**; a proteção principal será a do Panda (dentro do vídeo), na Fase 3.
 - `npm run build && npm start` na sua máquina bloqueia o vídeo de exemplo (é "produção"); para testar, use `npm run dev`.
 
@@ -321,7 +331,7 @@ explicando o erro do Google para contas não confirmadas.
   pular (`currentTime`) e a marca d'água DRM. Tudo foi feito pela documentação pública; ajustes ficam em `src/modules/video/panda/`.
 - Criar as contas do Panda e do Cloudflare R2 e cadastrar as variáveis (seção 9 e README). Configurar no Panda os domínios permitidos.
 - Um PDF enviado mas não confirmado (ex.: aba fechada no meio) fica "órfão" no R2 (invisível para alunos). Limpeza automática → Fase 7.
-- Trocar o endereço (slug) de um curso/aula publicado quebra links antigos; redirecionamento automático → Fase 6 (SEO).
+- Trocar o endereço (slug) de um curso/aula publicado quebra links antigos; redirecionamento automático → Fase 6 (SEO). (*Resolvido na Fase 6.*)
 - O seed de exemplo sincroniza o curso de exemplo: não use o curso do seed para conteúdo real.
 
 ### Fase 4 — Vendas: checkout (Asaas), webhooks, assinaturas, reembolso e NFS-e (2026-09-29)
@@ -363,7 +373,7 @@ explicando o erro do Google para contas não confirmadas.
   de assinantes, passar para uma tarefa em segundo plano → Fase 7.
 - Reembolso, cancelamento e checkout seguram uma conexão do banco durante a chamada ao Asaas (até 15 s), por causa da trava. Com
   muito movimento ao mesmo tempo, rever o tamanho do "pool" de conexões → Fase 7.
-- Cupons de desconto e afiliados → Fase 6.
+- Cupons de desconto e afiliados → Fase 6. (*Feito na Fase 6.*)
 - Exclusão de conta (LGPD) de quem tem compras: os registros fiscais precisam ficar (anonimizar em vez de apagar) → Fase 7.
 - Aviso do `pg` nos testes ("client.query() when the client is already executing a query") vem de dentro do adaptador do Prisma; não
   afeta o resultado. Acompanhar atualizações do Prisma.
@@ -409,3 +419,38 @@ explicando o erro do Google para contas não confirmadas.
 - Simulado em andamento que o aluno abandona fica "em andamento" (conta no limite de 3 até ele finalizar), e as questões dele
   ficam fora de "Resolver questões" até lá — inclusive para quem perdeu o acesso (não finaliza até o acesso voltar). Rever se incomodar.
 - Os testes no navegador deixam alunos, respostas e simulados no banco de desenvolvimento (apague com um banco novo se incomodar).
+
+### Fase 6 — Marketing: páginas de concurso, blog, SEO, cupons e afiliados (2026-09-30)
+
+**Entregue:**
+- Banco: `coupons` (+ produtos/planos), `affiliates`, `affiliate_click_days`, `affiliate_payouts` (+ itens), `exam_notices`
+  (+ assuntos), `blog_posts` e `slug_redirects`; pedido e assinatura com cupom, desconto, afiliado e taxa da comissão
+  (migração `marketing`, com travas `CHECK` nos códigos e valores).
+- **Cupons** (`src/modules/coupons`): regras puras testadas, campo "Tem um cupom?" na compra e na assinatura (e `?cupom=` no
+  link), conferência com trava no checkout, painel `/admin/vendas/cupons` e o cupom em "Minhas compras" e na ficha do pedido.
+- **Afiliados** (`src/modules/affiliates`): link `/r/<codigo>`, cookie, venda indicada, comissões (carência, estorno), área do
+  afiliado (`/area-do-aluno/afiliado`: link com destino, cliques, vendas, comissões e chave Pix) e painel
+  `/admin/vendas/afiliados` (cadastro, taxa, comissões e registro do pagamento).
+- **Blog** (`/blog`, `/blog/<post>`, `/blog/rss.xml`) e **páginas de concurso** (`/concursos`, `/concursos/<pagina>`), com o
+  painel "Conteúdo do site" (`/admin/conteudo`, PROFESSOR ou mais) e Markdown com prévia.
+- **SEO** (`src/modules/seo`): canonical, OpenGraph, sitemap, robots, JSON-LD, RSS e redirecionamento de endereços antigos
+  (cursos, aulas, posts e concursos). Página inicial nova, com os concursos abertos e os últimos posts.
+- Seed: 3 posts de exemplo e 1 página de concurso **fictícia**.
+- Testes: 325 unitários + 122 de integração (inclusive um cupom disputado por duas compras ao mesmo tempo, que falha sem a
+  trava); 84 cenários novos no navegador (inclusive celular de 360 px) e os das Fases 2, 3, 4 e 5 repetidos sem
+  regressão (36 + 48 + 55 + 57).
+- Os testes no navegador acharam 1 problema, corrigido: botões com texto longo (na página de concurso, no post com
+  assunto e no "Registrar pagamento") não quebravam a linha e alargavam a página no celular.
+
+**Como testar:** [README.md → "Como testar a Fase 6"](./README.md#7-como-testar-a-fase-6-passo-a-passo).
+
+**Pendências conhecidas (não bloqueiam a Fase 7):**
+- O pagamento ao afiliado é manual (Pix fora do site); split automático pelo Asaas → rever se o programa crescer.
+- Cupom "só no primeiro mês" da assinatura não existe (o desconto vale em todas as renovações).
+- Pedido **aguardando pagamento** (ou vencido) conta como uso do cupom: quem gerou um Pix com o cupom e quer pagar com
+  boleto usa o pedido já gerado (a página de compra mostra o link) — rever se incomodar.
+- Sem imagem de compartilhamento (OpenGraph) própria por página, nem imagens dentro dos posts.
+- A lista de afiliados do painel calcula as comissões um afiliado por vez; com centenas de afiliados, passar para uma
+  consulta agregada.
+- Páginas públicas sem cache (ver decisões); o `robots.txt` é gerado no build com o `BETTER_AUTH_URL` da época.
+- Os testes no navegador deixam cupons, afiliados, posts e páginas de teste no banco de desenvolvimento.

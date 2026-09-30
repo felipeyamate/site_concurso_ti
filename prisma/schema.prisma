@@ -19,7 +19,8 @@
 // (Subscription), cobranças (Payment), avisos do provedor (WebhookEvent) e notas fiscais (FiscalInvoice).
 // Fase 5: banco de questões — bancas (Board), assuntos (Subject), provas de concurso (Exam), questões
 // (Question + QuestionOption), respostas dos alunos (QuestionAttempt) e simulados (MockExam).
-// As demais tabelas (cupons, afiliados — seção 6 do PROJECT.md) entram nas fases em que forem usadas.
+// Fase 6: marketing — cupons (Coupon), afiliados (Affiliate + cliques e pagamentos de comissão),
+// posts do blog (BlogPost), páginas de edital (ExamNotice) e endereços antigos (SlugRedirect).
 // =============================================================================
 
 generator client {
@@ -69,6 +70,10 @@ model User {
   // Fase 5 (banco de questões): respostas e simulados do aluno.
   questionAttempts QuestionAttempt[]
   mockExams        MockExam[]
+  // Fase 6 (marketing): cadastro de afiliado, pagamentos de comissão registrados (admin) e posts.
+  affiliate        Affiliate?
+  affiliatePayouts AffiliatePayout[] @relation("AffiliatePayoutCreatedBy")
+  blogPosts        BlogPost[]
 
   @@map("users")
 }
@@ -365,6 +370,9 @@ model Product {
   updatedAt       DateTime        @updatedAt @map("updated_at")
   courses         ProductCourse[]
   orders          Order[]
+  // Fase 6: cupons restritos a este produto e páginas de edital que o oferecem.
+  coupons         CouponProduct[]
+  examNotices     ExamNotice[]
 
   @@map("products")
 }
@@ -398,6 +406,9 @@ model Plan {
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   subscriptions Subscription[]
+  // Fase 6: cupons restritos a este plano e páginas de edital que o oferecem.
+  coupons       CouponPlan[]
+  examNotices   ExamNotice[]
 
   @@map("plans")
 }
@@ -434,35 +445,46 @@ enum OrderStatus {
 // Uma compra avulsa. Guarda uma "foto" do que foi comprado (título, preço, dias e cursos):
 // mudar o produto depois não altera compras já feitas.
 model Order {
-  id                    String              @id @default(cuid())
-  userId                String              @map("user_id")
-  user                  User                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  productId             String              @map("product_id")
-  product               Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
-  productTitle          String              @map("product_title")
-  priceCents            Int                 @map("price_cents")
-  accessDays            Int?                @map("access_days")
-  method                PaymentMethod
-  installments          Int                 @default(1)
-  status                OrderStatus         @default(PENDING)
-  provider              PaymentProviderKind
+  id                     String              @id @default(cuid())
+  userId                 String              @map("user_id")
+  user                   User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  productId              String              @map("product_id")
+  product                Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productTitle           String              @map("product_title")
+  priceCents             Int                 @map("price_cents")
+  accessDays             Int?                @map("access_days")
+  method                 PaymentMethod
+  installments           Int                 @default(1)
+  status                 OrderStatus         @default(PENDING)
+  provider               PaymentProviderKind
   // Cobrança no provedor (numa compra parcelada: o "parcelamento" e a 1ª parcela).
-  providerPaymentId     String?             @unique @map("provider_payment_id")
-  providerInstallmentId String?             @unique @map("provider_installment_id")
+  providerPaymentId      String?             @unique @map("provider_payment_id")
+  providerInstallmentId  String?             @unique @map("provider_installment_id")
   // Quando o pagamento foi confirmado pela 1ª vez (início do acesso).
-  paidAt                DateTime?           @map("paid_at")
+  paidAt                 DateTime?           @map("paid_at")
   // Quem pediu reembolso e quando (informativo). O acesso sai porque as cobranças passam a
   // REFUND_REQUESTED na hora do pedido; a situação do pedido vem sempre das cobranças.
-  refundRequestedAt     DateTime?           @map("refund_requested_at")
-  refundRequestedBy     String?             @map("refund_requested_by")
+  refundRequestedAt      DateTime?           @map("refund_requested_at")
+  refundRequestedBy      String?             @map("refund_requested_by")
   // Mensagem do provedor quando a cobrança não pôde ser criada (para o suporte).
-  failureReason         String?             @map("failure_reason")
-  createdAt             DateTime            @default(now()) @map("created_at")
-  updatedAt             DateTime            @updatedAt @map("updated_at")
-  courses               OrderCourse[]
-  payments              Payment[]
+  failureReason          String?             @map("failure_reason")
+  // Fase 6 ("foto" do momento da compra): desconto do cupom (preço de tabela = priceCents +
+  // discountCents; `priceCents` é o valor COBRADO), o cupom, e o afiliado com a comissão combinada.
+  discountCents          Int                 @default(0) @map("discount_cents")
+  couponId               String?             @map("coupon_id")
+  coupon                 Coupon?             @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  couponCode             String?             @map("coupon_code")
+  affiliateId            String?             @map("affiliate_id")
+  affiliate              Affiliate?          @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  affiliateCommissionBps Int?                @map("affiliate_commission_bps")
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+  courses                OrderCourse[]
+  payments               Payment[]
 
   @@index([userId, createdAt])
+  @@index([couponId])
+  @@index([affiliateId])
   @@map("orders")
 }
 
@@ -501,11 +523,22 @@ model Subscription {
   providerSubscriptionId String?             @unique @map("provider_subscription_id")
   canceledAt             DateTime?           @map("canceled_at")
   failureReason          String?             @map("failure_reason")
+  // Fase 6: como no pedido — desconto do cupom (vale em todas as renovações: `priceCents` já é o
+  // valor com desconto), o cupom e o afiliado com a comissão combinada (vale para cada ciclo pago).
+  discountCents          Int                 @default(0) @map("discount_cents")
+  couponId               String?             @map("coupon_id")
+  coupon                 Coupon?             @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  couponCode             String?             @map("coupon_code")
+  affiliateId            String?             @map("affiliate_id")
+  affiliate              Affiliate?          @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  affiliateCommissionBps Int?                @map("affiliate_commission_bps")
   createdAt              DateTime            @default(now()) @map("created_at")
   updatedAt              DateTime            @updatedAt @map("updated_at")
   payments               Payment[]
 
   @@index([userId, createdAt])
+  @@index([couponId])
+  @@index([affiliateId])
   @@map("subscriptions")
 }
 
@@ -523,38 +556,40 @@ enum PaymentStatus {
 
 // Uma cobrança no provedor: a de uma compra (ou uma parcela dela) ou um ciclo da assinatura.
 model Payment {
-  id                      String              @id @default(cuid())
+  id                      String               @id @default(cuid())
   provider                PaymentProviderKind
-  providerPaymentId       String              @unique @map("provider_payment_id")
-  orderId                 String?             @map("order_id")
-  order                   Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  subscriptionId          String?             @map("subscription_id")
-  subscription            Subscription?       @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  providerPaymentId       String               @unique @map("provider_payment_id")
+  orderId                 String?              @map("order_id")
+  order                   Order?               @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  subscriptionId          String?              @map("subscription_id")
+  subscription            Subscription?        @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
   method                  PaymentMethod
-  status                  PaymentStatus       @default(PENDING)
+  status                  PaymentStatus        @default(PENDING)
   // Status original do provedor (ex.: "RECEIVED_IN_CASH"), para conferência.
-  providerStatus          String              @map("provider_status")
-  valueCents              Int                 @map("value_cents")
+  providerStatus          String               @map("provider_status")
+  valueCents              Int                  @map("value_cents")
   // Vencimento (dia). Na assinatura, é o início do ciclo que esta cobrança paga.
-  dueDate                 DateTime            @map("due_date") @db.Date
-  installmentNumber       Int?                @map("installment_number")
-  paidAt                  DateTime?           @map("paid_at")
+  dueDate                 DateTime             @map("due_date") @db.Date
+  installmentNumber       Int?                 @map("installment_number")
+  paidAt                  DateTime?            @map("paid_at")
   // Página de pagamento do provedor (cartão) e boleto em PDF.
-  invoiceUrl              String?             @map("invoice_url")
-  bankSlipUrl             String?             @map("bank_slip_url")
+  invoiceUrl              String?              @map("invoice_url")
+  bankSlipUrl             String?              @map("bank_slip_url")
   // Pix "copia e cola" e a imagem do QR Code (PNG em base64), guardados na 1ª consulta.
-  pixPayload              String?             @map("pix_payload")
-  pixImage                String?             @map("pix_image")
+  pixPayload              String?              @map("pix_payload")
+  pixImage                String?              @map("pix_image")
   // Data do último aviso aplicado (texto do provedor, ex.: "2026-09-29 10:00:00"): um aviso mais
   // antigo que chegue atrasado não desfaz um mais novo.
-  lastEventAt             String?             @map("last_event_at")
+  lastEventAt             String?              @map("last_event_at")
   // Estorno feito À MÃO no painel do provedor (boleto): o acesso já saiu aqui, mas o provedor ainda
   // mostra a cobrança como paga até alguém fazer o estorno lá. Enquanto isto estiver preenchido,
   // "paga" vinda do provedor NÃO devolve o acesso. Limpo quando o provedor mostra o estorno.
-  manualRefundRequestedAt DateTime?           @map("manual_refund_requested_at")
-  createdAt               DateTime            @default(now()) @map("created_at")
-  updatedAt               DateTime            @updatedAt @map("updated_at")
+  manualRefundRequestedAt DateTime?            @map("manual_refund_requested_at")
+  createdAt               DateTime             @default(now()) @map("created_at")
+  updatedAt               DateTime             @updatedAt @map("updated_at")
   fiscalInvoice           FiscalInvoice?
+  // Fase 6: em qual pagamento de comissão (ao afiliado) esta cobrança entrou, se entrou.
+  affiliatePayoutItem     AffiliatePayoutItem?
 
   @@index([orderId])
   @@index([subscriptionId])
@@ -633,14 +668,16 @@ enum AttemptSource {
 
 // Banca organizadora de concursos (ex.: Cesgranrio, Cebraspe, FGV, FCC).
 model Board {
-  id        String     @id @default(cuid())
+  id        String       @id @default(cuid())
   // Identificador usado nos filtros da URL (?banca=cesgranrio).
-  slug      String     @unique
-  name      String     @unique
-  createdAt DateTime   @default(now()) @map("created_at")
-  updatedAt DateTime   @updatedAt @map("updated_at")
+  slug      String       @unique
+  name      String       @unique
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
   exams     Exam[]
   questions Question[]
+  // Fase 6: páginas de edital desta banca.
+  notices   ExamNotice[]
 
   @@map("boards")
 }
@@ -648,14 +685,17 @@ model Board {
 // Assunto cobrado (ex.: "Segurança da Informação — malware"). É a base do mapa "o que mais cai"
 // e do desempenho do aluno por assunto.
 model Subject {
-  id        String     @id @default(cuid())
-  slug      String     @unique
-  name      String     @unique
+  id        String              @id @default(cuid())
+  slug      String              @unique
+  name      String              @unique
   // Ordem nas listas (menor primeiro; empate = ordem alfabética).
-  position  Int        @default(0)
-  createdAt DateTime   @default(now()) @map("created_at")
-  updatedAt DateTime   @updatedAt @map("updated_at")
+  position  Int                 @default(0)
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
   questions Question[]
+  // Fase 6: editais que cobram este assunto e posts do blog sobre ele.
+  notices   ExamNoticeSubject[]
+  blogPosts BlogPost[]
 
   @@map("subjects")
 }
@@ -785,4 +825,242 @@ model MockExamQuestion {
   @@unique([mockExamId, position])
   @@index([questionId])
   @@map("mock_exam_questions")
+}
+
+// -----------------------------------------------------------------------------
+// Marketing (Fase 6): cupons de desconto, afiliados, blog, páginas de edital e endereços antigos.
+// -----------------------------------------------------------------------------
+
+// Tipo de desconto do cupom.
+enum CouponDiscountType {
+  PERCENT // porcentagem do preço (ex.: 10 = 10%)
+  AMOUNT // valor fixo em centavos (ex.: 2000 = R$ 20,00)
+}
+
+// Cupom de desconto. O código fica em MAIÚSCULAS no banco (o aluno digita como quiser).
+// Cupom usado em alguma venda não se apaga (desativar): o pedido guarda qual cupom foi usado.
+model Coupon {
+  id                String             @id @default(cuid())
+  code              String             @unique
+  // Anotação interna (ex.: "Campanha Black Friday"). Não aparece para o aluno.
+  description       String             @default("")
+  discountType      CouponDiscountType @map("discount_type")
+  // PERCENT: de 1 a 100 (%). AMOUNT: centavos. O preço final nunca fica abaixo do mínimo de
+  // cobrança (conferido no checkout).
+  discountValue     Int                @map("discount_value")
+  // Onde vale: compras avulsas, assinaturas ou as duas. A lista de produtos/planos restringe
+  // ainda mais (vazia = todos daquele tipo). Na assinatura, o desconto vale em TODAS as renovações.
+  appliesToProducts Boolean            @default(true) @map("applies_to_products")
+  appliesToPlans    Boolean            @default(false) @map("applies_to_plans")
+  // Período de validade (vazio = sem limite daquele lado).
+  startsAt          DateTime?          @map("starts_at")
+  endsAt            DateTime?          @map("ends_at")
+  // Máximo de usos no total (vazio = sem limite) e por aluno.
+  maxRedemptions    Int?               @map("max_redemptions")
+  maxPerUser        Int                @default(1) @map("max_per_user")
+  isActive          Boolean            @default(true) @map("is_active")
+  // Cupom de um afiliado: a venda com este cupom conta para ele (mesmo sem o link).
+  affiliateId       String?            @map("affiliate_id")
+  affiliate         Affiliate?         @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  products          CouponProduct[]
+  plans             CouponPlan[]
+  orders            Order[]
+  subscriptions     Subscription[]
+
+  @@map("coupons")
+}
+
+// Produtos em que o cupom vale (vazio = todos, se `appliesToProducts`).
+model CouponProduct {
+  couponId  String  @map("coupon_id")
+  coupon    Coupon  @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([couponId, productId])
+  @@map("coupon_products")
+}
+
+// Planos em que o cupom vale (vazio = todos, se `appliesToPlans`).
+model CouponPlan {
+  couponId String @map("coupon_id")
+  coupon   Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  planId   String @map("plan_id")
+  plan     Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@id([couponId, planId])
+  @@map("coupon_plans")
+}
+
+// Afiliado: alguém (com conta no site) que divulga os cursos e ganha comissão pelas vendas.
+// Não se apaga (as vendas guardam o afiliado): desativar para de atribuir vendas novas.
+model Affiliate {
+  id            String              @id @default(cuid())
+  userId        String              @unique @map("user_id")
+  user          User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  // Código do link de divulgação (/r/<codigo>): letras minúsculas, números e hífen.
+  code          String              @unique
+  // Comissão em "pontos-base" (100 = 1%): 2000 = 20%. Guardada no pedido no momento da venda.
+  commissionBps Int                 @map("commission_bps")
+  // Como pagar a comissão (ex.: "Pix: chave@email.com"). Só o admin e o próprio afiliado veem.
+  payoutInfo    String              @default("") @map("payout_info")
+  isActive      Boolean             @default(true) @map("is_active")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  clickDays     AffiliateClickDay[]
+  coupons       Coupon[]
+  orders        Order[]
+  subscriptions Subscription[]
+  payouts       AffiliatePayout[]
+
+  @@map("affiliates")
+}
+
+// Cliques no link do afiliado, somados por dia (um contador por dia, não uma linha por clique).
+model AffiliateClickDay {
+  affiliateId String    @map("affiliate_id")
+  affiliate   Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  day         DateTime  @db.Date
+  clicks      Int       @default(0)
+
+  @@id([affiliateId, day])
+  @@map("affiliate_click_days")
+}
+
+// Pagamento de comissões a um afiliado, feito FORA do site (ex.: Pix) e registrado pelo admin.
+// Registro financeiro: nunca é apagado.
+model AffiliatePayout {
+  id          String                @id @default(cuid())
+  affiliateId String                @map("affiliate_id")
+  affiliate   Affiliate             @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  amountCents Int                   @map("amount_cents")
+  note        String                @default("")
+  // Quem registrou (admin).
+  createdById String                @map("created_by_id")
+  createdBy   User                  @relation("AffiliatePayoutCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime              @default(now()) @map("created_at")
+  items       AffiliatePayoutItem[]
+
+  @@index([affiliateId, createdAt])
+  @@map("affiliate_payouts")
+}
+
+// Cada cobrança paga que entrou num pagamento de comissão — no máximo UMA vez (chave única).
+model AffiliatePayoutItem {
+  payoutId    String          @map("payout_id")
+  payout      AffiliatePayout @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+  paymentId   String          @unique @map("payment_id")
+  payment     Payment         @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  amountCents Int             @map("amount_cents")
+
+  @@id([payoutId, paymentId])
+  @@map("affiliate_payout_items")
+}
+
+// Situação de um concurso (página de edital).
+enum ExamNoticeStatus {
+  EXPECTED // previsto (edital ainda não saiu)
+  OPEN // inscrições abertas
+  CLOSED // inscrições encerradas, prova por vir
+  DONE // prova já aplicada
+}
+
+// Página de um concurso/edital (landing page): /concursos/<slug>.
+model ExamNotice {
+  id                 String              @id @default(cuid())
+  slug               String              @unique
+  // Ex.: "Banco do Brasil 2026 — Escriturário".
+  title              String
+  // Órgão (ex.: "Banco do Brasil") e cargo (ex.: "Escriturário — Agente Comercial").
+  organization       String
+  role               String              @default("")
+  // Banca (Fase 5): liga ao mapa "o que mais cai" e às questões dela.
+  boardId            String?             @map("board_id")
+  board              Board?              @relation(fields: [boardId], references: [id], onDelete: SetNull)
+  status             ExamNoticeStatus    @default(EXPECTED)
+  registrationEndsOn DateTime?           @map("registration_ends_on") @db.Date
+  examDate           DateTime?           @map("exam_date") @db.Date
+  // Textos livres (ex.: "6.000 + cadastro reserva", "R$ 3.622,23").
+  vacancies          String              @default("")
+  salary             String              @default("")
+  // Resumo (lista de concursos e descrição para o Google) e texto da página (Markdown simples).
+  summary            String              @default("")
+  body               String              @default("")
+  // Link do edital oficial (só https).
+  officialUrl        String?             @map("official_url")
+  // O que oferecer na página: um produto e/ou um plano, com um cupom opcional já aplicado.
+  productId          String?             @map("product_id")
+  product            Product?            @relation(fields: [productId], references: [id], onDelete: SetNull)
+  planId             String?             @map("plan_id")
+  plan               Plan?               @relation(fields: [planId], references: [id], onDelete: SetNull)
+  couponCode         String?             @map("coupon_code")
+  isPublished        Boolean             @default(false) @map("is_published")
+  publishedAt        DateTime?           @map("published_at")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  // Assuntos de TI cobrados neste edital ("o que estudar" + atalho para as questões).
+  subjects           ExamNoticeSubject[]
+
+  @@index([isPublished, examDate])
+  @@map("exam_notices")
+}
+
+model ExamNoticeSubject {
+  noticeId  String     @map("notice_id")
+  notice    ExamNotice @relation(fields: [noticeId], references: [id], onDelete: Cascade)
+  subjectId String     @map("subject_id")
+  subject   Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@id([noticeId, subjectId])
+  @@map("exam_notice_subjects")
+}
+
+// Post do blog: /blog/<slug>. Texto em Markdown simples (sem HTML).
+model BlogPost {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  title       String
+  // Resumo (lista do blog e descrição para o Google).
+  excerpt     String    @default("")
+  body        String
+  // Autor (professor/admin). Se a conta for apagada, o post fica sem autor.
+  authorId    String?   @map("author_id")
+  author      User?     @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  // Assunto (Fase 5) do post: atalho "treine questões deste assunto" no fim do texto.
+  subjectId   String?   @map("subject_id")
+  subject     Subject?  @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  isPublished Boolean   @default(false) @map("is_published")
+  // Data de publicação (a primeira vez que foi publicado; aparece no post e ordena a lista).
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([isPublished, publishedAt])
+  @@map("blog_posts")
+}
+
+// O que tem endereço público que pode mudar (e o endereço antigo precisa redirecionar).
+enum SlugRedirectKind {
+  COURSE
+  LESSON
+  BLOG_POST
+  EXAM_NOTICE
+}
+
+// Endereço antigo → item atual. Quando o slug de um curso/aula/post/edital muda, o endereço antigo
+// continua funcionando (redireciona para o novo) — links compartilhados e o Google não quebram.
+model SlugRedirect {
+  id        String           @id @default(cuid())
+  kind      SlugRedirectKind
+  // Onde o slug é único: aula = ID do curso; os demais = "" (únicos no site todo).
+  scope     String           @default("")
+  oldSlug   String           @map("old_slug")
+  // ID do curso/aula/post/edital (sem chave estrangeira: aponta para tabelas diferentes).
+  targetId  String           @map("target_id")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@unique([kind, scope, oldSlug])
+  @@map("slug_redirects")
 }
