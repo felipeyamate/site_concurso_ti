@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { CsvError, detectDelimiter, normalizeHeader, parseCsv } from "./csv";
+import { CsvError, decodeCsvBytes, detectDelimiter, normalizeHeader, parseCsv } from "./csv";
 
 describe("detectDelimiter", () => {
   it("Excel em português usa ';'; em inglês, ','", () => {
@@ -50,5 +50,25 @@ describe("normalizeHeader", () => {
   it("sem acento, minúsculas e sem espaços nas pontas", () => {
     expect(normalizeHeader(" Comentário ")).toBe("comentario");
     expect(normalizeHeader("Código")).toBe("codigo");
+  });
+});
+
+describe("decodeCsvBytes", () => {
+  const text = "tipo;enunciado\nMúltipla escolha;Ação “segura”";
+
+  it("UTF-8 (com ou sem BOM) sai igual", () => {
+    const utf8 = new TextEncoder().encode(text);
+    expect(decodeCsvBytes(utf8)).toBe(text);
+    expect(decodeCsvBytes(new Uint8Array([0xef, 0xbb, 0xbf, ...utf8]))).toBe(text);
+  });
+
+  it("Windows-1252 (o 'CSV separado por ponto e vírgula' do Excel em português) também", () => {
+    // Em Windows-1252: ú = 0xFA, ç = 0xE7, ã = 0xE3, aspas curvas = 0x93 e 0x94.
+    const bytes: number[] = [];
+    for (const char of text) {
+      const special: Record<string, number> = { "ú": 0xfa, "ç": 0xe7, "ã": 0xe3, "“": 0x93, "”": 0x94 };
+      bytes.push(special[char] ?? char.charCodeAt(0));
+    }
+    expect(decodeCsvBytes(new Uint8Array(bytes))).toBe(text);
   });
 });

@@ -17,6 +17,7 @@ import {
   deleteBoard,
   deleteQuestion,
   deleteSubject,
+  getQuestionBankOverview,
   getQuestionForAdmin,
   importQuestionsFromCsv,
   saveExam,
@@ -24,7 +25,14 @@ import {
 } from "@/modules/questions/admin/questions-admin.server";
 import { IMPORT_TEMPLATE_CSV } from "@/modules/questions/import-questions";
 import { getIncidenceMap } from "@/modules/questions/incidence.server";
-import { createMockExam, finishMockExam, getMockExamForOwner, saveMockExamAnswer } from "@/modules/questions/mock-exams.server";
+import {
+  createMockExam,
+  finishMockExam,
+  getMockExamClock,
+  getMockExamForOwner,
+  listMyMockExams,
+  saveMockExamAnswer,
+} from "@/modules/questions/mock-exams.server";
 import { getMyPerformance } from "@/modules/questions/performance.server";
 import { answerQuestion, getQuestionBankStatus, listPracticeQuestions } from "@/modules/questions/questions.server";
 import { parsePracticeFilters, questionSchema } from "@/modules/questions/schemas";
@@ -197,6 +205,59 @@ describe("responder questões", () => {
       [bank.q2.id]: "CORRECT",
     });
   });
+
+  it("questão de um simulado DELE em andamento: some da lista e não responde (o gabarito sairia antes da hora)", async () => {
+    const student = await createEnrolledStudent("q-aluno");
+    const other = await createEnrolledStudent("q-outro");
+    const { mockExamId } = await createMockExam({
+      viewer: student,
+      boardId: bank.cesgranrio.id,
+      subjectIds: [bank.security.id],
+      count: 10,
+      timeLimitMinutes: null,
+      now: T0,
+    }); // Q1 e Q2
+    const ids = async (userId: string) =>
+      (await listPracticeQuestions({ userId, filters: parsePracticeFilters({ assunto: "seguranca" }) })).questions.map((question) => question.id);
+    expect(await ids(student.id)).toEqual([]);
+    await expect(answerQuestion({ viewer: student, questionId: bank.q1.id, answer: "B", now: T0 })).rejects.toThrow(/simulado seu em andamento/);
+    // Outro aluno não é afetado; depois de finalizar, a questão volta.
+    expect((await ids(other.id)).sort()).toEqual([bank.q1.id, bank.q2.id].sort());
+    await finishMockExam({ viewer: student, mockExamId, now: at(1) });
+    expect((await ids(student.id)).sort()).toEqual([bank.q1.id, bank.q2.id].sort());
+    await expect(answerQuestion({ viewer: student, questionId: bank.q1.id, answer: "B", now: at(1) })).resolves.toMatchObject({ isCorrect: true });
+  });
+
+  it("a cota grátis conta só 'Resolver questões': respostas de simulado (de quando tinha acesso) não gastam a cota", async () => {
+    const student = await createEnrolledStudent("q-aluno");
+    const { mockExamId } = await createMockExam({ viewer: student, boardId: null, subjectIds: [], count: 10, timeLimitMinutes: null, now: T0 });
+    for (const questionId of [bank.q1.id, bank.q2.id, bank.q3.id, bank.tf.id]) {
+      await saveMockExamAnswer({ viewer: student, mockExamId, questionId, answer: questionId === bank.tf.id ? "C" : "A", now: T0 });
+    }
+    await finishMockExam({ viewer: student, mockExamId, now: T0 });
+    const course = await prisma.course.findUniqueOrThrow({ where: { slug: "teste-questoes" } });
+    await revokeEnrollment(prisma, { userId: student.id, courseId: course.id, now: at(1) });
+    expect(await getQuestionBankStatus(student, at(2))).toMatchObject({ level: "FREE", remainingFree: FREE_DAILY_ANSWERS });
+  });
+
+  it("'% dos alunos acertam': a PRIMEIRA resposta de cada aluno; repetições e professor não contam", async () => {
+    const teacher = await createUser("q-prof", "TEACHER");
+    // Um aluno repetindo 12 vezes e o professor testando: ainda é 1 aluno → sem porcentagem.
+    const repeater = await createEnrolledStudent("q-aluno-00");
+    for (let index = 0; index < 12; index += 1) {
+      await answerQuestion({ viewer: repeater, questionId: bank.q3.id, answer: index < 11 ? "B" : "A", now: T0 });
+    }
+    for (let index = 0; index < 5; index += 1) {
+      await answerQuestion({ viewer: teacher, questionId: bank.q3.id, answer: "A", now: T0 });
+    }
+    expect(await answerQuestion({ viewer: teacher, questionId: bank.q3.id, answer: "A", now: T0 })).toMatchObject({ communityPercent: null });
+    // Mais 9 alunos (10 no total): 3 acertam de primeira (o repetidor errou de primeira).
+    for (let index = 1; index <= 9; index += 1) {
+      const student = await createUser(`q-aluno-${String(index).padStart(2, "0")}`);
+      await answerQuestion({ viewer: student, questionId: bank.q3.id, answer: index <= 3 ? "A" : "B", now: T0 });
+    }
+    expect(await answerQuestion({ viewer: teacher, questionId: bank.q3.id, answer: "A", now: T0 })).toMatchObject({ communityPercent: 30 });
+  });
 });
 
 describe("simulados", () => {
@@ -288,6 +349,28 @@ describe("simulados", () => {
     const view = await getMockExamForOwner({ userId: student.id, mockExamId, now: at(2) });
     expect(view).toMatchObject({ finishedAt: null });
     expect(JSON.stringify(view)).not.toContain("SEGREDO-COMENTARIO");
+  });
+
+  it("relógio fresco (tempo restante medido agora) e a lista sempre mostra os em andamento", async () => {
+    const student = await createEnrolledStudent("q-aluno");
+    const { mockExamId } = await createMockExam({ viewer: student, boardId: null, subjectIds: [], count: 10, timeLimitMinutes: 30, now: T0 });
+    expect(await getMockExamClock({ userId: student.id, mockExamId, now: at(0.25) })).toEqual({ remainingMs: 15 * 60 * 1000, finished: false });
+    expect(await getMockExamClock({ userId: "q-outro", mockExamId, now: at(0.25) })).toBeNull();
+
+    // 51 simulados finalizados DEPOIS do aberto: o aberto continua na lista (em primeiro).
+    await prisma.mockExam.createMany({
+      data: Array.from({ length: 51 }, (_, index) => ({
+        userId: student.id,
+        title: `Antigo ${index}`,
+        questionCount: 10,
+        startedAt: at(1 + index),
+        finishedAt: at(1 + index),
+        correctCount: 0,
+      })),
+    });
+    const list = await listMyMockExams(student.id);
+    expect(list[0]).toMatchObject({ id: mockExamId, finishedAt: null });
+    expect(list).toHaveLength(51); // o aberto + os 50 finalizados mais recentes
   });
 
   it("no máximo 3 simulados em andamento", async () => {
@@ -407,6 +490,38 @@ describe("painel de questões", () => {
     release();
     await teacherSave;
     expect(await answering).toMatchObject({ isCorrect: true, correctAnswer: "D" });
+  });
+
+  it("questão salva no instante em que a prova troca de banca: fica com a banca NOVA (trava da prova)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let signalLocked!: () => void;
+    const locked = new Promise<void>((resolve) => (signalLocked = resolve));
+    // O "outro professor" no meio do `saveExam`: prova e questões já com a banca nova, ainda sem confirmar.
+    const examSave = prisma.$transaction(
+      async (tx) => {
+        await tx.exam.update({ where: { id: bank.exam.id }, data: { boardId: bank.cebraspe.id } });
+        await tx.question.updateMany({ where: { examId: bank.exam.id }, data: { boardId: bank.cebraspe.id } });
+        signalLocked();
+        await gate;
+      },
+      { timeout: 20_000 },
+    );
+    await locked;
+    const saving = saveQuestion(formFor({ examId: bank.exam.id, code: "NO-MEIO" }));
+    await new Promise((resolve) => setTimeout(resolve, 300)); // a gravação chega e espera a trava
+    release();
+    await examSave;
+    const { id } = await saving;
+    expect(await prisma.question.findUniqueOrThrow({ where: { id } })).toMatchObject({ boardId: bank.cebraspe.id });
+  });
+
+  it("visão geral: 'respostas de alunos' não conta os testes do professor", async () => {
+    const teacher = await createUser("q-prof", "TEACHER");
+    const student = await createEnrolledStudent("q-aluno");
+    await answerQuestion({ viewer: teacher, questionId: bank.q1.id, answer: "B", now: T0 });
+    await answerQuestion({ viewer: student, questionId: bank.q1.id, answer: "B", now: T0 });
+    expect(await getQuestionBankOverview()).toMatchObject({ attempts: 1 });
   });
 
   it("banca/assunto com questões não se apagam; prova que troca de banca leva as questões junto", async () => {

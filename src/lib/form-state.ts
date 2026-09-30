@@ -67,6 +67,24 @@ export function formDataToObject(formData: FormData): Record<string, string> {
 }
 
 /**
+ * Lê o formulário HTML num objeto. Diferente de `formDataToObject`, junta os campos repetidos
+ * (várias caixas marcadas com o mesmo nome, ex.: `courseIds`) numa lista.
+ */
+export function formDataWithLists(formData: FormData, listFields: string[]): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const [name, value] of formData.entries()) {
+    if (typeof value !== "string") continue;
+    if (listFields.includes(name)) {
+      values[name] = [...((values[name] as string[] | undefined) ?? []), value];
+    } else {
+      values[name] = value;
+    }
+  }
+  for (const name of listFields) values[name] ??= [];
+  return values;
+}
+
+/**
  * Converte um erro qualquer em `FormState`.
  * Erro esperado → mensagem dele (e o campo, se houver). Inesperado → log + mensagem genérica.
  */

@@ -88,7 +88,7 @@ function AnswerForm({ question, onRetry }: { question: PracticeQuestion; onRetry
           <p className={state.isCorrect ? "font-semibold text-green-700 dark:text-green-400" : "font-semibold text-red-700 dark:text-red-400"}>
             {state.isCorrect ? "Você acertou!" : `Você errou. Gabarito: ${state.correctLabel}.`}
             {state.communityPercent !== null ? (
-              <span className="text-muted-foreground ml-2 text-xs font-normal">{state.communityPercent}% dos alunos acertam esta questão.</span>
+              <span className="text-muted-foreground ml-2 text-xs font-normal">{state.communityPercent}% dos alunos acertam esta questão na primeira tentativa.</span>
             ) : null}
           </p>
           <div className="bg-muted/50 rounded-md p-3 text-sm">

@@ -19,6 +19,7 @@ import { redirect } from "next/navigation";
 import { errorState, formDataToObject, invalidState, stateFromError, successState, type FormState } from "@/lib/form-state";
 import { PERMISSION_DENIED_MESSAGE, getSessionWithRole } from "@/modules/auth/action-guards";
 
+import { decodeCsvBytes } from "../csv";
 import { IMPORT_TOO_LARGE_MESSAGE, MAX_IMPORT_BYTES } from "../import-questions";
 import { boardSchema, deleteByIdSchema, examSchema, questionSchema, subjectSchema } from "../schemas";
 import {
@@ -183,7 +184,8 @@ export async function importQuestionsAction(_previous: FormState, formData: Form
   if (file.size > MAX_IMPORT_BYTES) return errorState(IMPORT_TOO_LARGE_MESSAGE);
 
   try {
-    const outcome = await importQuestionsFromCsv(await file.text());
+    // Bytes → texto aceitando UTF-8 e o Windows-1252 do Excel em português (ver `decodeCsvBytes`).
+    const outcome = await importQuestionsFromCsv(decodeCsvBytes(await file.arrayBuffer()));
     if (!outcome.ok) {
       return errorState(
         "Nada foi importado. Corrija a planilha e envie de novo:",

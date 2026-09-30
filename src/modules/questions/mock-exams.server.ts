@@ -198,6 +198,30 @@ export async function getMockExamForOwner(input: { userId: string; mockExamId: s
 export type MockExamView = NonNullable<Awaited<ReturnType<typeof getMockExamForOwner>>>;
 
 /**
+ * O relógio do simulado, "fresco" (medido agora): quanto falta e se já foi finalizado.
+ * Por quê: a tela recebe o tempo restante quando a página é montada, mas o navegador pode mostrar
+ * a página guardada ("Voltar", cache do Next) minutos depois — com um tempo restante velho.
+ * A tela pergunta aqui ao abrir e ao voltar para a aba. Dono só (de outra pessoa = null).
+ */
+export async function getMockExamClock(input: {
+  userId: string;
+  mockExamId: string;
+  now?: Date;
+}): Promise<{ remainingMs: number | null; finished: boolean } | null> {
+  const now = input.now ?? new Date();
+  const mockExam = await prisma.mockExam.findUnique({
+    where: { id: input.mockExamId },
+    select: { userId: true, startedAt: true, timeLimitMinutes: true, finishedAt: true },
+  });
+  if (!mockExam || mockExam.userId !== input.userId) return null;
+  const deadline = mockExamDeadline(mockExam.startedAt, mockExam.timeLimitMinutes);
+  return {
+    remainingMs: deadline ? Math.max(0, deadline.getTime() - now.getTime()) : null,
+    finished: mockExam.finishedAt !== null,
+  };
+}
+
+/**
  * Salva (ou apaga, com `answer = null`) a resposta de uma questão do simulado.
  * Recusa: simulado de outra pessoa, já finalizado, sem acesso completo (ex.: reembolso depois de
  * começar o simulado), tempo esgotado (com tolerância) ou letra inválida para a questão.
@@ -289,24 +313,37 @@ export async function finishMockExam(input: { viewer: QuestionViewer; mockExamId
   });
 }
 
-/** Os simulados do aluno (mais recentes primeiro), com quantas respondeu nos em andamento. */
+// Quantos simulados FINALIZADOS a lista mostra (os em andamento aparecem sempre).
+const FINISHED_MOCK_EXAMS_LISTED = 50;
+
+const mockExamListSelect = {
+  id: true,
+  title: true,
+  questionCount: true,
+  timeLimitMinutes: true,
+  startedAt: true,
+  finishedAt: true,
+  correctCount: true,
+  _count: { select: { items: { where: { answer: { not: null } } } } },
+} as const satisfies Prisma.MockExamSelect;
+
+/**
+ * Os simulados do aluno: primeiro TODOS os em andamento (no máximo MAX_OPEN_MOCK_EXAMS), depois os
+ * finalizados mais recentes, com quantas questões ele respondeu em cada um.
+ * Por que duas consultas: um simulado aberto antigo não pode sumir da lista — ele ocupa uma das
+ * vagas de "em andamento" e o aluno precisa achá-lo para finalizar.
+ */
 export async function listMyMockExams(userId: string) {
-  const mockExams = await prisma.mockExam.findMany({
-    where: { userId },
-    orderBy: { startedAt: "desc" },
-    take: 50,
-    select: {
-      id: true,
-      title: true,
-      questionCount: true,
-      timeLimitMinutes: true,
-      startedAt: true,
-      finishedAt: true,
-      correctCount: true,
-      _count: { select: { items: { where: { answer: { not: null } } } } },
-    },
-  });
-  return mockExams.map(({ _count, ...mockExam }) => ({ ...mockExam, answeredCount: _count.items }));
+  const [open, finished] = await Promise.all([
+    prisma.mockExam.findMany({ where: { userId, finishedAt: null }, orderBy: { startedAt: "desc" }, select: mockExamListSelect }),
+    prisma.mockExam.findMany({
+      where: { userId, finishedAt: { not: null } },
+      orderBy: { startedAt: "desc" },
+      take: FINISHED_MOCK_EXAMS_LISTED,
+      select: mockExamListSelect,
+    }),
+  ]);
+  return [...open, ...finished].map(({ _count, ...mockExam }) => ({ ...mockExam, answeredCount: _count.items }));
 }
 
 /** Opções do formulário de novo simulado: bancas e assuntos com questões publicadas (e quantas). */

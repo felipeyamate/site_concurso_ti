@@ -29,16 +29,20 @@ import { answerLabel, isCorrectAnswer, isValidAnswer } from "./answers";
 import type { PracticeFilters } from "./schemas";
 
 export const PRACTICE_PAGE_SIZE = 10;
-// Com pelo menos esta quantidade de respostas, mostramos "X% dos alunos acertaram".
-const MIN_ATTEMPTS_FOR_COMMUNITY_STATS = 10;
+// Com pelo menos esta quantidade de ALUNOS diferentes, mostramos "X% dos alunos acertaram".
+const MIN_STUDENTS_FOR_COMMUNITY_STATS = 10;
 
 export type QuestionViewer = { id: string; role: unknown };
 
 type Db = Pick<Prisma.TransactionClient, "enrollment" | "questionAttempt">;
 
-/** Quantas respostas a pessoa deu hoje (dia de Brasília) — a cota grátis conta todas. */
+/**
+ * Quantas respostas a pessoa deu hoje (dia de Brasília) em "Resolver questões" — a cota grátis
+ * conta todas as de lá (inclusive as repetidas). As de simulado não entram: simulado é de quem
+ * tinha acesso completo, e não pode gastar a cota de quem perdeu o acesso depois.
+ */
 async function countAnsweredToday(db: Db, userId: string, now: Date): Promise<number> {
-  return db.questionAttempt.count({ where: { userId, answeredAt: { gte: startOfTodayInSaoPaulo(now) } } });
+  return db.questionAttempt.count({ where: { userId, source: "PRACTICE", answeredAt: { gte: startOfTodayInSaoPaulo(now) } } });
 }
 
 /** Nível de acesso ao banco de questões (ver `access.ts`). */
@@ -88,11 +92,14 @@ const practiceQuestionSelect = {
  * Questões publicadas com os filtros, paginadas (mais novas primeiro).
  * Para cada uma, diz se o aluno já respondeu e se acertou alguma vez (o selo "já respondida").
  * Filtro "que errei" = errou alguma vez e ainda não acertou.
+ * Ficam de fora as questões de um simulado DELE em andamento: respondê-las aqui mostraria o
+ * gabarito antes de ele finalizar o simulado (ver também `answerQuestion`).
  */
 export async function listPracticeQuestions(input: { userId: string; filters: PracticeFilters }) {
   const { filters, userId } = input;
   const where: Prisma.QuestionWhereInput = {
     isPublished: true,
+    mockExamItems: { none: { mockExam: { userId, finishedAt: null } } },
     ...(filters.subject ? { subject: { slug: filters.subject } } : {}),
     ...(filters.board ? { board: { slug: filters.board } } : {}),
     ...(filters.exam ? { exam: { slug: filters.exam } } : {}),
@@ -151,9 +158,10 @@ export type AnswerResult = {
  *     trocando o gabarito agora (`FOR UPDATE` no painel) e faz o painel esperar esta resposta —
  *     assim a correção nunca usa um gabarito que está sendo trocado. Vários alunos ao mesmo
  *     tempo não se bloqueiam (`FOR SHARE` só barra quem vai ALTERAR a linha).
- *  2. Nível de acesso e cota do dia (`checkAnswerPermission`).
- *  3. A resposta é uma letra válida para a questão.
- *  4. Grava a tentativa e devolve o gabarito + comentário (só agora eles saem do servidor).
+ *  2. Recusa questão que está num simulado dele em andamento (o gabarito sairia antes da hora).
+ *  3. Nível de acesso e cota do dia (`checkAnswerPermission`).
+ *  4. A resposta é uma letra válida para a questão.
+ *  5. Grava a tentativa e devolve o gabarito + comentário (só agora eles saem do servidor).
  */
 export async function answerQuestion(input: {
   viewer: QuestionViewer;
@@ -170,6 +178,14 @@ export async function answerQuestion(input: {
       select: { id: true, type: true, isPublished: true, correctAnswer: true, explanation: true, options: { select: { label: true } } },
     });
     if (!question || (!question.isPublished && !isStaff)) throw new UserFacingError("Questão não encontrada.");
+    // Questão de um simulado dele ainda em andamento: aqui sairia o gabarito antes da hora.
+    // (Criar simulado usa a mesma trava do aluno, então não há como um aparecer no meio.)
+    const inOpenMockExam = await tx.mockExamQuestion.count({
+      where: { questionId: question.id, mockExam: { userId: input.viewer.id, finishedAt: null } },
+    });
+    if (inOpenMockExam > 0) {
+      throw new UserFacingError("Esta questão está num simulado seu em andamento. Finalize o simulado para ver o gabarito.");
+    }
 
     const level = await getQuestionBankLevelFor(input.viewer, now, tx);
     const answeredToday = level === "FREE" ? await countAnsweredToday(tx, input.viewer.id, now) : 0;
@@ -190,17 +206,35 @@ export async function answerQuestion(input: {
     return { question, isCorrect, remainingFree: permission.remainingFree };
   });
 
-  // "X% dos alunos acertaram" (fora da trava: é só uma estatística).
-  const [total, correct] = await Promise.all([
-    prisma.questionAttempt.count({ where: { questionId: result.question.id } }),
-    prisma.questionAttempt.count({ where: { questionId: result.question.id, isCorrect: true } }),
-  ]);
+  const community = await firstAnswerStats(result.question.id);
   return {
     isCorrect: result.isCorrect,
     correctAnswer: result.question.correctAnswer,
     correctLabel: answerLabel(result.question.type, result.question.correctAnswer),
     explanation: result.question.explanation,
     remainingFree: result.remainingFree,
-    communityPercent: total >= MIN_ATTEMPTS_FOR_COMMUNITY_STATS ? Math.round((correct / total) * 100) : null,
+    communityPercent:
+      community.students >= MIN_STUDENTS_FOR_COMMUNITY_STATS ? Math.round((community.correct / community.students) * 100) : null,
   };
+}
+
+/**
+ * "X% dos alunos acertaram": olha a PRIMEIRA resposta de cada aluno (repetir até acertar não
+ * infla a conta, e um aluno só não "vira" 10). Quem conta como aluno: a regra de
+ * `student-history.ts`, escrita aqui em SQL (é aluno hoje ou tem/teve matrícula).
+ * Fora da trava: é só uma estatística. Paralelo em Python/pandas: `df.sort_values("answered_at")
+ * .groupby("user_id").first()` e depois a média de `is_correct`.
+ */
+async function firstAnswerStats(questionId: string): Promise<{ students: number; correct: number }> {
+  const rows = await prisma.$queryRaw<Array<{ students: number; correct: number }>>`
+    SELECT COUNT(*)::int AS students, COUNT(*) FILTER (WHERE first_answer.is_correct)::int AS correct
+    FROM (
+      SELECT DISTINCT ON (a.user_id) a.user_id, a.is_correct
+      FROM question_attempts a
+      JOIN users u ON u.id = a.user_id
+      WHERE a.question_id = ${questionId}
+        AND (u.role = 'STUDENT' OR EXISTS (SELECT 1 FROM enrollments e WHERE e.user_id = u.id))
+      ORDER BY a.user_id, a.answered_at ASC, a.id ASC
+    ) AS first_answer`;
+  return rows[0] ?? { students: 0, correct: 0 };
 }

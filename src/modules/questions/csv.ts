@@ -8,7 +8,9 @@
  *  - o Excel em português separa as colunas com ";" (em inglês, com ","): detectamos pelo cabeçalho;
  *  - enunciados têm vírgulas, aspas e quebras de linha: seguimos a regra do CSV (RFC 4180) —
  *    campo entre aspas pode ter tudo isso, e aspas dentro dele vêm dobradas ("");
- *  - o Excel às vezes põe um caractere invisível (BOM) no começo do arquivo: removemos.
+ *  - o Excel às vezes põe um caractere invisível (BOM) no começo do arquivo: removemos;
+ *  - o "CSV (separado por ponto e vírgula)" do Excel em português é gravado em Windows-1252, não
+ *    em UTF-8: `decodeCsvBytes` lê os dois.
  * Paralelo em Python: é o `csv.reader(arquivo, delimiter=";")`.
  *
  * Arquivo "puro", testado em `csv.test.ts`.
@@ -21,6 +23,21 @@ export class CsvError extends Error {
   ) {
     super(message);
     this.name = "CsvError";
+  }
+}
+
+/**
+ * Converte os bytes do arquivo em texto, em UTF-8 ou Windows-1252.
+ * Por quê: lido como UTF-8, um arquivo Windows-1252 vira "M�ltipla escolha" (cada letra acentuada
+ * estraga). Passos: tenta UTF-8 "estrito" (dá erro em byte inválido); se falhar, Windows-1252.
+ * Um arquivo UTF-8 de verdade nunca cai no segundo caso, e o BOM do UTF-8 é removido.
+ * Paralelo em Python: `try: dados.decode("utf-8") except UnicodeDecodeError: dados.decode("cp1252")`.
+ */
+export function decodeCsvBytes(bytes: ArrayBuffer | Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("windows-1252").decode(bytes);
   }
 }
 

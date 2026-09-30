@@ -31,6 +31,7 @@
 - Painel admin: toda Server Action começa com `getSessionWithRole` (`src/modules/auth/action-guards.ts`):
   TEACHER para conteúdo (cursos, aulas, vídeos, PDFs), ADMIN para usuários, perfis e matrículas.
   Formulários usam `useAdminForm` + `FormState`; erros esperados são `UserFacingError` (`src/lib/form-state.ts`).
+  Caixas marcadas repetidas (listas) no FormData: `formDataWithLists` (`src/lib/form-state.ts`).
   Exceção: o envio de PDF (3 passos, `attachment-manager.tsx`) não usa o `useAdminForm`, mas usa `FormState` + `FormStatus`.
   Lista de erros detalhados (ex.: por linha da planilha): `FormState.details`, mostrada pelo `FormStatus`.
   Server Action aceita até 1 MB por envio (padrão do Next, mantido): arquivo maior só com conferência antes de enviar.
@@ -67,7 +68,11 @@
   Responder, criar/salvar/finalizar simulado rodam com `withAdvisoryLock` (`questions:<aluno>` / `mock-exam:<id>`);
   responder também trava a questão com `FOR SHARE` (o painel usa `FOR UPDATE`). Salvar/finalizar simulado conferem o acesso.
   Questão com resposta de ALUNO (`hasStudentHistory`) não muda tipo/letras/gabarito nem se apaga (`questions-admin.server.ts`).
-  Relógio na tela: conta a partir do tempo restante medido no servidor, nunca comparando com o relógio do aparelho.
+  Relógio na tela: conta a partir do tempo restante medido no servidor, nunca comparando com o relógio do aparelho,
+  e se acerta de novo (`mockExamClockAction`) ao abrir e ao voltar para a aba (a página pode vir do cache do "Voltar").
+  Questão de simulado em andamento do aluno não aparece nem responde em "Resolver questões". "Quem é aluno" nas
+  contas: `STUDENT_USER` (`student-history.ts`). Questão de prova: banca lida com a prova travada (`lockExamsForRead`).
+  Planilha: bytes → texto só com `decodeCsvBytes` (UTF-8 ou Windows-1252 do Excel), nunca `file.text()`.
 - Componente com `"use client"` só exporta componentes: função usada também no servidor (ex.: `choicesFor`) fica num
   arquivo "puro" (senão a página quebra ao ser montada no servidor).
 - Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`

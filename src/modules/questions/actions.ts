@@ -15,11 +15,10 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { UserFacingError, formDataToObject, invalidState, stateFromError, type FormState } from "@/lib/form-state";
+import { UserFacingError, formDataToObject, formDataWithLists, invalidState, stateFromError, type FormState } from "@/lib/form-state";
 import { getSessionWithRole } from "@/modules/auth/action-guards";
-import { formDataWithLists } from "@/modules/payments/schemas";
 
-import { createMockExam, finishMockExam, saveMockExamAnswer } from "./mock-exams.server";
+import { createMockExam, finishMockExam, getMockExamClock, saveMockExamAnswer } from "./mock-exams.server";
 import { answerQuestion, type AnswerResult } from "./questions.server";
 import { answerSchema, createMockExamSchema, mockExamIdSchema, saveMockAnswerSchema } from "./schemas";
 
@@ -81,6 +80,18 @@ export async function saveMockAnswerAction(formData: FormData): Promise<{ ok: tr
     console.error("[simulados] Falha ao salvar resposta:", error);
     return { ok: false, message: "Não foi possível salvar a resposta. Tente de novo." };
   }
+}
+
+/**
+ * O relógio do simulado medido agora no servidor (a tela pergunta ao abrir e ao voltar para a aba —
+ * ver `getMockExamClock`). Só o dono; sem login ou de outra pessoa = null.
+ */
+export async function mockExamClockAction(mockExamId: string): Promise<{ remainingMs: number | null; finished: boolean } | null> {
+  const session = await getSessionWithRole("STUDENT");
+  if (!session) return null;
+  const parsed = mockExamIdSchema.safeParse({ mockExamId });
+  if (!parsed.success) return null;
+  return getMockExamClock({ userId: session.user.id, mockExamId: parsed.data.mockExamId });
 }
 
 export async function finishMockExamAction(_previous: FormState, formData: FormData): Promise<FormState> {

@@ -6,11 +6,14 @@
  * Quem chama: /simulados/[id] enquanto o simulado não foi finalizado.
  * O que faz:
  *  - cada clique numa alternativa é salvo na hora (`saveMockAnswerAction`) — fechar a aba não
- *    perde nada; um erro ao salvar aparece embaixo da questão (e a marcação volta ao que estava);
- *  - com tempo de prova, mostra o relógio; quando zera, finaliza sozinho;
+ *    perde nada; um erro ao salvar aparece embaixo da questão (e a marcação volta ao que o
+ *    servidor tem — a não ser que o aluno já tenha clicado em outra depois);
+ *  - com tempo de prova, mostra o relógio (acertado com o servidor ao abrir e ao voltar para a
+ *    aba); quando zera, finaliza sozinho;
  *  - "Finalizar" pergunta antes se ainda há questões em branco.
  * Nada de gabarito aqui: a página só manda enunciado e alternativas até o fim.
  */
+import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 
 import { FormStatus } from "@/components/admin/form-status";
@@ -19,7 +22,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { initialFormState } from "@/lib/form-state";
 
-import { finishMockExamAction, saveMockAnswerAction } from "../actions";
+import { finishMockExamAction, mockExamClockAction, saveMockAnswerAction } from "../actions";
 import { choicesFor } from "../answers";
 import { AnswerChoices } from "./answer-choices";
 import { QuestionMeta, type QuestionMetaData } from "./question-meta";
@@ -49,29 +52,62 @@ function formatRemaining(milliseconds: number): string {
 }
 
 export function MockExamRunner({ mockExamId, items, remainingMs, timeIsUp }: MockExamRunnerProps) {
+  const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string | null>>(() =>
     Object.fromEntries(items.map((item) => [item.question.id, item.answer])),
   );
+  // O que o servidor já tem de cada questão: se um salvamento falhar, a tela volta para isto.
+  const savedAnswers = useRef<Record<string, string | null>>(Object.fromEntries(items.map((item) => [item.question.id, item.answer])));
+  // Número do último envio de cada questão (um contador, não a letra: A, B e A de novo são 3 envios):
+  // a resposta de um envio antigo não desfaz um clique mais novo.
+  const sendCounter = useRef(0);
+  const lastSent = useRef<Record<string, number>>({});
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
   const [finishState, finishDispatch, finishing] = useActionState(finishMockExamAction, initialFormState);
-  // `start` e `deadlineMs` no relógio DESTE aparelho: agora + o que o servidor disse que falta.
+  // `start` e o fim do tempo no relógio DESTE aparelho: agora + o que o servidor disse que falta.
   // Só a diferença entre dois instantes do mesmo relógio importa (como `time.monotonic()` no Python).
-  const [clock] = useState(() => {
+  const [initialClock] = useState(() => {
     const start = Date.now();
     return { start, deadlineMs: remainingMs === null ? null : start + remainingMs };
   });
-  const [now, setNow] = useState(clock.start);
+  const [deadlineMs, setDeadlineMs] = useState(initialClock.deadlineMs);
+  const [now, setNow] = useState(initialClock.start);
   const [expired, setExpired] = useState(timeIsUp);
   const autoFinished = useRef(false);
 
   const answeredCount = Object.values(answers).filter((answer) => answer !== null).length;
-  const deadlineMs = clock.deadlineMs;
 
   function finish() {
     const formData = new FormData();
     formData.set("mockExamId", mockExamId);
     startTransition(() => finishDispatch(formData));
   }
+
+  // Acerta o relógio com o servidor ao abrir e ao voltar para a aba. Por quê: o navegador pode
+  // mostrar esta página guardada (botão "Voltar") com o tempo restante de minutos atrás. Se o
+  // simulado já foi finalizado (ex.: em outra aba), recarrega a página para mostrar o resultado.
+  useEffect(() => {
+    if (remainingMs === null) return;
+    let cancelled = false;
+    async function sync() {
+      const fresh = await mockExamClockAction(mockExamId);
+      if (cancelled || !fresh) return;
+      if (fresh.finished) {
+        router.refresh();
+        return;
+      }
+      if (fresh.remainingMs !== null) setDeadlineMs(Date.now() + fresh.remainingMs);
+    }
+    void sync();
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") void sync();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [mockExamId, remainingMs, router]);
 
   // Relógio: atualiza a cada segundo; quando zera, finaliza sozinho (uma vez só).
   useEffect(() => {
@@ -91,7 +127,9 @@ export function MockExamRunner({ mockExamId, items, remainingMs, timeIsUp }: Moc
   }, [deadlineMs]);
 
   function select(questionId: string, value: string) {
-    const previous = answers[questionId] ?? null;
+    sendCounter.current += 1;
+    const sendNumber = sendCounter.current;
+    lastSent.current[questionId] = sendNumber;
     setAnswers((current) => ({ ...current, [questionId]: value }));
     setSaveErrors((current) => {
       const next = { ...current };
@@ -104,10 +142,16 @@ export function MockExamRunner({ mockExamId, items, remainingMs, timeIsUp }: Moc
     formData.set("answer", value);
     startTransition(async () => {
       const result = await saveMockAnswerAction(formData);
-      if (!result.ok) {
-        setAnswers((current) => ({ ...current, [questionId]: previous }));
-        setSaveErrors((current) => ({ ...current, [questionId]: result.message }));
+      if (result.ok) {
+        savedAnswers.current[questionId] = value;
+        return;
       }
+      // Falhou: só mexe na tela se este ainda é o clique mais novo da questão (senão, um clique
+      // posterior já foi enviado e decide o que fica).
+      if (lastSent.current[questionId] !== sendNumber) return;
+      const saved = savedAnswers.current[questionId] ?? null;
+      setAnswers((current) => ({ ...current, [questionId]: saved }));
+      setSaveErrors((current) => ({ ...current, [questionId]: result.message }));
     });
   }
 

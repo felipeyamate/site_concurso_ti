@@ -212,9 +212,9 @@ atualizado.
 | 2026-09-30 | "Conferir no Asaas" que descobre um pagamento usa o **dia do pagamento** informado pelo Asaas (não a hora do clique) | O prazo de 7 dias do reembolso e o início do acesso contam do pagamento |
 | 2026-09-30 | Com um estorno em andamento na assinatura, "cancelar e estornar" de novo é recusado (e o botão some no painel); estorno de boleto pendente em assinatura aparece na visão geral e na página da assinatura | Achados da revisão: repetir o botão estornava um segundo ciclo; o estorno manual da assinatura ficava invisível |
 | 2026-09-30 | **Fase 5:** banco de questões com classificação em **banca**, **assunto** e **prova** (concurso + ano). Questão de prova herda a banca da prova; questão inédita pode ter uma banca "no estilo de". Dois tipos: **múltipla escolha** (A a E, de 2 a 5 alternativas) e **Certo/Errado** (estilo Cebraspe). Texto puro (sem imagens/formatação) nesta fase | Filtros que o aluno usa na prova ("Cesgranrio, Segurança"); o mapa de incidência precisa saber de que prova veio cada questão |
-| 2026-09-30 | Acesso ao banco de questões numa função só (`getQuestionBankLevelFor` + `checkAnswerPermission`): **qualquer matrícula ativa** (curso avulso, assinatura ou manual) ou professor/admin = **acesso completo**; conta gratuita = **10 respostas por dia** (dia de Brasília), contando as repetidas. Simulados só com acesso completo | A questão grátis atrai o aluno (como a aula grátis) sem entregar o banco inteiro; a mesma regra de "quem tem curso" da Fase 2/4 |
+| 2026-09-30 | Acesso ao banco de questões numa função só (`getQuestionBankLevelFor` + `checkAnswerPermission`): **qualquer matrícula ativa** (curso avulso, assinatura ou manual) ou professor/admin = **acesso completo**; conta gratuita = **10 respostas por dia** (dia de Brasília), contando as repetidas (*segunda revisão: só as de "Resolver questões"; as de simulado não gastam a cota*). Simulados só com acesso completo | A questão grátis atrai o aluno (como a aula grátis) sem entregar o banco inteiro; a mesma regra de "quem tem curso" da Fase 2/4 |
 | 2026-09-30 | Gabarito e comentário **nunca** vão para a página antes da resposta (na prática) ou antes de finalizar (no simulado); a cota grátis e a resposta são gravadas com uma trava por aluno | Ver o código da página não pode entregar a resposta; sem a trava, várias respostas ao mesmo tempo passavam da cota |
-| 2026-09-30 | Toda resposta fica guardada (`question_attempts`), inclusive as repetidas e as dos simulados; o desempenho conta todas. "Que errei" = errou alguma vez e **ainda não acertou**. "X% dos alunos acertaram" só aparece com 10+ respostas | Histórico completo para o desempenho por assunto; a lista "que errei" esvazia conforme o aluno aprende |
+| 2026-09-30 | Toda resposta fica guardada (`question_attempts`), inclusive as repetidas e as dos simulados; o desempenho conta todas. "Que errei" = errou alguma vez e **ainda não acertou**. "X% dos alunos acertaram" só aparece com 10+ respostas (*segunda revisão: 10+ ALUNOS, olhando a primeira resposta de cada um*) | Histórico completo para o desempenho por assunto; a lista "que errei" esvazia conforme o aluno aprende |
 | 2026-09-30 | Simulado: de 10 a 60 questões, com ou sem tempo de prova (15 min a 4 h); sorteia primeiro as questões que o aluno **nunca respondeu**; no máximo **3 em andamento**; respostas salvas a cada clique; o tempo tem **30 s de tolerância** (a última resposta a caminho do servidor); questão em branco conta como erro; ao finalizar, as respostas entram no desempenho. Sem gabarito até finalizar | Simular a prova de verdade, sem repetir sempre as mesmas questões; a tolerância evita perder a última marcação por atraso da rede |
 | 2026-09-30 | Mapa "o que mais cai" (`/o-que-mais-cai`, público): % das questões **de prova publicadas** por assunto, geral e por banca. Questões inéditas não entram | Mostrar incidência real ("o que já caiu"), que é o diferencial do produto; página pública ajuda no SEO |
 | 2026-09-30 | Histórico do aluno protegido: questão respondida (na prática ou em simulado) não se apaga (despublicar) e não muda de **tipo**, **letras** nem **gabarito** — só os textos. Banca, assunto e prova com questões não se apagam. Trocar a banca de uma prova leva junto a banca das questões dela | Mudar o gabarito depois reescreveria o "acertou/errou" que o aluno já viu; mesma regra de "nunca apagar histórico" das Fases 2–4 |
@@ -223,6 +223,8 @@ atualizado.
 | 2026-09-30 | **Revisão da Fase 5:** "histórico de aluno" numa questão = resposta ou simulado de quem é **aluno** ou tem/teve matrícula (mesma regra das aulas); o professor testando não trava a questão, e apagá-la leva junto os testes dele. Responder trava a linha da questão para leitura (`FOR SHARE`), esperando um professor que esteja trocando o gabarito naquele instante | Achados da revisão: um teste do professor impedia corrigir o gabarito; uma resposta no mesmo instante da troca era corrigida com o gabarito antigo |
 | 2026-09-30 | Salvar e finalizar um simulado conferem o acesso completo de novo: quem perdeu o acesso (reembolso, fim da assinatura) vê um aviso e o simulado fica aberto até o acesso voltar. O relógio do simulado conta a partir do tempo restante medido pelo **servidor** | Finalizar entrega o gabarito e os comentários; um relógio errado no aparelho do aluno encurtava (ou alongava) a prova |
 | 2026-09-30 | Planilha de importação com no máximo **900 KB** (conferido no navegador antes de enviar) | O Next aceita até 1 MB por envio numa Server Action; aumentar esse limite valeria para todas as ações do site |
+| 2026-09-30 | **Segunda revisão da Fase 5:** questão que está num simulado do aluno **em andamento** some de "Resolver questões" (e a resposta é recusada) até ele finalizar; a cota grátis conta só as respostas de "Resolver questões"; "X% dos alunos acertam" usa a **primeira resposta de cada aluno** (10+ alunos; professor testando não conta) | Achados da revisão: responder na prática entregava o gabarito do simulado aberto; quem perdia o acesso via a cota "gasta" pelo simulado; um aluno repetindo 10 vezes já gerava a porcentagem |
+| 2026-09-30 | Planilha aceita UTF-8 **e** Windows-1252 (o "CSV separado por ponto e vírgula" do Excel em português); gravar questão de prova trava a prova para leitura (a banca é lida com a prova travada); o relógio do simulado se acerta com o servidor ao abrir a página e ao voltar para a aba; a lista de simulados mostra sempre os em andamento | Achados da revisão: acentos viravam "�"; questão gravada durante a troca de banca da prova ficava com a banca antiga; o botão "Voltar" devolvia minutos ao relógio; simulado aberto antigo sumia da lista |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -382,8 +384,8 @@ explicando o erro do Google para contas não confirmadas.
 - Painel `/admin/questoes` (professor ou admin): lista com filtros, criar/editar/publicar/apagar questão (com a proteção
   do histórico), bancas/assuntos/provas e **importação por planilha** (com modelo para baixar).
 - Seed: 4 bancas, 6 assuntos, 3 provas fictícias e 30 questões comentadas de exemplo.
-- Testes: 285 unitários + 97 de integração; 57 cenários novos no navegador (inclusive celular de 360 px), mais 14 das
-  correções da revisão, e os das Fases 2, 3 e 4 repetidos sem regressão (36 + 48 + 55).
+- Testes: 287 unitários + 103 de integração; 57 cenários novos no navegador (inclusive celular de 360 px), mais 18 das
+  correções das revisões, e os das Fases 2, 3 e 4 repetidos sem regressão (36 + 48 + 55).
 - Os testes no navegador acharam 2 problemas, corrigidos: a tela de resultado do simulado quebrava (o servidor chamava
   uma função de um componente do navegador) e o modelo de planilha usava um assunto que não existe no seed
   (agora um teste importa o próprio modelo).
@@ -391,6 +393,10 @@ explicando o erro do Google para contas não confirmadas.
   principais: resposta no instante da troca do gabarito era corrigida com o gabarito antigo; teste do professor travava a
   questão; quem perdia o acesso ainda finalizava simulados abertos (e via os gabaritos); relógio do simulado dependia do
   relógio do aparelho; planilha acima de 1 MB dava erro genérico. Os casos principais têm testes que falham sem a correção.
+- Segunda revisão (antes do merge): mais 10 achados, todos corrigidos — os principais: responder em "Resolver questões" uma
+  questão do próprio simulado aberto entregava o gabarito; planilha do Excel em português (Windows-1252) estragava os
+  acentos; o "Voltar" do navegador devolvia minutos ao relógio do simulado; questão gravada durante a troca de banca da
+  prova ficava com a banca antiga; a cota grátis contava respostas de simulado. 5 testes novos falham sem as correções.
 
 **Como testar:** [README.md → "Como testar a Fase 5"](./README.md#6-como-testar-a-fase-5-passo-a-passo).
 
@@ -400,5 +406,6 @@ explicando o erro do Google para contas não confirmadas.
 - O aluno não tem botão para **avisar erro** numa questão, e não existe a marca de questão **anulada** pela banca.
 - O assunto da questão não aponta para a **aula** que ensina aquilo ("estude esta aula") → junto com as trilhas.
 - O mapa "o que mais cai" só fica representativo quando houver provas reais cadastradas (as do seed são fictícias).
-- Simulado em andamento que o aluno abandona fica "em andamento" (conta no limite de 3 até ele finalizar). Rever se incomodar.
+- Simulado em andamento que o aluno abandona fica "em andamento" (conta no limite de 3 até ele finalizar), e as questões dele
+  ficam fora de "Resolver questões" até lá — inclusive para quem perdeu o acesso (não finaliza até o acesso voltar). Rever se incomodar.
 - Os testes no navegador deixam alunos, respostas e simulados no banco de desenvolvimento (apague com um banco novo se incomodar).

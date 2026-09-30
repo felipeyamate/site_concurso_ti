@@ -27,18 +27,13 @@ import { findAvailableSlug } from "@/modules/catalog/admin/slug";
 import { CsvError, parseCsv } from "../csv";
 import { importCodes, parseQuestionImport, type ImportError } from "../import-questions";
 import type { QuestionFormData } from "../schemas";
+import { STUDENT_USER } from "../student-history";
 
 type Tx = Prisma.TransactionClient;
 
 export const QUESTIONS_ADMIN_PAGE_SIZE = 30;
 
 const lockQuestion = (tx: Tx, questionId: string) => tx.$executeRaw`SELECT id FROM questions WHERE id = ${questionId} FOR UPDATE`;
-
-/**
- * Quem conta como ALUNO para o histórico: é aluno hoje, ou tem (ou teve) alguma matrícula — um aluno
- * promovido a professor (ex.: monitor) continua protegido. Mesma ideia de `catalog-admin.server.ts`.
- */
-const STUDENT_USER: Prisma.UserWhereInput = { OR: [{ role: "STUDENT" }, { enrollments: { some: {} } }] };
 
 /** A questão tem histórico de ALUNO (resposta ou simulado)? Respostas de professor testando não contam. */
 async function hasStudentHistory(tx: Tx, questionId: string): Promise<boolean> {
@@ -229,11 +224,27 @@ export async function getQuestionForAdmin(questionId: string) {
   return { ...question, correctAttempts: correct, hasStudentHistory: studentHistory };
 }
 
-/** Confere assunto, banca e prova; a banca de uma questão de prova é a da prova. */
+/**
+ * Trava as provas para leitura (`FOR SHARE`) antes de usar a banca delas. Por quê: trocar a banca
+ * de uma prova (`saveExam`) atualiza a prova e depois as questões dela; uma questão gravada no meio
+ * com a banca ANTIGA ficaria de fora dessa atualização. Com a trava, ou esperamos a troca terminar
+ * (e lemos a banca nova), ou a troca espera a nossa gravação (e atualiza a questão nova também).
+ * A chave estrangeira sozinha não basta: ela só trava a "chave" da prova, e a troca de banca não
+ * mexe na chave.
+ */
+async function lockExamsForRead(tx: Tx, examIds: string[]): Promise<Map<string, string>> {
+  if (examIds.length === 0) return new Map();
+  const rows = await tx.$queryRaw<Array<{ id: string; board_id: string }>>`
+    SELECT id, board_id FROM exams WHERE id = ANY(${examIds}) FOR SHARE`;
+  return new Map(rows.map((row) => [row.id, row.board_id]));
+}
+
+/** Confere assunto, banca e prova; a banca de uma questão de prova é a da prova (lida com a prova travada). */
 async function resolveClassification(tx: Tx, data: QuestionFormData) {
   const subject = await tx.subject.findUnique({ where: { id: data.subjectId }, select: { id: true } });
   if (!subject) throw new UserFacingError("Assunto não encontrado.", { field: "subjectId" });
   if (data.examId) {
+    await lockExamsForRead(tx, [data.examId]);
     const exam = await tx.exam.findUnique({ where: { id: data.examId }, select: { id: true, boardId: true } });
     if (!exam) throw new UserFacingError("Prova não encontrada.", { field: "examId" });
     return { subjectId: subject.id, examId: exam.id, boardId: exam.boardId };
@@ -334,7 +345,7 @@ export type ImportOutcome = { ok: true; created: number } | { ok: false; errors:
  * Passos:
  *  1. Lê o CSV (`parseCsv`) e busca bancas, assuntos, provas e os códigos já usados.
  *  2. Confere todas as linhas (`parseQuestionImport`). Algum erro → devolve os erros, nada gravado.
- *  3. Grava todas numa transação (se uma falhar, nenhuma fica).
+ *  3. Grava todas numa transação (se uma falhar, nenhuma fica), com as provas travadas.
  */
 export async function importQuestionsFromCsv(csvText: string): Promise<ImportOutcome> {
   let parsed: ReturnType<typeof parseCsv>;
@@ -363,9 +374,16 @@ export async function importQuestionsFromCsv(csvText: string): Promise<ImportOut
   });
   if (!result.ok) return result;
 
+  const examIds = [...new Set(result.questions.flatMap((question) => (question.examId ? [question.examId] : [])))];
   try {
     await prisma.$transaction(
       async (tx) => {
+        // A banca de uma questão de prova é a da prova — relida AQUI, com as provas travadas
+        // (a conferência acima leu antes; uma troca de banca no meio não pode passar batido).
+        const examBoards = await lockExamsForRead(tx, examIds);
+        if (examBoards.size !== examIds.length) {
+          throw new UserFacingError("Uma prova usada na planilha acabou de ser apagada. Confira e importe de novo.");
+        }
         for (const question of result.questions) {
           await tx.question.create({
             data: {
@@ -375,7 +393,7 @@ export async function importQuestionsFromCsv(csvText: string): Promise<ImportOut
               correctAnswer: question.correctAnswer,
               explanation: question.explanation,
               subjectId: question.subjectId,
-              boardId: question.boardId,
+              boardId: question.examId ? (examBoards.get(question.examId) ?? null) : question.boardId,
               examId: question.examId,
               isPublished: false,
               options: { create: question.options },
@@ -399,7 +417,8 @@ export async function getQuestionBankOverview() {
   const [published, drafts, attempts] = await Promise.all([
     prisma.question.count({ where: { isPublished: true } }),
     prisma.question.count({ where: { isPublished: false } }),
-    prisma.questionAttempt.count(),
+    // "Respostas de alunos": os testes de professor/admin não entram (mesma regra do histórico).
+    prisma.questionAttempt.count({ where: { user: STUDENT_USER } }),
   ]);
   return { published, drafts, attempts };
 }
