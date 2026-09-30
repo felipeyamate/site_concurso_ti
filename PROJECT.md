@@ -107,6 +107,8 @@ User ──< MockExam ──< MockExamQuestion >── Question   (simulados; ao
 Coupon ──< Order/Subscription (desconto)   Affiliate ──< Order/Subscription (indicação), Affiliate ──< AffiliatePayout
 BlogPost, ExamNotice (página de concurso) ──< ExamNoticeSubject >── Subject, SlugRedirect (endereços antigos)
 WebhookEvent (log de tudo que chega dos provedores)
+User ──< LegalConsent   (aceites dos Termos/Privacidade: versão, data, IP, navegador)
+User ──< AccessLog      (registro de acesso do Marco Civil: cada login, guardado por 6 meses)
 ```
 
 ### Regras de negócio que não mudam
@@ -131,7 +133,7 @@ WebhookEvent (log de tudo que chega dos provedores)
 | 4 | Checkout (Asaas), webhooks, matrículas, assinaturas, reembolso, NFS-e | ✅ concluída (ver seção 10) |
 | 5 | Banco de questões, simulados, mapa de incidência por banca | ✅ concluída (ver seção 10) |
 | 6 | Landing pages por edital, SEO, blog, cupons e afiliados | ✅ concluída (ver seção 10) |
-| 7 | Testes E2E, Sentry, LGPD, deploy de produção | ⏳ próxima |
+| 7 | Testes E2E, Sentry, LGPD, deploy de produção | ✅ concluída (ver seção 10) |
 
 **Cada fase termina com:** código funcionando + testes + instruções de como testar + este arquivo
 atualizado.
@@ -157,7 +159,7 @@ atualizado.
 | 2026-09-28 | Tabelas e colunas do banco em snake_case (`users.email_verified`) via `@map` | Facilita SQL direto no console da Neon e em ferramentas de dados |
 | 2026-09-28 | Schema da Fase 1 só com tabelas de contas; as demais entram na fase em que forem usadas | Evita tabelas sem código e retrabalho de migração |
 | 2026-09-28 | Sem `RESEND_API_KEY`: em dev os e-mails são impressos no terminal; em produção dá erro (logado) | Testar tudo localmente sem configurar e-mail, sem falhas silenciosas em produção |
-| 2026-09-28 | Migrações de produção aplicadas manualmente (`npm run db:deploy`), não no deploy automático | Evita que um deploy de preview altere o banco de produção. Reavaliar na Fase 7 |
+| 2026-09-28 | Migrações de produção aplicadas manualmente (`npm run db:deploy`), não no deploy automático (*mudou na Fase 7: automáticas só no deploy de produção — ver 2026-10-01*) | Evita que um deploy de preview altere o banco de produção. Reavaliar na Fase 7 |
 | 2026-09-28 | Testes de integração exigem banco separado (`TEST_DATABASE_URL`, ex.: branch `test` na Neon); CI no GitHub Actions com Postgres temporário | Os testes apagam dados; nunca podem rodar no banco do app |
 | 2026-09-28 | Componentes shadcn/ui copiados à mão nesta fase (estilo new-york) | O ambiente do Claude bloqueia `ui.shadcn.com`. Na sua máquina, `npx shadcn@latest add <componente>` funciona normalmente com o `components.json` |
 | 2026-09-28 | Páginas do servidor só **leem** a sessão; a renovação diária é feita pelo navegador (`SessionRefresher` nos layouts das áreas logadas) | Encontrado na revisão: renovar durante a renderização estendia o banco mas não o cookie, e o aluno era deslogado em 7 dias mesmo usando o site |
@@ -234,9 +236,21 @@ atualizado.
 | 2026-09-30 | **Blog e páginas de concurso** escritos em **Markdown** (títulos, negrito, itálico, links, listas, citações) com um leitor **nosso**: o texto vira elementos da página, nunca HTML cru; links só `https://`, `mailto:` e endereços do site. Nascem como **rascunho**; o professor vê a prévia no endereço real; a data de publicação é a da **primeira** publicação | Segurança (um texto colado não consegue rodar script) e ninguém precisa saber HTML |
 | 2026-09-30 | Página de concurso (`/concursos/<endereco>`): situação, banca, datas, vagas, texto, assuntos com "treinar questões", "o que mais cai na banca" e a oferta (produto e/ou plano) com um **cupom já aplicado** no botão — só na oferta em que o cupom **vale hoje**, com o preço final (*revisão da Fase 6*). Oferta inativa some da página. O seed tem uma página **fictícia** | Landing page por edital (seção 1, Fase B do conteúdo) reaproveitando o banco de questões e o mapa |
 | 2026-09-30 | **SEO:** endereço canônico e OpenGraph em todas as páginas públicas, `sitemap.xml`, `robots.txt` (bloqueia painel, área do aluno, checkout e `/r/`), dados estruturados (escola, site, curso, artigo, trilha) e RSS do blog. Trocar o endereço (slug) de curso, aula, post ou página de concurso grava o antigo e ele **redireciona** para o novo (permanente) | Pendência da Fase 3 resolvida; o Google não perde as páginas já indexadas |
-| 2026-09-30 | Páginas públicas continuam montadas **a cada acesso** (sem cache): o `sitemap`, o RSS e as páginas usam `connection()` | Simples e sempre atualizado; cache entra quando o movimento pedir (Fase 7) |
+| 2026-09-30 | Páginas públicas continuam montadas **a cada acesso** (sem cache): o `sitemap`, o RSS e as páginas usam `connection()` | Simples e sempre atualizado; cache entra quando o movimento pedir (*continua sem cache depois da Fase 7: ver pendências*) |
 | 2026-09-30 | **Revisão da Fase 6:** pedido **vencido** sem pagamento devolve o uso do cupom (o aguardando pagamento continua sendo uma reserva, com a mensagem "você já tem um pedido com o cupom aguardando pagamento"); a página de concurso só mostra o cupom na oferta em que ele vale hoje; o **cupom da página só o ADMIN escolhe** (o professor edita o resto e o cupom atual fica); endereço antigo de **rascunho** não redireciona para o público; editar/apagar cupom usa a **mesma trava do checkout**; "vendas indicadas" do afiliado contam só vendas pagas | Achados da revisão: um Pix esquecido travava o cupom do aluno para sempre; a página prometia desconto que o checkout recusava; o professor podia "adivinhar" cupons pela mensagem de erro; o 308 revelava o endereço novo de um rascunho; trocar o código no instante de uma compra deixava o pedido com um código que não existe mais |
 | 2026-09-30 | **Segunda revisão da Fase 6:** assinatura recém-criada (antes de a 1ª cobrança ser gravada) já reserva o cupom; produto/plano que está na lista de um cupom **não se apaga** (a lista vazia faria o cupom valer para tudo); registrar o pagamento ao afiliado confere se as comissões liberadas são **as mesmas que a página mostrava**; trocar o código de um cupom **leva junto** as páginas de concurso que o usam (e cupom usado numa página não se apaga); links do Markdown e do afiliado usam a mesma conferência do login (`safeRedirectPath`); cada página do blog tem o seu endereço canônico | Achados da revisão: dois alunos levavam o último uso de um cupom de assinatura; apagar um produto sem vendas transformava um cupom restrito em cupom para tudo; uma comissão liberada no meio-tempo era registrada como paga sem ter sido paga; a página de concurso perdia o desconto (ou passava a usar outro cupom) ao renomear o cupom; um link "/\\site" do Markdown levava para fora do site |
+| 2026-10-01 | **Fase 7 — LGPD:** Termos e Privacidade têm **versão** (`LEGAL_VERSION`); o cadastro exige marcar "Li e aceito" e cada aceite fica registrado (`legal_consents`: versão, data, IP e navegador). Quando a versão muda, toda área logada leva antes à tela de aceite (`requireSession` → `/aceitar-termos`), que depois volta para onde a pessoa ia | Prova do consentimento (art. 8º da LGPD) e aviso claro quando as regras mudam, sem bloquear quem só quer sair ou ler os textos |
+| 2026-10-01 | **Excluir a conta** = **anonimizar**: apaga logins, progresso, respostas, simulados, telefone e chave Pix (o CPF fica só se houve compra: nota fiscal); nome vira "Conta excluída" e o e-mail, um endereço inválido (o e-mail real fica livre para um cadastro novo). Pedidos, pagamentos, notas e aceites **ficam** (obrigação fiscal/legal), sem nome. Pede a frase "EXCLUIR MINHA CONTA" e login feito há **até 15 min**; bloqueada com assinatura ativa ou pagamento aguardando; professor/admin não se excluem por aqui; o admin exclui digitando o e-mail da conta. Roda com a trava do checkout (`checkout:<aluno>`) | Direito de eliminação (art. 18) sem apagar registros que a lei manda guardar; sem assinatura "fantasma" cobrando quem saiu; um celular esquecido logado não exclui a conta de ninguém |
+| 2026-10-01 | **Registro de acesso** (Marco Civil da Internet, art. 15): data, hora, IP e navegador de **cada login** (`access_logs`), gravados pelo gancho de login do Better Auth, guardados por **6 meses** (186 dias) — inclusive depois da exclusão da conta — e apagados pela limpeza diária. Uma falha ao gravar não impede o login | A lei obriga site com fins comerciais a guardar os acessos por 6 meses (e a entregar só com ordem judicial); o login (sessão) some ao sair ou ao trocar de aparelho |
+| 2026-10-01 | **Baixar meus dados**: um arquivo JSON (chaves em português) com a conta, aceites, dispositivos, matrículas, progresso, respostas, simulados, compras e afiliado — sem senha nem tokens | Direito de acesso e portabilidade (art. 18) sem trabalho manual do suporte |
+| 2026-10-01 | **Sentry** só com o DSN configurado; sem dados pessoais: sem `sendDefaultPii`, sem cookies, corpo de formulário ou parâmetros de endereço, e e-mails/CPFs apagados das mensagens. Sem gravação de tela nem medição de desempenho (por enquanto). Erros do servidor que só iam para o log (`console.error`) também viram aviso | Saber que algo quebrou sem enviar dados de alunos para fora (e sem custo de plano maior) |
+| 2026-10-01 | **PostHog** (análise de uso) só depois de o visitante clicar em "Aceitar análise" no aviso de cookies (cookie `ct_cookies`, 1 ano; "Preferências de cookies" no rodapé muda a escolha). Sem a chave, nem o aviso aparece. Sem gravação de tela e sem captura automática de cliques: só as páginas visitadas | Cookie de análise não é essencial: a LGPD pede consentimento; menos dados coletados = menos risco |
+| 2026-10-01 | **Cabeçalhos de segurança** em todas as páginas: não pode ser aberto dentro de `<iframe>` de outro site, HTTPS obrigatório (HSTS), sem "adivinhar" tipo de arquivo, endereço de origem reduzido e câmera/microfone desligados. Previews da Vercel com `noindex` e `robots.txt` bloqueando tudo | Proteção contra "clickjacking" e vazamentos simples; o Google não indexa os sites de teste |
+| 2026-10-01 | **Tarefas agendadas** (Vercel Cron, protegidas pelo `CRON_SECRET`): de hora em hora, **conferir no Asaas** as cobranças em aberto dos últimos 90 dias (até 25 por vez, cada uma no máximo 1 vez por hora); todo dia, **limpar** logins e códigos vencidos. `/api/health` para o monitor de disponibilidade | Um aviso do Asaas perdido não deixa mais o aluno sem acesso até alguém clicar em "Conferir"; o banco não acumula lixo |
+| 2026-10-01 | **Migrações automáticas só no deploy de produção** (`scripts/vercel-build.sh`: `prisma migrate deploy` antes do `next build`); previews só migram com `MIGRATE_ON_PREVIEW=true` (banco próprio por preview, integração Neon). Mudança que apaga/renomeia coluna vai em duas entregas | A migração manual deixava um intervalo com código novo e banco velho; o build só vai ao ar se a migração passar |
+| 2026-10-01 | Previews da Vercel usam o **próprio endereço** (`VERCEL_BRANCH_URL`/`VERCEL_URL`) como `BETTER_AUTH_URL` | O login em previews mandava para o site oficial |
+| 2026-10-01 | **Testes E2E** (Playwright) no repositório, contra o site em modo desenvolvimento (pagamento **simulado**), rodando no CI com o seed num banco descartável | Garante os caminhos mais importantes (cadastro, LGPD, compra, reembolso, celular) a cada PR, sem conta no Asaas |
+| 2026-10-01 | Dados da empresa nos textos legais pelas variáveis `LEGAL_*`, **obrigatórias** no site oficial; os textos atuais são **modelos** a revisar com um advogado | A LGPD exige identificar o controlador e o canal do encarregado; o site oficial não sobe com "[CNPJ]" |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -248,7 +262,8 @@ atualizado.
 - [ ] Panda Video — Fase 3
 - [ ] Cloudflare (R2) — Fase 3
 - [ ] Asaas (conta sandbox para testes; depois a de produção) — Fase 4 (código pronto, falta a conta)
-- [ ] Sentry e PostHog — Fase 7
+- [ ] Sentry (avisos de erro) e PostHog (análise, opcional) — Fase 7 (código pronto, falta a conta)
+- [ ] Monitor de disponibilidade (ex.: UptimeRobot) apontando para `/api/health` — Fase 7
 
 > Nunca colar senhas ou chaves de API no chat. Elas vão só no arquivo `.env.local`
 > (que não sobe para o GitHub) e nas variáveis de ambiente da Vercel.
@@ -276,9 +291,9 @@ Os efeitos colaterais foram tratados na própria Fase 1: aviso "Sua conta não t
 explicando o erro do Google para contas não confirmadas.
 
 **Pendências conhecidas (não bloqueiam a Fase 2):**
-- Textos definitivos de Termos e Privacidade + registro formal de consentimento (LGPD) → Fase 7.
-- Exclusão de conta pelo próprio aluno (LGPD) → Fase 7.
-- Deploys de preview da Vercel: `BETTER_AUTH_URL` aponta para um endereço fixo; login em previews exigirá ajuste → Fase 7.
+- Textos definitivos de Termos e Privacidade + registro formal de consentimento (LGPD) → Fase 7. (*Feito na Fase 7; falta a revisão de um advogado.*)
+- Exclusão de conta pelo próprio aluno (LGPD) → Fase 7. (*Feito na Fase 7.*)
+- Deploys de preview da Vercel: `BETTER_AUTH_URL` aponta para um endereço fixo; login em previews exigirá ajuste → Fase 7. (*Resolvido na Fase 7.*)
 - `npm audit` aponta alertas em dependências internas do CLI do Prisma (usado só em desenvolvimento, não vai para o site). Acompanhar atualizações do Prisma.
 
 ### Fase 2 — Catálogo, área do aluno, player e progresso (2026-09-28)
@@ -300,7 +315,7 @@ explicando o erro do Google para contas não confirmadas.
 **Pendências conhecidas (não bloqueiam a Fase 3):**
 - A conclusão olha a **posição** no vídeo, não o tempo realmente assistido (pular para o fim conclui). Rever se virar problema.
 - Progresso do player do Panda (dentro de um `<iframe>`) depende das mensagens do player deles → Fase 3.
-- Vitrine pública (`/cursos`) é montada a cada acesso; cache e SEO próprios na Fase 6. (*SEO feito na Fase 6; o cache ficou para a Fase 7.*)
+- Vitrine pública (`/cursos`) é montada a cada acesso; cache e SEO próprios na Fase 6. (*SEO feito na Fase 6; o cache continua pendente — ver a Fase 7.*)
 - A nossa marca d'água fica por cima do player e **não aparece em tela cheia**; a proteção principal será a do Panda (dentro do vídeo), na Fase 3.
 - `npm run build && npm start` na sua máquina bloqueia o vídeo de exemplo (é "produção"); para testar, use `npm run dev`.
 
@@ -332,7 +347,7 @@ explicando o erro do Google para contas não confirmadas.
 - **Conferir com uma conta real do Panda** (o ambiente do Claude não acessa o Panda): nomes exatos dos eventos do player, o comando de
   pular (`currentTime`) e a marca d'água DRM. Tudo foi feito pela documentação pública; ajustes ficam em `src/modules/video/panda/`.
 - Criar as contas do Panda e do Cloudflare R2 e cadastrar as variáveis (seção 9 e README). Configurar no Panda os domínios permitidos.
-- Um PDF enviado mas não confirmado (ex.: aba fechada no meio) fica "órfão" no R2 (invisível para alunos). Limpeza automática → Fase 7.
+- Um PDF enviado mas não confirmado (ex.: aba fechada no meio) fica "órfão" no R2 (invisível para alunos). Limpeza automática → Fase 7. (*Continua pendente: ver a Fase 7.*)
 - Trocar o endereço (slug) de um curso/aula publicado quebra links antigos; redirecionamento automático → Fase 6 (SEO). (*Resolvido na Fase 6.*)
 - O seed de exemplo sincroniza o curso de exemplo: não use o curso do seed para conteúdo real.
 
@@ -367,16 +382,16 @@ explicando o erro do Google para contas não confirmadas.
   (precisa estar cadastrado na conta), QR code do Pix, cobrança automática da assinatura no cartão e a emissão da NFS-e. Tudo foi feito
   pela documentação pública; ajustes ficam em `src/modules/payments/provider/asaas/`.
 - Criar a conta do Asaas (sandbox e depois produção), cadastrar o aviso (webhook) com o token e combinar a NFS-e com o contador (seção 9 e README).
-- Aviso perdido (o Asaas desistiu de enviar): hoje o admin usa "Conferir no Asaas" no pedido; conferência automática periódica → Fase 7.
+- Aviso perdido (o Asaas desistiu de enviar): hoje o admin usa "Conferir no Asaas" no pedido; conferência automática periódica → Fase 7. (*Feito na Fase 7: de hora em hora.*)
 - Trocar de plano (mensal ↔ anual) não é automático: o aluno cancela e assina o outro.
 - Estorno de boleto pendente não tem botão de "desistir" no painel: se o admin decidir não devolver, o acesso volta com uma
   matrícula manual. Rever se acontecer.
 - Recalcular todos os assinantes (ao mudar os cursos da assinatura) roda um aluno por vez dentro da ação do painel; com milhares
-  de assinantes, passar para uma tarefa em segundo plano → Fase 7.
+  de assinantes, passar para uma tarefa em segundo plano → Fase 7. (*Continua pendente: ver a Fase 7.*)
 - Reembolso, cancelamento e checkout seguram uma conexão do banco durante a chamada ao Asaas (até 15 s), por causa da trava. Com
-  muito movimento ao mesmo tempo, rever o tamanho do "pool" de conexões → Fase 7.
+  muito movimento ao mesmo tempo, rever o tamanho do "pool" de conexões → Fase 7. (*Continua pendente: ver a Fase 7.*)
 - Cupons de desconto e afiliados → Fase 6. (*Feito na Fase 6.*)
-- Exclusão de conta (LGPD) de quem tem compras: os registros fiscais precisam ficar (anonimizar em vez de apagar) → Fase 7.
+- Exclusão de conta (LGPD) de quem tem compras: os registros fiscais precisam ficar (anonimizar em vez de apagar) → Fase 7. (*Feito na Fase 7.*)
 - Aviso do `pg` nos testes ("client.query() when the client is already executing a query") vem de dentro do adaptador do Prisma; não
   afeta o resultado. Acompanhar atualizações do Prisma.
 - Os testes no navegador deixam pedidos simulados no banco de desenvolvimento (apague com um banco novo se incomodar).
@@ -466,3 +481,44 @@ explicando o erro do Google para contas não confirmadas.
 - Sem imagem de compartilhamento (OpenGraph) própria por página, nem imagens dentro dos posts.
 - Páginas públicas sem cache (ver decisões); o `robots.txt` é gerado no build com o `BETTER_AUTH_URL` da época.
 - Os testes no navegador deixam cupons, afiliados, posts e páginas de teste no banco de desenvolvimento.
+
+### Fase 7 — LGPD, avisos de erro, análise de uso, testes E2E e produção (2026-10-01)
+
+**Entregue:**
+- Banco: `legal_consents` (aceites) e `access_logs` (registro de acesso do Marco Civil); `users` com `legal_version` e
+  `deleted_at`; `payments` com `provider_checked_at` (migrações `privacy_production` e `access_logs`).
+- **LGPD** (`src/modules/legal`, `src/modules/privacy`): Termos de uso e Política de privacidade completos (modelos a revisar
+  com um advogado, com os dados da empresa pelas variáveis `LEGAL_*`), com versão; aceite obrigatório no cadastro e tela
+  `/aceitar-termos` quando a versão muda; **Minha conta e privacidade** (`/area-do-aluno/conta`: nome, aceites, **Baixar meus
+  dados** em JSON e **Excluir minha conta**, que anonimiza e guarda os registros fiscais); exclusão pelo painel (ADMIN).
+- **Registro de acesso** (Marco Civil): cada login guardado por 6 meses e apagado depois pela limpeza diária.
+- **Sentry** (`src/instrumentation*.ts`, `src/lib/observability`): servidor e navegador, só com o DSN, sem dados pessoais; páginas
+  "Algo deu errado" (`error.tsx`, `global-error.tsx`).
+- **PostHog** (`src/modules/analytics`): aviso de cookies e análise só depois do "Aceitar análise"; "Preferências de cookies" no rodapé.
+- **Produção:** cabeçalhos de segurança (`next.config.ts`); `/api/health`; tarefas agendadas (`vercel.json` + `/api/cron/...` com
+  `CRON_SECRET`): conferir pagamentos em aberto no Asaas de hora em hora e limpeza diária; previews com o próprio endereço e fora
+  do Google; migrações automáticas só no deploy de produção (`scripts/vercel-build.sh`); guia de publicação completo no README.
+- **Testes E2E no repositório** (`tests/e2e/`, Playwright, `npm run test:e2e`) e no CI (job `e2e`, com o seed num banco descartável).
+- Testes: 345 unitários + 142 de integração + 12 cenários E2E no repositório (cadastro com aceite, aceite de versão nova, baixar
+  dados, excluir conta, compra com Pix simulado e reembolso, cupom, páginas públicas, SEO/cabeçalhos/tarefas, questão grátis,
+  afiliado, painel fechado para alunos e celular de 360 px).
+- Os testes E2E acharam 1 problema, corrigido: um e-mail comprido (sem onde quebrar a linha) alargava a área do aluno no
+  celular; agora o e-mail quebra (`break-all`) na área do aluno, na conta e na ficha do usuário no painel.
+
+**Como testar:** [README.md → "Como testar a Fase 7"](./README.md#8-como-testar-a-fase-7-passo-a-passo).
+**Publicar:** [README.md → "Publicando o site"](./README.md#12-publicando-o-site-produção-na-vercel).
+
+**Pendências conhecidas:**
+- **Revisão jurídica** dos Termos e da Política de privacidade (os textos são modelos) e preenchimento dos dados reais (`LEGAL_*`).
+  Conferir com o advogado se o registro de acesso precisa também da **porta de origem** (IPs compartilhados de operadoras).
+- Criar as contas do Sentry (e, se quiser, PostHog) e o monitor de disponibilidade; plano **Pro** da Vercel para as tarefas de hora em hora.
+- `Content-Security-Policy` completa (lista de scripts/imagens/iframes permitidos) — hoje só `frame-ancestors`; exige testar com o
+  Panda, o Asaas, o Sentry e o PostHog de verdade.
+- Páginas públicas continuam **sem cache** (montadas a cada acesso) → ativar quando o movimento pedir.
+- PDF "órfão" (envio não confirmado) continua no R2; limpeza automática → quando o volume justificar.
+- Recalcular todos os assinantes ao mudar os cursos da assinatura roda dentro da ação do painel; com milhares de assinantes,
+  passar para uma tarefa em segundo plano.
+- Reembolso, cancelamento e checkout seguram uma conexão do banco durante a chamada ao Asaas: acompanhar o "pool" de conexões
+  da Neon com movimento real.
+- Nos testes E2E, o pagamento é sempre **simulado**; a conferência com o sandbox real do Asaas continua pendente (Fase 4).
+- Os testes E2E deixam contas `e2e-...@exemplo.com` (e produtos/cupons de teste) no banco de desenvolvimento.

@@ -10,6 +10,9 @@
  * mas ele só olha se o cookie existe (é rápido, porém não confere no banco). Toda página
  * protegida precisa chamar uma das funções abaixo.
  *
+ * Fase 7 (LGPD): quem ainda não aceitou a versão ATUAL dos Termos/Política de privacidade (entrou
+ * pelo Google/link mágico, ou os textos mudaram) é levado à tela de aceite antes de continuar.
+ *
  * Paralelo em Python/Django: `requireSession` ≈ `@login_required`;
  * `requireRole` ≈ `@user_passes_test(...)`.
  */
@@ -19,8 +22,10 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
+import { LEGAL_ACCEPT_PATH, needsLegalAcceptance } from "@/modules/legal/version";
+
 import { auth } from "./auth";
-import { loginPath } from "./redirect";
+import { RETURN_TO_PARAM, loginPath } from "./redirect";
 import { hasMinimumRole, type Role } from "./roles";
 
 /**
@@ -45,11 +50,18 @@ export const getCurrentSession = cache(async () => {
 /**
  * Exige login. Se não houver sessão válida, manda para /entrar e, depois do login,
  * traz o usuário de volta para `returnTo`.
+ * Depois, exige o aceite da versão atual dos Termos/Política: sem ele, manda para a tela de
+ * aceite (que traz de volta para `returnTo`). `allowPendingLegal: true` só nas páginas que precisam
+ * abrir mesmo sem o aceite: a própria tela de aceite e "Minha conta e privacidade" (quem não
+ * concorda com os textos novos precisa conseguir baixar os dados e excluir a conta).
  */
-export async function requireSession(returnTo: string) {
+export async function requireSession(returnTo: string, options: { allowPendingLegal?: boolean } = {}) {
   const session = await getCurrentSession();
   if (!session) {
     redirect(loginPath(returnTo));
+  }
+  if (!options.allowPendingLegal && needsLegalAcceptance(session.user.legalVersion)) {
+    redirect(`${LEGAL_ACCEPT_PATH}?${RETURN_TO_PARAM}=${encodeURIComponent(returnTo)}`);
   }
   return session;
 }

@@ -10,7 +10,6 @@ import { redirect } from "next/navigation";
 
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { isGoogleAuthEnabled } from "@/modules/auth/auth";
-import { LegalNotice } from "@/modules/auth/components/legal-notice";
 import { SignUpForm } from "@/modules/auth/components/sign-up-form";
 import { RETURN_TO_PARAM, safeRedirectPath } from "@/modules/auth/redirect";
 import { getCurrentSession } from "@/modules/auth/session";
@@ -44,7 +43,6 @@ export default async function SignUpPage({ searchParams }: PageProps<"/cadastro"
             Entrar
           </Link>
         </p>
-        <LegalNotice action="Ao criar a conta" />
       </CardFooter>
     </Card>
   );

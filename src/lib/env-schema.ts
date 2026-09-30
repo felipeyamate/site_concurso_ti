@@ -99,6 +99,34 @@ const envSchema = z
       emptyToUndefined,
       z.coerce.number({ error: "NFSE_ISS_RATE deve ser um número (ex.: 2 ou 2.5)." }).min(0).max(5).optional(),
     ),
+
+    // Fase 7 — dados da empresa nos Termos de uso e na Política de privacidade (LGPD: quem é o
+    // "controlador" dos dados e como falar com o encarregado). Obrigatórios no site oficial
+    // (VERCEL_ENV=production); em desenvolvimento aparecem textos de exemplo.
+    LEGAL_COMPANY_NAME: optionalString(),
+    // CNPJ (ou CPF, se for pessoa física), como aparece para o aluno. Ex.: 12.345.678/0001-90
+    LEGAL_COMPANY_DOCUMENT: optionalString(),
+    // E-mail para pedidos sobre dados pessoais (o "encarregado"/DPO da LGPD) e suporte.
+    LEGAL_CONTACT_EMAIL: z.preprocess(emptyToUndefined, z.email({ error: "LEGAL_CONTACT_EMAIL deve ser um e-mail." }).optional()),
+    // Endereço (opcional): cidade/UF já bastam para o foro; o endereço completo é recomendado.
+    LEGAL_ADDRESS: optionalString(),
+
+    // Fase 7 — tarefas agendadas (Vercel Cron). A Vercel manda "Authorization: Bearer <CRON_SECRET>";
+    // sem este segredo, as rotas /api/cron/... recusam tudo (ninguém de fora dispara as tarefas).
+    CRON_SECRET: z.preprocess(emptyToUndefined, z.string().min(16, "CRON_SECRET precisa ter pelo menos 16 caracteres.").optional()),
+
+    // Fase 7 — Sentry (avisos de erro). Opcional: sem o DSN, nada é enviado.
+    // O DSN não é segredo (vai para o navegador); o token de envio dos mapas de código é (SENTRY_AUTH_TOKEN, só no build).
+    NEXT_PUBLIC_SENTRY_DSN: z.preprocess(emptyToUndefined, z.url({ error: "NEXT_PUBLIC_SENTRY_DSN deve ser o endereço (DSN) do Sentry." }).optional()),
+
+    // Fase 7 — PostHog (análise de uso). Opcional: sem a chave, nada é carregado e o aviso de
+    // cookies nem aparece. Com a chave, só roda para quem ACEITAR os cookies de análise.
+    NEXT_PUBLIC_POSTHOG_KEY: optionalString(),
+    NEXT_PUBLIC_POSTHOG_HOST: z.preprocess(emptyToUndefined, z.url().default("https://us.i.posthog.com")),
+
+    // Preenchidas automaticamente pela Vercel: o endereço deste deploy e o da branch (sem "https://").
+    VERCEL_URL: optionalString(),
+    VERCEL_BRANCH_URL: optionalString(),
   })
   // Regra que envolve mais de um campo (como um `@model_validator` do pydantic):
   // não faz sentido ter só o ID do Google sem o segredo, ou vice-versa.
@@ -165,6 +193,17 @@ const envSchema = z
       }
     }
 
+    // Site oficial: os Termos e a Política de privacidade precisam dos dados reais da empresa
+    // (a LGPD exige identificar o controlador e o canal do encarregado).
+    if (values.VERCEL_ENV === "production") {
+      const legalKeys = ["LEGAL_COMPANY_NAME", "LEGAL_COMPANY_DOCUMENT", "LEGAL_CONTACT_EMAIL"] as const;
+      for (const key of legalKeys) {
+        if (!values[key]) {
+          ctx.addIssue({ code: "custom", path: [key], message: `No site oficial, preencha ${key} (aparece nos Termos e na Política de privacidade).` });
+        }
+      }
+    }
+
     // Em produção, com o Resend ligado, o remetente precisa ser de um domínio NOSSO verificado.
     // O remetente de teste "@resend.dev" só entrega para o dono da conta do Resend: os alunos
     // nunca receberiam os e-mails (e o erro só apareceria no log). Melhor barrar já no deploy.
@@ -182,6 +221,18 @@ const envSchema = z
 export type Env = z.infer<typeof envSchema>;
 
 /**
+ * Deploy de teste ("preview") da Vercel: o endereço do site é o do PRÓPRIO preview
+ * (ex.: https://site-git-minha-branch.vercel.app), não o do site oficial. Sem isso, o login
+ * num preview mandaria a pessoa para o site oficial (o cookie é do endereço configurado).
+ * A Vercel informa o endereço da branch (VERCEL_BRANCH_URL) e o do deploy (VERCEL_URL).
+ */
+function withPreviewSiteUrl(raw: Record<string, string | undefined>): Record<string, string | undefined> {
+  const host = raw.VERCEL_BRANCH_URL || raw.VERCEL_URL;
+  if (raw.VERCEL_ENV !== "preview" || !host) return raw;
+  return { ...raw, BETTER_AUTH_URL: `https://${host}` };
+}
+
+/**
  * Valida um conjunto de variáveis de ambiente.
  *
  * Passos:
@@ -191,7 +242,7 @@ export type Env = z.infer<typeof envSchema>;
  *     você corrigir tudo de uma vez no `.env.local` (ou na Vercel).
  */
 export function parseEnv(raw: Record<string, string | undefined>): Env {
-  const result = envSchema.safeParse(raw);
+  const result = envSchema.safeParse(withPreviewSiteUrl(raw));
   if (!result.success) {
     const problems = result.error.issues
       .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)

@@ -1,9 +1,12 @@
 /**
- * site-footer.tsx — Rodapé do site (concursos, blog, o que mais cai, planos e links legais).
+ * site-footer.tsx — Rodapé do site (concursos, blog, o que mais cai, planos, links legais e
+ * "Preferências de cookies" — este só quando a análise de uso está configurada).
  *
  * Quem chama: `src/app/layout.tsx`, em todas as páginas.
  */
 import Link from "next/link";
+
+import { CookiePreferencesLink } from "@/modules/analytics/components/analytics-consent";
 
 export function SiteFooter() {
   return (
@@ -29,6 +32,7 @@ export function SiteFooter() {
           <Link href="/privacidade" className="hover:underline">
             Política de privacidade
           </Link>
+          <CookiePreferencesLink />
         </nav>
       </div>
     </footer>

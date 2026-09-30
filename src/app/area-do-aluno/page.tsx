@@ -6,7 +6,8 @@
  *
  * Mostra os dados da conta, avisos (e-mail não confirmado, conta sem senha), "Meus cursos"
  * com o progresso e o botão "Continuar", o atalho para "Minhas compras" (Fase 4), os atalhos do
- * banco de questões (Fase 5) e os dispositivos conectados (limite de sessões).
+ * banco de questões (Fase 5), os dispositivos conectados (limite de sessões) e o atalho para
+ * "Minha conta e privacidade" (Fase 7, LGPD).
  */
 import "server-only";
 
@@ -69,12 +70,16 @@ export default async function StudentAreaPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Olá, {user.name}!</h1>
-          <p className="text-muted-foreground text-sm">{user.email}</p>
+          {/* break-all: um e-mail comprido não tem onde quebrar e alargaria a página no celular. */}
+          <p className="text-muted-foreground text-sm break-all">{user.email}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">{roleLabel}</Badge>
           <Button asChild variant="outline" size="sm">
             <Link href="/area-do-aluno/compras">Minhas compras</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/area-do-aluno/conta">Minha conta e privacidade</Link>
           </Button>
           {canSeeAdmin ? (
             <Button asChild variant="outline" size="sm">
@@ -90,7 +95,7 @@ export default async function StudentAreaPage() {
           <AlertTitle>Confirme seu e-mail</AlertTitle>
           <AlertDescription>
             <p>
-              Enviamos um link de confirmação para {user.email}. Confirmar garante que você
+              Enviamos um link de confirmação para <span className="break-all">{user.email}</span>. Confirmar garante que você
               receba avisos de compra e consiga recuperar a senha.
             </p>
             <ResendVerificationButton email={user.email} />

@@ -4,12 +4,13 @@ Plataforma de cursos que ensina Informática/TI para candidatos de concursos que
 área de TI**. Visão, regras de negócio, stack e roteiro estão em **[PROJECT.md](./PROJECT.md)**
 (leia primeiro).
 
-**Estado atual:** Fase 6 concluída — marketing: páginas por concurso (edital) com a oferta e o cupom já
-aplicado, blog com posts em Markdown, SEO (endereço canônico, sitemap, robots, dados estruturados, RSS e
-redirecionamento de endereços antigos), cupons de desconto e programa de afiliados (link de divulgação,
-comissão e registro de pagamento). (Fase 1: projeto, banco, login e perfis. Fase 2: catálogo, player,
-matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs. Fase 4: vendas com o Asaas — Pix, boleto,
-cartão, assinaturas, reembolso e nota fiscal. Fase 5: banco de questões, simulados e "o que mais cai".)
+**Estado atual:** Fase 7 concluída — pronto para produção: LGPD (termos e privacidade versionados, aceite
+registrado, "Baixar meus dados" e "Excluir minha conta"), avisos de erro (Sentry, sem dados pessoais), análise de uso
+(PostHog, só com o aceite dos cookies), cabeçalhos de segurança, tarefas agendadas (conferir pagamentos no Asaas e
+limpeza), testes de ponta a ponta no navegador (Playwright) e o guia de publicação (seção 12). (Fase 1: projeto,
+banco, login e perfis. Fase 2: catálogo, player, matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs.
+Fase 4: vendas com o Asaas. Fase 5: banco de questões, simulados e "o que mais cai". Fase 6: páginas de concurso,
+blog, SEO, cupons e afiliados.)
 
 ---
 
@@ -352,7 +353,72 @@ ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegad
 
 ---
 
-## 8. Comandos do dia a dia
+## 8. Como testar a Fase 7 (passo a passo)
+
+Pré-requisitos: `npm install` (dependências novas: Sentry, PostHog e Playwright), `npm run db:deploy` (migração nova
+`privacy_production`) e `npm run db:generate`; o seed aplicado (`npm run db:seed`); uma conta ADMIN.
+
+> **Contas criadas antes desta fase** não têm o aceite dos termos registrado: na primeira visita à área logada,
+> elas passam pela tela "Antes de continuar" (é o esperado — e é o que vai acontecer com qualquer aluno quando os
+> textos mudarem de versão).
+
+**LGPD: aceite dos termos**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 1 | `/cadastro`: preencha tudo **sem** marcar "Li e aceito os Termos de uso e a Política de privacidade" → Criar conta | "Para criar a conta, aceite os Termos de uso e a Política de privacidade." (a conta não é criada) |
+| 2 | Marque a caixa e crie a conta; na área do aluno, clique em **Minha conta e privacidade** | "Você já aceitou esta versão." e a lista de aceites com a data e "(no cadastro)" |
+| 3 | Com uma conta **antiga** (ou, no `npm run db:studio`, apague o `legal_version` de um usuário), abra `/area-do-aluno/compras` | Vai para "Antes de continuar" (`/aceitar-termos`). Sem marcar → "Marque para continuar."; marcando → volta para "Minhas compras" e o aceite aparece na conta como "(na tela de aceite)" |
+| 4 | `/termos` e `/privacidade` | "Versão de 1º de outubro de 2026". Os dados da empresa aparecem entre [colchetes] até você preencher as variáveis `LEGAL_*` |
+
+**LGPD: meus dados e excluir a conta**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 5 | Minha conta → troque o **nome** → Salvar | "Nome atualizado." (o topo da área do aluno muda) |
+| 6 | **Baixar meus dados** | Baixa `meus-dados-concurso-ti-AAAA-MM-DD.json`: conta, aceites, dispositivos, **registros de acesso** (cada login: data, IP e navegador — o Marco Civil manda guardar por 6 meses), matrículas, progresso, respostas, simulados, compras e afiliado. Sem senha nem tokens |
+| 7 | Com um aluno que tem **assinatura ativa** ou um **Pix aguardando** | "Ainda não dá para excluir" com o motivo (cancelar a assinatura / pagar ou esperar vencer). Conta de professor/admin também não se exclui por aqui |
+| 8 | Com uma conta que entrou há **mais de 15 minutos** | "Entre de novo para confirmar" (botão para sair e entrar de novo) |
+| 9 | Logo depois de entrar: digite `excluir` → Excluir minha conta | "Para confirmar, digite exatamente: EXCLUIR MINHA CONTA" |
+| 10 | Digite `EXCLUIR MINHA CONTA` → Excluir → confirme a janela | Volta para a página inicial com "Sua conta foi excluída". Entrar com o e-mail e a senha antigos: "E-mail ou senha incorretos". O **mesmo e-mail** pode criar uma conta nova |
+| 11 | ADMIN: `/admin/usuarios/<id>` de uma conta de aluno → **Excluir conta (LGPD)**; digite um e-mail errado, depois o certo | Errado: "O e-mail digitado não é o desta conta." Certo: a ficha mostra "Conta excluída" e o selo "Excluída em ...". As compras dela continuam em Vendas (registros fiscais), sem nome nem e-mail |
+
+**Cookies e análise de uso (PostHog)**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 12 | Sem `NEXT_PUBLIC_POSTHOG_KEY` | Nenhum aviso de cookies (não há cookies de análise) |
+| 13 | Com a chave no `.env.local` (a de um projeto grátis do PostHog), reinicie o `npm run dev` e abra o site num navegador anônimo | O aviso "Usamos cookies essenciais..." com **Só os essenciais** e **Aceitar análise**. Antes de escolher, nada do PostHog carrega (F12 → Rede) |
+| 14 | **Aceitar análise** e navegue por 2 páginas | No PostHog (Activity), as visitas aparecem. **Preferências de cookies** (rodapé) reabre o aviso; "Só os essenciais" para de enviar |
+
+**Avisos de erro (Sentry) e página de erro**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 15 | Troque a `DATABASE_URL` do `.env.local` por uma inválida (ex.: porta 5999), reinicie e abra `/cursos` | "Algo deu errado", com "Tentar de novo" e "Ir para o início" (volte a `DATABASE_URL` certa depois) |
+| 16 | Com `NEXT_PUBLIC_SENTRY_DSN` (projeto Next.js grátis no Sentry), repita o passo 15 | O erro aparece no Sentry (Issues), **sem** nome, e-mail, CPF, cookies ou o texto de formulários |
+
+**Peças de produção**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 17 | `curl -I http://localhost:3000/` | Cabeçalhos `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy: frame-ancestors 'none'`, `Strict-Transport-Security` |
+| 18 | `http://localhost:3000/api/health` | `{"status":"ok"}` (com o banco fora do ar: status 503 — é o que o monitor de disponibilidade vai olhar) |
+| 19 | Com `CRON_SECRET` no `.env.local`: `curl http://localhost:3000/api/cron/limpeza` e depois com `-H "Authorization: Bearer <CRON_SECRET>"` | Sem o segredo: `{"error":"não autorizado"}` (401). Com ele: quantos logins/códigos vencidos e registros de acesso com mais de 6 meses foram apagados |
+| 20 | Com o segredo: `curl -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/conferir-pagamentos` | `{"checked":0,"failed":0,...}` sem cobranças abertas. No modo **simulado**, cada Pix/boleto aguardando conta em `failed` (o simulador não responde a consultas, como no botão "Conferir no Asaas"); a conferência de verdade roda com o Asaas e está coberta pelos testes de integração (`operations.test.ts`) |
+
+**Testes de ponta a ponta (navegador de verdade)**
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 21 | Primeira vez: `npx playwright install chromium`. Depois: `npm run test:e2e` (com o seed aplicado; o `npm run dev` na porta 3000 pode continuar aberto) | Sobe o site na porta 3100 e roda 12 cenários (cadastro com aceite, aceite de versão nova, baixar dados, excluir conta, compra com Pix simulado + reembolso, cupom, páginas públicas, SEO e cabeçalhos, questão grátis, afiliado, painel fechado e celular de 360 px): "12 passed" |
+
+> Os testes E2E usam o banco do `.env.local` (o de desenvolvimento) e deixam contas de teste nele (e-mails
+> `e2e-...@exemplo.com`). No CI, rodam num banco descartável a cada push.
+
+---
+
+## 9. Comandos do dia a dia
 
 | Comando | Para que serve |
 |---|---|
@@ -361,7 +427,8 @@ ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegad
 | `npm run lint` | Procura problemas comuns no código |
 | `npm run typecheck` | Checa os tipos do TypeScript (como o `mypy`) |
 | `npm test` | Testes unitários (rápidos, sem banco) |
-| `npm run test:integration` | Testes com banco de verdade (ver seção 9) |
+| `npm run test:integration` | Testes com banco de verdade (ver seção 10) |
+| `npm run test:e2e` | Testes de ponta a ponta: sobe o site e clica nele com um navegador (ver seção 10) |
 | `npm run db:migrate -- --name descricao` | Depois de **alterar** `prisma/schema.prisma`: cria e aplica uma nova migração |
 | `npm run db:deploy` | Aplica migrações já existentes (primeira vez, produção) |
 | `npm run db:studio` | Abre uma interface visual para ver/editar os dados do banco |
@@ -371,7 +438,7 @@ ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegad
 
 ---
 
-## 9. Testes automáticos
+## 10. Testes automáticos
 
 - **Unitários** (`npm test`): regras puras — perfis, limite de sessões, proteção de redirecionamento,
   validação de formulários, variáveis de ambiente, e-mails, **acesso às aulas** (matrícula),
@@ -382,37 +449,51 @@ ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegad
   **banco de questões**: letras e gabarito, cota grátis do dia, sorteio e nota do simulado, desempenho por
   assunto, mapa "o que mais cai", leitura de planilha CSV e importação; e o **marketing**: regras do cupom
   (desconto, validade, limites), comissão dos afiliados (carência, estorno), o Markdown seguro do blog, os dados
-  estruturados (JSON-LD) e o RSS.
+  estruturados (JSON-LD) e o RSS; e a **Fase 7**: regras da exclusão de conta, limpeza de dados pessoais dos avisos
+  de erro (Sentry), aviso de cookies e a senha das tarefas agendadas.
 - **Integração** (`npm run test:integration`): cadastro, login, limite de sessões, seed do catálogo,
   acesso às aulas, progresso, painel de cursos (criar, reordenar, apagar com proteção), envio e
   download de PDFs, matrículas e perfis, e as vendas (compra, avisos repetidos/atrasados, reembolso,
   contestação, assinatura, concorrência e a rota do webhook) e o banco de questões (responder, cota grátis com
   respostas simultâneas, simulados, mapa, painel com a proteção do histórico, importação e o seed) e o marketing
   (compra com cupom, cupom disputado por duas compras ao mesmo tempo, venda indicada, comissão e repasse, blog,
-  páginas de concurso, redirecionamento de endereços antigos, sitemap e RSS), gravando num PostgreSQL de verdade.
+  páginas de concurso, redirecionamento de endereços antigos, sitemap e RSS) e a Fase 7 (aceite dos termos, excluir a conta
+  com compras guardadas, baixar os dados, conferência automática de pagamentos e limpeza), gravando num PostgreSQL de verdade.
   Os pagamentos nos testes são sempre SIMULADOS (a chave do Asaas é ignorada). **Os testes apagam os dados do banco que usam**, por isso exigem um banco
   SEPARADO na variável `TEST_DATABASE_URL`:
   1. Na Neon, crie uma branch chamada `test` (Branches → New branch).
   2. Copie a string de conexão **direta** dessa branch.
   3. Adicione ao `.env.local`: `TEST_DATABASE_URL="postgresql://..."`
   4. Rode `npm run test:integration`. (Os testes se recusam a rodar se esse banco for o mesmo da `DATABASE_URL`.)
-- **CI:** a cada push/PR, o GitHub Actions roda lint, tipos, os dois tipos de teste e o build
-  (`.github/workflows/ci.yml`), com um PostgreSQL temporário.
+- **Ponta a ponta / E2E** (`npm run test:e2e`, Playwright): sobe o site (`npm run dev`, porta 3100) e usa um navegador
+  de verdade como um aluno: cadastro com o aceite, aceite de uma versão nova dos textos, baixar os dados, excluir a conta,
+  compra com Pix simulado + reembolso, cupom, páginas públicas, SEO e cabeçalhos, questão grátis, link de afiliado, painel
+  fechado para alunos e celular de 360 px. Usa o banco do `.env.local` (com o `npm run db:seed`); na primeira vez, rode
+  `npx playwright install chromium`. Os testes ficam em `tests/e2e/`.
+- **CI:** a cada push/PR, o GitHub Actions roda lint, tipos, os testes unitários e de integração e o build e, em paralelo,
+  os testes E2E com o conteúdo de exemplo (`.github/workflows/ci.yml`), cada um com um PostgreSQL temporário. Se o E2E
+  falhar, o relatório com fotos da tela fica para baixar na página do CI (Summary → Artifacts → `playwright-report`).
 
 ---
 
-## 10. Onde fica cada coisa
+## 11. Onde fica cada coisa
 
 ```
 prisma/
   schema.prisma          Tabelas do banco (como os models.py do Django/SQLAlchemy)
   migrations/            Histórico de alterações do banco (SQL gerado pelo Prisma)
   seed.ts, seed-catalog.ts, seed-questions.ts, seed-marketing.ts  Curso, questões, posts e concurso de EXEMPLO (npm run db:seed)
-scripts/                 set-role.ts (perfil) e enroll.ts (matrícula)
+scripts/                 set-role.ts (perfil), enroll.ts (matrícula) e vercel-build.sh (build da Vercel: migra o banco em produção)
+vercel.json              Comando de build e tarefas agendadas (Vercel Cron)
+playwright.config.ts     Testes E2E (sobe o site e abre o navegador)
 src/
   app/                   Páginas e rotas (cada pasta = um endereço do site)
     (auth)/              /entrar, /cadastro, /esqueci-senha, /redefinir-senha
-    area-do-aluno/       Área do aluno: meus cursos, dispositivos, compras/, pagamentos/[id], desempenho/ e afiliado/ (exige login)
+    area-do-aluno/       Área do aluno: meus cursos, dispositivos, compras/, pagamentos/[id], desempenho/, afiliado/ e
+                         conta/ (nome, aceites, baixar meus dados, excluir a conta) (exige login)
+    aceitar-termos/      Tela de aceite quando os Termos/Privacidade mudam de versão
+    termos/, privacidade/  Textos legais (versão em modules/legal/version.ts)
+    error.tsx, global-error.tsx  Páginas "Algo deu errado" (avisam o Sentry)
     blog/, concursos/    Blog (posts e rss.xml) e páginas por concurso/edital (públicos)
     r/[codigo]/          Link de divulgação do afiliado (conta o clique, guarda o cookie e redireciona)
     sitemap.ts, robots.ts  Mapa do site e regras para o Google
@@ -426,9 +507,12 @@ src/
     api/auth/[...all]/   API de autenticação (/api/auth/*)
     api/dev-storage/     Envio/download de PDFs SEM o R2 (só desenvolvimento)
     api/webhooks/asaas/  Onde o Asaas avisa os pagamentos (confere o token)
+    api/cron/            Tarefas agendadas: conferir-pagamentos/ (de hora em hora) e limpeza/ (diária), com CRON_SECRET
+    api/health/          Saúde do site (para o monitor de disponibilidade)
   components/ui/         Componentes visuais (shadcn/ui)
   components/admin/      Peças comuns do painel (menu, botões de ação, mensagens dos formulários)
-  lib/                   Utilidades gerais: banco (db.ts), configurações (env.ts), formulários (form-state.ts), markdown/ (texto do blog)
+  lib/                   Utilidades gerais: banco (db.ts), configurações (env.ts), formulários (form-state.ts), markdown/ (texto do blog),
+                         observability/ (Sentry sem dados pessoais) e cron-auth.ts (senha das tarefas agendadas)
   modules/               Domínios do sistema ("monolito modular")
     auth/                Contas: login, perfis, sessões; perfis pelo painel (admin-*)
     catalog/             Cursos, módulos e aulas; admin/ = cadastro pelo painel
@@ -437,7 +521,7 @@ src/
     video/               Fornecedores de vídeo (exemplo e panda/) e os players
     materials/           PDFs das aulas: envio, lista, download
     payments/            Vendas: checkout, avisos do provedor, recálculo do acesso pago (access-sync),
-                         reembolsos, notas fiscais; provider/ = Asaas e o simulado; admin/ = painel de vendas
+                         reembolsos, notas fiscais, conferência automática (reconcile); provider/ = Asaas e o simulado; admin/ = painel de vendas
     questions/           Banco de questões: acesso e cota grátis (access.ts), respostas, simulados, desempenho,
                          mapa de incidência, planilha CSV; admin/ = cadastro e importação pelo painel
     coupons/             Cupons de desconto: regras (rules.ts), conferência no checkout, painel
@@ -446,21 +530,89 @@ src/
     seo/                 Endereço do site, dados estruturados (JSON-LD), RSS, sitemap e endereços antigos (redirects)
     storage/             Armazenamento de arquivos: Cloudflare R2 ou pasta local (desenvolvimento)
     email/               Envio de e-mails e modelos de texto
+    legal/               Versão dos Termos/Privacidade e dados da empresa
+    privacy/             LGPD: registro do aceite, baixar meus dados, excluir (anonimizar) a conta
+    analytics/           Aviso de cookies e PostHog (só com o aceite)
+    maintenance/         Limpeza diária (logins e códigos vencidos)
   proxy.ts               Barreira rápida das áreas protegidas
+  instrumentation.ts, instrumentation-client.ts  Liga o Sentry (servidor e navegador) quando há o DSN
   generated/prisma/      Cliente do banco GERADO pelo Prisma (não editar; fora do Git)
 tests/integration/       Testes que usam o banco de verdade
+tests/e2e/               Testes de ponta a ponta no navegador (Playwright)
 ```
 
 ---
 
-## 11. Publicando na Vercel (quando for a hora)
+## 12. Publicando o site (produção na Vercel)
 
-1. Na Vercel: **Add New → Project** e importe este repositório do GitHub.
-2. Em **Settings → Environment Variables**, cadastre as mesmas variáveis do `.env.example`,
-   com valores de produção (`BETTER_AUTH_URL` = endereço do site, `BETTER_AUTH_SECRET` novo,
-   `RESEND_API_KEY` obrigatória, `PANDA_DRM_*` obrigatórias para os vídeos tocarem, `R2_*` para os PDFs e
-   `ASAAS_*` para vender — sem a chave, as vendas ficam desligadas em produção).
-3. Antes do primeiro deploy (e sempre que houver migração nova), aplique as migrações no banco
-   de produção: `DIRECT_URL="<url direta de produção>" npm run db:deploy`.
-4. Se usar Google: cadastre `https://SEU-DOMINIO/api/auth/callback/google` como URI de
-   redirecionamento no Google Cloud Console.
+Faça na ordem; cada passo diz onde clicar. **Nunca cole chaves no chat nem no código**: elas vão só nas variáveis da Vercel.
+
+**1. Banco de produção (Neon)**
+- Na Neon, use a branch principal (`main`) como banco de produção, na região **São Paulo (aws-sa-east-1)**, a mesma das
+  funções da Vercel (passo 3) — banco e site perto um do outro deixam cada página mais rápida.
+- Guarde as duas conexões: a **pooled** (host com `-pooler`, para `DATABASE_URL`) e a **direta** (para `DIRECT_URL`).
+- Recomendado: em Settings → Backup & restore, confira o "restore window" (voltar o banco no tempo em caso de erro).
+
+**2. Projeto na Vercel**
+- **Add New → Project** e importe este repositório. O `vercel.json` já traz o comando de build e as tarefas agendadas.
+- **Settings → Functions → Function Region**: São Paulo (`gru1`).
+- As tarefas agendadas rodam **de hora em hora** (conferir pagamentos): isso exige o plano **Pro** da Vercel (o Hobby
+  só permite uma vez por dia e não é para uso comercial).
+
+**3. Variáveis de ambiente** (Settings → Environment Variables; marque **Production**)
+
+| Variável | Valor |
+|---|---|
+| `DATABASE_URL` / `DIRECT_URL` | As do passo 1. `DIRECT_URL` **só** em Production (ela é usada para migrar o banco) |
+| `BETTER_AUTH_URL` | O endereço oficial, ex.: `https://www.seudominio.com.br` (sem barra no fim) |
+| `BETTER_AUTH_SECRET` | Um valor NOVO: `openssl rand -base64 32` |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Obrigatórias. O remetente precisa ser do seu domínio verificado no Resend (Domains) |
+| `LEGAL_COMPANY_NAME`, `LEGAL_COMPANY_DOCUMENT`, `LEGAL_CONTACT_EMAIL` (e `LEGAL_ADDRESS`) | Obrigatórias: aparecem nos Termos e na Política de privacidade |
+| `CRON_SECRET` | `openssl rand -hex 32` (a Vercel usa sozinha nas tarefas agendadas) |
+| `PANDA_API_KEY`, `PANDA_DRM_GROUP_ID`, `PANDA_DRM_SECRET` | Sem o DRM, as aulas do Panda não tocam em produção |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Para os PDFs |
+| `ASAAS_API_KEY`, `ASAAS_ENVIRONMENT=production`, `ASAAS_WEBHOOK_TOKEN` | Para vender (com a chave do sandbox, as vendas ficam desligadas) |
+| `NFSE_*` | Só depois de combinar com o contador |
+| `NEXT_PUBLIC_SENTRY_DSN` (+ `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`) | Avisos de erro (recomendado) |
+| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | Análise de uso (opcional) |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Login com Google (opcional) |
+
+Se faltar alguma obrigatória, o deploy mostra no log **qual** é (a validação fica em `src/lib/env-schema.ts`).
+
+**4. Migrações do banco (automáticas)**
+- A cada deploy de **produção**, o `scripts/vercel-build.sh` aplica as migrações novas (`prisma migrate deploy`) **antes** de
+  montar o site: a Vercel só coloca a versão nova no ar se o build terminar. Se a migração falhar, o site continua na versão anterior.
+- Deploys de teste (**preview**, um por PR) **nunca** migram o banco de produção. Para que eles funcionem com as tabelas novas,
+  instale a integração **Neon** na Vercel (Integrations → Neon, opção "create a branch for each preview deployment") e cadastre
+  `MIGRATE_ON_PREVIEW=true` **só** em Preview: cada preview ganha um banco próprio (cópia do de produção) e migra esse banco.
+  Sem a integração, deixe `DATABASE_URL` de Preview apontando para um banco de teste (nunca o de produção).
+- Mudança de banco que **apaga ou renomeia** coluna/tabela: faça em duas entregas (primeiro o código para de usar; depois,
+  noutro deploy, a migração apaga), senão a versão antiga do site, ainda no ar durante o build, quebra.
+
+**5. Primeiro deploy e domínio**
+- **Deployments → Redeploy** (ou um push na `main`). Depois, em **Settings → Domains**, adicione o seu domínio e siga as instruções de DNS.
+- Crie a sua conta no site e vire ADMIN: rode, na sua máquina, `DATABASE_URL="<conexão de produção>" npm run user:set-role -- seu@email.com ADMIN`.
+
+**6. Fornecedores apontando para o site oficial**
+- **Asaas** (produção): Integrações → Webhooks → endereço `https://SEU-DOMINIO/api/webhooks/asaas`, com o mesmo token do
+  `ASAAS_WEBHOOK_TOKEN`; cadastre o domínio do site na conta (retorno do cartão).
+- **Panda Video**: domínios permitidos = o seu domínio (e `*.vercel.app` se quiser vídeos nos previews).
+- **Cloudflare R2**: na política de CORS do bucket, o seu domínio (ver "Configurando o Cloudflare R2").
+- **Google** (se usar): URI de redirecionamento `https://SEU-DOMINIO/api/auth/callback/google`. (O login com Google não
+  funciona nos previews — o Google só aceita endereços cadastrados; use e-mail e senha para testar os previews.)
+- **Resend**: o domínio do remetente verificado (SPF/DKIM).
+
+**7. Monitoramento**
+- **Sentry**: crie um projeto "Next.js"; o DSN vai em `NEXT_PUBLIC_SENTRY_DSN`. Em Alerts, ligue o aviso por e-mail de erro novo.
+- **Disponibilidade**: cadastre `https://SEU-DOMINIO/api/health` num monitor gratuito (ex.: UptimeRobot, a cada 5 min).
+  Ele responde `{"status":"ok"}` com o banco no ar e erro 503 sem o banco.
+- **Tarefas agendadas**: Vercel → Settings → Cron Jobs mostra a última execução de cada uma.
+
+**8. Conferência final (em produção)**
+- [ ] `/termos` e `/privacidade` com os dados reais da empresa — e os textos **revisados por um advogado** (os atuais são modelos).
+- [ ] Criar uma conta nova (aceite dos termos), confirmar o e-mail (o e-mail chega?), sair e entrar.
+- [ ] Uma compra real de valor baixo (produto de teste de R$ 5,00, depois desative) com Pix: o acesso é liberado pelo aviso do
+      Asaas; peça o reembolso em "Minhas compras" e confira o estorno no Asaas.
+- [ ] Uma aula do Panda toca com a marca d'água (DRM) e um PDF baixa.
+- [ ] `https://SEU-DOMINIO/robots.txt` libera o site (e um preview mostra `Disallow: /`).
+- [ ] No Google Search Console, envie `https://SEU-DOMINIO/sitemap.xml`.

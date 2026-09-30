@@ -103,4 +103,34 @@ describe("parseEnv", () => {
     });
     expect(env.NFSE_ISS_RATE).toBe(2.5);
   });
+
+  it("Fase 7: site oficial exige os dados da empresa (Termos/Privacidade); fora dele, são opcionais", () => {
+    expect(parseEnv(validEnv).LEGAL_COMPANY_NAME).toBeUndefined();
+    expect(() => parseEnv({ ...validEnv, VERCEL_ENV: "production" })).toThrowError(/LEGAL_COMPANY_NAME[\s\S]*LEGAL_CONTACT_EMAIL/);
+    const official = parseEnv({
+      ...validEnv,
+      VERCEL_ENV: "production",
+      LEGAL_COMPANY_NAME: "Concurso TI Educação Ltda.",
+      LEGAL_COMPANY_DOCUMENT: "12.345.678/0001-90",
+      LEGAL_CONTACT_EMAIL: "privacidade@exemplo.com.br",
+    });
+    expect(official.LEGAL_CONTACT_EMAIL).toBe("privacidade@exemplo.com.br");
+    expect(() => parseEnv({ ...validEnv, LEGAL_CONTACT_EMAIL: "sem-arroba" })).toThrowError(/LEGAL_CONTACT_EMAIL/);
+  });
+
+  it("Fase 7: segredo das tarefas agendadas precisa ser longo; PostHog tem endereço padrão", () => {
+    expect(() => parseEnv({ ...validEnv, CRON_SECRET: "curto" })).toThrowError(/CRON_SECRET/);
+    expect(parseEnv({ ...validEnv, CRON_SECRET: "x".repeat(16) }).CRON_SECRET).toHaveLength(16);
+    expect(parseEnv(validEnv).NEXT_PUBLIC_POSTHOG_HOST).toBe("https://us.i.posthog.com");
+  });
+
+  it("Fase 7: no preview da Vercel, o endereço do site é o do próprio preview", () => {
+    const preview = parseEnv({ ...validEnv, BETTER_AUTH_URL: "https://site-oficial.com.br", VERCEL_ENV: "preview", VERCEL_BRANCH_URL: "site-git-teste.vercel.app", VERCEL_URL: "site-abc123.vercel.app" });
+    expect(preview.BETTER_AUTH_URL).toBe("https://site-git-teste.vercel.app");
+    // Sem BETTER_AUTH_URL cadastrada para os previews: usa o endereço do deploy.
+    const withoutUrl = { ...validEnv, BETTER_AUTH_URL: undefined };
+    expect(parseEnv({ ...withoutUrl, VERCEL_ENV: "preview", VERCEL_URL: "site-abc123.vercel.app" }).BETTER_AUTH_URL).toBe("https://site-abc123.vercel.app");
+    // No site oficial nada muda.
+    expect(parseEnv({ ...validEnv, VERCEL_URL: "site-abc123.vercel.app" }).BETTER_AUTH_URL).toBe("http://localhost:3000");
+  });
 });

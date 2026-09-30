@@ -23,8 +23,10 @@ export default defineConfig({
   },
   datasource: {
     // Migrações precisam de uma conexão DIRETA com o banco (sem o "pooler" da Neon),
-    // porque usam travas (locks) que o pooler não suporta. Se DIRECT_URL não existir
-    // (ex.: banco local), usamos a mesma DATABASE_URL do app.
-    url: process.env.DIRECT_URL ?? process.env.DATABASE_URL,
+    // porque usam travas (locks) que o pooler não suporta. Ordem:
+    //  - DIRECT_URL (a que você cadastra);
+    //  - DATABASE_URL_UNPOOLED (a que a integração Neon + Vercel cria sozinha nos previews);
+    //  - DATABASE_URL (banco local, onde as duas são a mesma).
+    url: process.env.DIRECT_URL || process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL,
   },
 });

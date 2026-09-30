@@ -55,6 +55,7 @@ export async function getUserForAdmin(userId: string) {
       role: true,
       emailVerified: true,
       createdAt: true,
+      deletedAt: true,
       enrollments: {
         orderBy: { createdAt: "asc" },
         select: {

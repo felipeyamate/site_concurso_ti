@@ -46,3 +46,9 @@ next-env.d.ts
 
 # PDFs enviados em desenvolvimento (armazenamento local, sem R2)
 /.data/
+
+# Playwright (testes E2E): relatórios e resultados gerados a cada execução
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

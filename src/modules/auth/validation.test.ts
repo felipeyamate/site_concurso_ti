@@ -11,6 +11,7 @@ const validSignUp = {
   email: "Maria@Exemplo.com ",
   password: "senhaForte123",
   confirmPassword: "senhaForte123",
+  acceptLegal: true,
 };
 
 describe("signUpSchema", () => {
@@ -18,6 +19,12 @@ describe("signUpSchema", () => {
     const result = signUpSchema.safeParse(validSignUp);
     expect(result.success).toBe(true);
     expect(result.data?.email).toBe("maria@exemplo.com");
+  });
+
+  it("exige o aceite dos Termos e da Política de privacidade (LGPD)", () => {
+    const result = signUpSchema.safeParse({ ...validSignUp, acceptLegal: false });
+    expect(result.success).toBe(false);
+    expect(getFieldErrors(result.error!).acceptLegal).toMatch(/aceite os Termos/);
   });
 
   it("recusa senha curta", () => {

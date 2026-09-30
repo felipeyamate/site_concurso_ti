@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "bash scripts/vercel-build.sh",
+  "crons": [
+    { "path": "/api/cron/conferir-pagamentos", "schedule": "5 * * * *" },
+    { "path": "/api/cron/limpeza", "schedule": "20 6 * * *" }
+  ]
+}
