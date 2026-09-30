@@ -116,6 +116,11 @@ export async function cancelSubscriptionAction(_previous: FormState, formData: F
       refund: parsed.data.refund,
     });
     refreshScreens();
+    if (result.cancelFailure) {
+      return errorState(
+        `O reembolso foi pedido, mas o provedor não cancelou a assinatura (${result.cancelFailure}). Clique em "Cancelar assinatura" de novo.`,
+      );
+    }
     return successState(
       result.refunded
         ? "Assinatura cancelada e reembolso pedido."

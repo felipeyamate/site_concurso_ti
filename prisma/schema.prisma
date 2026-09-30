@@ -518,34 +518,38 @@ enum PaymentStatus {
 
 // Uma cobrança no provedor: a de uma compra (ou uma parcela dela) ou um ciclo da assinatura.
 model Payment {
-  id                String              @id @default(cuid())
-  provider          PaymentProviderKind
-  providerPaymentId String              @unique @map("provider_payment_id")
-  orderId           String?             @map("order_id")
-  order             Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  subscriptionId    String?             @map("subscription_id")
-  subscription      Subscription?       @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
-  method            PaymentMethod
-  status            PaymentStatus       @default(PENDING)
+  id                      String              @id @default(cuid())
+  provider                PaymentProviderKind
+  providerPaymentId       String              @unique @map("provider_payment_id")
+  orderId                 String?             @map("order_id")
+  order                   Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  subscriptionId          String?             @map("subscription_id")
+  subscription            Subscription?       @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  method                  PaymentMethod
+  status                  PaymentStatus       @default(PENDING)
   // Status original do provedor (ex.: "RECEIVED_IN_CASH"), para conferência.
-  providerStatus    String              @map("provider_status")
-  valueCents        Int                 @map("value_cents")
+  providerStatus          String              @map("provider_status")
+  valueCents              Int                 @map("value_cents")
   // Vencimento (dia). Na assinatura, é o início do ciclo que esta cobrança paga.
-  dueDate           DateTime            @map("due_date") @db.Date
-  installmentNumber Int?                @map("installment_number")
-  paidAt            DateTime?           @map("paid_at")
+  dueDate                 DateTime            @map("due_date") @db.Date
+  installmentNumber       Int?                @map("installment_number")
+  paidAt                  DateTime?           @map("paid_at")
   // Página de pagamento do provedor (cartão) e boleto em PDF.
-  invoiceUrl        String?             @map("invoice_url")
-  bankSlipUrl       String?             @map("bank_slip_url")
+  invoiceUrl              String?             @map("invoice_url")
+  bankSlipUrl             String?             @map("bank_slip_url")
   // Pix "copia e cola" e a imagem do QR Code (PNG em base64), guardados na 1ª consulta.
-  pixPayload        String?             @map("pix_payload")
-  pixImage          String?             @map("pix_image")
+  pixPayload              String?             @map("pix_payload")
+  pixImage                String?             @map("pix_image")
   // Data do último aviso aplicado (texto do provedor, ex.: "2026-09-29 10:00:00"): um aviso mais
   // antigo que chegue atrasado não desfaz um mais novo.
-  lastEventAt       String?             @map("last_event_at")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  fiscalInvoice     FiscalInvoice?
+  lastEventAt             String?             @map("last_event_at")
+  // Estorno feito À MÃO no painel do provedor (boleto): o acesso já saiu aqui, mas o provedor ainda
+  // mostra a cobrança como paga até alguém fazer o estorno lá. Enquanto isto estiver preenchido,
+  // "paga" vinda do provedor NÃO devolve o acesso. Limpo quando o provedor mostra o estorno.
+  manualRefundRequestedAt DateTime?           @map("manual_refund_requested_at")
+  createdAt               DateTime            @default(now()) @map("created_at")
+  updatedAt               DateTime            @updatedAt @map("updated_at")
+  fiscalInvoice           FiscalInvoice?
 
   @@index([orderId])
   @@index([subscriptionId])

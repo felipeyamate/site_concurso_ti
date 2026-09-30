@@ -8,6 +8,7 @@ import {
   checkRefundEligibility,
   computeDueDate,
   deriveOrderStatus,
+  isOutdatedChargeUpdate,
   isWithinRefundWindow,
   nextCycleDueDate,
   subscriptionPeriodEnd,
@@ -89,8 +90,58 @@ describe("ciclos da assinatura", () => {
     expect(nextCycleDueDate("2026-10-01", "YEARLY")).toBe("2027-10-01");
   });
 
-  it("um ciclo pago vale até o próximo vencimento + 5 dias de tolerância (00:00 de Brasília)", () => {
-    expect(subscriptionPeriodEnd("2026-10-01", "MONTHLY").toISOString()).toBe("2026-11-06T03:00:00.000Z");
-    expect(subscriptionPeriodEnd("2026-10-01", "YEARLY").toISOString()).toBe("2027-10-06T03:00:00.000Z");
+  it("assinatura valendo: um ciclo pago vale até o fim do 5º dia depois do próximo vencimento (Brasília)", () => {
+    const active = { canceled: false };
+    // 06/11 23:59:59.999 em Brasília = 07/11 02:59:59.999 UTC → a tela mostra "até 06/11" e vale o dia todo.
+    expect(subscriptionPeriodEnd("2026-10-01", "MONTHLY", active).toISOString()).toBe("2026-11-07T02:59:59.999Z");
+    expect(subscriptionPeriodEnd("2026-10-01", "YEARLY", active).toISOString()).toBe("2027-10-07T02:59:59.999Z");
+  });
+
+  it("assinatura cancelada: sem tolerância — vale até a véspera do próximo vencimento", () => {
+    const canceled = { canceled: true };
+    expect(subscriptionPeriodEnd("2026-10-01", "MONTHLY", canceled).toISOString()).toBe("2026-11-01T02:59:59.999Z");
+    expect(subscriptionPeriodEnd("2026-01-31", "MONTHLY", canceled).toISOString()).toBe("2026-02-28T02:59:59.999Z");
+  });
+});
+
+describe("isOutdatedChargeUpdate (aviso fora de ordem)", () => {
+  const base = { lastAppliedAt: "2026-10-01 10:00:00", currentStatus: "RECEIVED" as const };
+
+  it("mais antigo que o último aplicado: atrasado; mais novo: vale", () => {
+    expect(isOutdatedChargeUpdate({ ...base, incomingAt: "2026-10-01 09:59:59", incomingStatus: "OVERDUE" })).toBe(true);
+    expect(isOutdatedChargeUpdate({ ...base, incomingAt: "2026-10-01 10:00:01", incomingStatus: "OVERDUE" })).toBe(false);
+  });
+
+  it("no mesmo segundo, vale o status mais adiantado, em qualquer ordem de chegada", () => {
+    const sameSecond = "2026-10-02 08:00:00";
+    // Chegou "estornada" primeiro; "estorno em andamento" do mesmo segundo não desfaz.
+    expect(
+      isOutdatedChargeUpdate({
+        incomingAt: sameSecond,
+        incomingStatus: "REFUND_REQUESTED",
+        lastAppliedAt: sameSecond,
+        currentStatus: "REFUNDED",
+      }),
+    ).toBe(true);
+    // Na ordem certa, "estornada" depois de "estorno em andamento" vale.
+    expect(
+      isOutdatedChargeUpdate({
+        incomingAt: sameSecond,
+        incomingStatus: "REFUNDED",
+        lastAppliedAt: sameSecond,
+        currentStatus: "REFUND_REQUESTED",
+      }),
+    ).toBe(false);
+    // "Vencida" no mesmo segundo de "paga" não desfaz o pagamento.
+    expect(
+      isOutdatedChargeUpdate({ incomingAt: sameSecond, incomingStatus: "OVERDUE", lastAppliedAt: sameSecond, currentStatus: "CONFIRMED" }),
+    ).toBe(true);
+  });
+
+  it("sem horário (conferência pelo painel, 1º registro) nunca é atrasado", () => {
+    expect(isOutdatedChargeUpdate({ ...base, incomingAt: null, incomingStatus: "PENDING" })).toBe(false);
+    expect(
+      isOutdatedChargeUpdate({ incomingAt: "2026-10-01 10:00:00", incomingStatus: "PENDING", lastAppliedAt: null, currentStatus: "PENDING" }),
+    ).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ import {
   eventTimeToDate,
   mapAsaasInvoiceStatus,
   mapAsaasPaymentStatus,
+  parseAsaasEnvelope,
   parseAsaasWebhook,
 } from "./mapping";
 
@@ -102,6 +103,15 @@ describe("parseAsaasWebhook", () => {
     expect(parseAsaasWebhook({ id: "evt_1" })).toMatchObject({ ok: false });
     expect(parseAsaasWebhook({ id: "evt_1", event: "PAYMENT_RECEIVED" })).toMatchObject({ ok: false });
     expect(parseAsaasWebhook("não é json")).toMatchObject({ ok: false });
+  });
+
+  it("o envelope (o que a rota confere antes de gravar) só exige ID e tipo", () => {
+    // Cobrança num formato inesperado: o envelope passa (o aviso é guardado); a leitura completa falha.
+    const weird = { id: "evt_2", event: "PAYMENT_RECEIVED", payment: { value: "muito" } };
+    expect(parseAsaasEnvelope(weird)).toEqual({ ok: true, eventId: "evt_2", type: "PAYMENT_RECEIVED" });
+    expect(parseAsaasWebhook(weird)).toMatchObject({ ok: false });
+    expect(parseAsaasEnvelope({ event: "PAYMENT_RECEIVED" })).toMatchObject({ ok: false });
+    expect(parseAsaasEnvelope(null)).toMatchObject({ ok: false });
   });
 
   it("nota fiscal e assinatura", () => {

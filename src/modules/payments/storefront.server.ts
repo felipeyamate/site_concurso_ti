@@ -155,7 +155,12 @@ export async function listMyPurchases(userId: string, now: Date = new Date()) {
     subscriptions: subscriptions.map((subscription) => {
       const paid = subscription.payments.filter((payment) => isPaidStatus(payment.status) && payment.paidAt);
       const period = computeSubscriptionAccess(
-        paid.map((payment) => ({ paidAt: payment.paidAt as Date, dueDate: payment.dueDate, cycle: subscription.cycle })),
+        paid.map((payment) => ({
+          paidAt: payment.paidAt as Date,
+          dueDate: payment.dueDate,
+          cycle: subscription.cycle,
+          canceled: subscription.status === "CANCELED",
+        })),
       );
       const openPayment = subscription.payments.find((payment) => payment.status === "PENDING" || payment.status === "OVERDUE");
       return {

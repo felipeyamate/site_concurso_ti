@@ -215,6 +215,11 @@ export async function adminCancelSubscriptionAction(_previous: FormState, formDa
       refund: parsed.data.refund,
     });
     refreshScreens();
+    if (result.cancelFailure) {
+      return errorState(
+        `O estorno foi pedido, mas o provedor não cancelou a assinatura (${result.cancelFailure}). Clique em "Cancelar" de novo.`,
+      );
+    }
     return successState(result.refunded ? "Assinatura cancelada e último pagamento estornado." : "Assinatura cancelada.");
   } catch (error) {
     return stateFromError(error, "cancelar assinatura");

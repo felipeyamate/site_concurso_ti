@@ -179,6 +179,21 @@ export type ParsedWebhook =
 
 export type ParseWebhookResult = { ok: true; webhook: ParsedWebhook } | { ok: false; error: string };
 
+// Só o mínimo para GUARDAR o aviso: o ID (evita processar duas vezes) e o tipo.
+const minimalEnvelopeSchema = z.object({ id: z.string().min(1).max(300), event: z.string().min(1).max(100) });
+
+/**
+ * Lê só o "envelope" do aviso (ID e tipo). É o que a rota confere ANTES de gravar: um aviso com
+ * ID e tipo é sempre guardado, mesmo que o resto venha num formato inesperado (aí o erro fica
+ * registrado no próprio aviso, para corrigir e reprocessar pelo painel). Sem ID nem tipo, não é
+ * um aviso do Asaas.
+ */
+export function parseAsaasEnvelope(body: unknown): { ok: true; eventId: string; type: string } | { ok: false; error: string } {
+  const envelope = minimalEnvelopeSchema.safeParse(body);
+  if (!envelope.success) return { ok: false, error: "Aviso sem ID ou sem tipo de evento." };
+  return { ok: true, eventId: envelope.data.id, type: envelope.data.event };
+}
+
 /**
  * Lê e confere um aviso do Asaas (o corpo JSON já convertido em objeto).
  *

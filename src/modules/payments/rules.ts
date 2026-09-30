@@ -10,7 +10,7 @@
  */
 import type { OrderStatus, PaymentMethod, PaymentStatus, PlanCycle } from "@/generated/prisma/enums";
 
-import { addDays, addMonths, startOfDayInSaoPaulo, toSaoPauloDate, type DateOnly } from "./dates";
+import { addDays, addMonths, endOfDayInSaoPaulo, toSaoPauloDate, type DateOnly } from "./dates";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -112,11 +112,51 @@ export function nextCycleDueDate(dueDate: DateOnly, cycle: PlanCycle): DateOnly 
 }
 
 /**
- * Até quando um ciclo pago da assinatura libera o acesso: o vencimento do ciclo seguinte + a
- * tolerância (ex.: ciclo de 01/10, mensal → até 06/11 00:00, com 5 dias de tolerância).
+ * Até quando um ciclo pago da assinatura libera o acesso (sempre até o FIM de um dia de Brasília,
+ * para "acesso até 06/11" na tela valer o dia 06/11 inteiro):
+ *  - assinatura valendo: até o 5º dia depois do vencimento do ciclo seguinte — a tolerância para o
+ *    próximo pagamento ser confirmado. Ex.: ciclo de 01/10, mensal → até 06/11 (fim do dia).
+ *  - assinatura CANCELADA: não há próximo pagamento para esperar, então sem tolerância — até a
+ *    véspera do vencimento seguinte. Ex.: ciclo de 01/10, mensal → até 31/10 (fim do dia).
  * O período conta a partir do VENCIMENTO (não do dia em que pagou): pagar atrasado não "empurra"
  * o calendário da assinatura.
  */
-export function subscriptionPeriodEnd(dueDate: DateOnly, cycle: PlanCycle): Date {
-  return startOfDayInSaoPaulo(addDays(nextCycleDueDate(dueDate, cycle), SUBSCRIPTION_GRACE_DAYS));
+export function subscriptionPeriodEnd(dueDate: DateOnly, cycle: PlanCycle, options: { canceled: boolean }): Date {
+  const nextDueDate = nextCycleDueDate(dueDate, cycle);
+  const lastDay = options.canceled ? addDays(nextDueDate, -1) : addDays(nextDueDate, SUBSCRIPTION_GRACE_DAYS);
+  return endOfDayInSaoPaulo(lastDay);
+}
+
+// Ordem "natural" da vida de uma cobrança. Serve só para DESEMPATAR dois avisos com o mesmo
+// horário (o Asaas manda o horário com precisão de segundos, e dois avisos podem cair no mesmo).
+const STATUS_PROGRESS: Record<PaymentStatus, number> = {
+  PENDING: 0,
+  OVERDUE: 1,
+  CONFIRMED: 2,
+  RECEIVED: 3,
+  REFUND_REQUESTED: 4,
+  CHARGEBACK: 5,
+  REFUNDED: 6,
+  CANCELED: 6,
+};
+
+/**
+ * Este aviso está ATRASADO (é mais antigo que o último já aplicado)? Se sim, é ignorado — avisos
+ * podem chegar fora de ordem, e um antigo não pode desfazer um novo (ex.: "vencida" chegando
+ * depois de "paga").
+ *
+ * Os horários vêm como texto "AAAA-MM-DD HH:mm:ss", que se compara em ordem alfabética igual à
+ * ordem do tempo. No EMPATE (mesmo segundo), vale o status mais "adiantado" na vida da cobrança:
+ * "estornada" e "estorno em andamento" no mesmo segundo → fica "estornada", em qualquer ordem
+ * de chegada. Sem horário (ex.: conferência pelo painel), nunca é considerado atrasado.
+ */
+export function isOutdatedChargeUpdate(input: {
+  incomingAt: string | null;
+  incomingStatus: PaymentStatus;
+  lastAppliedAt: string | null;
+  currentStatus: PaymentStatus;
+}): boolean {
+  if (!input.incomingAt || !input.lastAppliedAt) return false;
+  if (input.incomingAt !== input.lastAppliedAt) return input.incomingAt < input.lastAppliedAt;
+  return STATUS_PROGRESS[input.incomingStatus] < STATUS_PROGRESS[input.currentStatus];
 }

@@ -11,7 +11,8 @@
  *     assinatura/parcelamento no provedor ou pela nossa referência — e cria a cobrança.
  *     Cobrança sem dono (criada à mão no painel do Asaas) é ignorada.
  *  2. Ignora um aviso MAIS ANTIGO que o último aplicado (avisos podem chegar fora de ordem).
- *  3. Grava o novo status; recalcula a situação do pedido / ativa a assinatura.
+ *  3. Grava o novo status (exceto "paga" com estorno manual pendente — ver `manualRefundRequestedAt`);
+ *     recalcula a situação do pedido / ativa a assinatura.
  *  4. Recalcula o acesso do aluno (`syncPaidAccess`) — nunca "soma" nada direto.
  *  5. Devolve os efeitos (e-mail, nota fiscal) para rodar DEPOIS da transação.
  */
@@ -28,7 +29,7 @@ import type { PaymentEffect } from "./effects.server";
 import { PAYMENT_STATUS_LABELS } from "./labels";
 import { eventTimeToDate } from "./provider/asaas/mapping";
 import type { ProviderCharge } from "./provider/types";
-import { deriveOrderStatus, isPaidStatus, isReversedStatus } from "./rules";
+import { deriveOrderStatus, isOutdatedChargeUpdate, isPaidStatus, isReversedStatus } from "./rules";
 
 type Tx = Prisma.TransactionClient;
 
@@ -105,7 +106,13 @@ async function applyInTransaction(
       return { paymentId: payment.id, note: "Cobrança já registrada.", effects: [] };
     }
     // Aviso mais antigo que o último aplicado: não desfaz o mais novo.
-    if (input.occurredAt && payment.lastEventAt && input.occurredAt < payment.lastEventAt) {
+    const outdated = isOutdatedChargeUpdate({
+      incomingAt: input.occurredAt,
+      incomingStatus: charge.status,
+      lastAppliedAt: payment.lastEventAt,
+      currentStatus: payment.status,
+    });
+    if (outdated) {
       return { paymentId: payment.id, note: "Aviso mais antigo que o último aplicado: ignorado.", effects: [] };
     }
     previousStatus = payment.status;
@@ -140,13 +147,21 @@ async function applyInTransaction(
     }
   }
 
+  // Estorno manual pendente (boleto): o acesso já saiu, mas o provedor continua mostrando "paga"
+  // até alguém fazer o estorno no painel dele. Esse "paga" NÃO devolve o acesso (senão um
+  // "Conferir no Asaas" ou qualquer aviso da cobrança desfaria o reembolso). Quando o provedor
+  // mostra outra situação (estorno em andamento, estornada...), o controle volta a ser dele.
+  const keepManualRefund = payment.manualRefundRequestedAt !== null && isPaidStatus(charge.status);
+  const status: PaymentStatus = keepManualRefund ? "REFUND_REQUESTED" : charge.status;
+
   // Grava a nova situação. `paidAt` = quando ficou paga pela 1ª vez (hora do aviso, se houver).
-  const nowPaid = isPaidStatus(charge.status);
+  const nowPaid = isPaidStatus(status);
   const paidAt = nowPaid && !payment.paidAt ? (input.occurredAt ? eventTimeToDate(input.occurredAt) : now) : payment.paidAt;
   await tx.payment.update({
     where: { id: payment.id },
     data: {
-      status: charge.status,
+      status,
+      manualRefundRequestedAt: keepManualRefund ? payment.manualRefundRequestedAt : null,
       providerStatus: charge.providerStatus,
       valueCents: charge.valueCents > 0 ? charge.valueCents : payment.valueCents,
       ...(charge.dueDate ? { dueDate: dateOnlyToUtc(charge.dueDate) } : {}),
@@ -160,7 +175,7 @@ async function applyInTransaction(
   const effects: PaymentEffect[] = [];
   const wasPaid = isPaidStatus(previousStatus);
   if (nowPaid && !wasPaid) effects.push({ type: "SCHEDULE_INVOICE", paymentId: payment.id });
-  if (isReversedStatus(charge.status) && !isReversedStatus(previousStatus) && (wasPaid || previousPaidAt)) {
+  if (isReversedStatus(status) && !isReversedStatus(previousStatus) && (wasPaid || previousPaidAt)) {
     effects.push({ type: "CANCEL_INVOICE", paymentId: payment.id });
   }
 
@@ -192,10 +207,11 @@ async function applyInTransaction(
 
   await syncPaidAccess(tx, userId, now);
 
-  const note =
-    previousStatus === charge.status
-      ? `Cobrança ${charge.paymentId}: continua "${PAYMENT_STATUS_LABELS[charge.status]}".`
-      : `Cobrança ${charge.paymentId}: "${PAYMENT_STATUS_LABELS[previousStatus]}" → "${PAYMENT_STATUS_LABELS[charge.status]}".`;
+  const note = keepManualRefund
+    ? `Cobrança ${charge.paymentId}: o provedor ainda mostra "paga", mas há estorno manual pendente — o acesso continua retirado.`
+    : previousStatus === status
+      ? `Cobrança ${charge.paymentId}: continua "${PAYMENT_STATUS_LABELS[status]}".`
+      : `Cobrança ${charge.paymentId}: "${PAYMENT_STATUS_LABELS[previousStatus]}" → "${PAYMENT_STATUS_LABELS[status]}".`;
   return { paymentId: payment.id, note, effects };
 }
 

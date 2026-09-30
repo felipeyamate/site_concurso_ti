@@ -9,6 +9,7 @@ import {
   addMonths,
   dateOnlyToUtc,
   daysBetween,
+  endOfDayInSaoPaulo,
   formatDateOnly,
   startOfDayInSaoPaulo,
   toSaoPauloDate,
@@ -32,8 +33,11 @@ describe("conversões", () => {
     expect(formatDateOnly(dateOnlyToUtc("2026-09-30"))).toBe("30/09/2026");
   });
 
-  it("o dia começa às 03:00 UTC (00:00 em Brasília)", () => {
+  it("o dia começa às 03:00 UTC (00:00 em Brasília) e termina às 02:59:59.999 UTC do dia seguinte", () => {
     expect(startOfDayInSaoPaulo("2026-11-04").toISOString()).toBe("2026-11-04T03:00:00.000Z");
+    expect(endOfDayInSaoPaulo("2026-11-04").toISOString()).toBe("2026-11-05T02:59:59.999Z");
+    // O fim do dia ainda é "aquele dia" na tela.
+    expect(toSaoPauloDate(endOfDayInSaoPaulo("2026-12-31"))).toBe("2026-12-31");
   });
 });
 

@@ -202,13 +202,15 @@ CPFs de teste (válidos na conta, não pertencem a ninguém): `529.982.247-25`, 
 | 8 | Clique em "Abra a fatura" (abre o simulador) → "Pagar (aprovar)". Volte à aba do pagamento | Em até 5 s: "Pagamento confirmado!". A aula paga abre. No terminal: o e-mail "Pagamento confirmado" |
 | 9 | Área do aluno → **Minhas compras** → "Pedir reembolso" | Pedido "Reembolso em andamento" e o acesso sai **na hora** (a aula mostra "acesso cancelado"). No simulador, "Concluir estorno" → pedido "Reembolsado" |
 | 10 | Com a 2ª conta: compre no **Cartão de crédito** em 3x | Página com "3x de R$ 65,67" e "Pagar com cartão" (no Asaas real, a página segura dele). No simulador, "Pagar (aprovar)" → acesso liberado |
-| 11 | Com a 1ª conta: `/planos` → "Assinar" → **Boleto** → "Abrir o boleto" (simulador) → "Pagar (aprovar)" | Em Minhas compras: assinatura "Ativa" e "Acesso garantido até <vencimento + 1 mês + 5 dias>" |
+| 11 | Com a 1ª conta: `/planos` → "Assinar" → **Boleto** → "Abrir o boleto" (simulador) → "Pagar (aprovar)" | Em Minhas compras: assinatura "Ativa" e "Acesso garantido até <vencimento + 1 mês + 5 dias de tolerância>" (vale o dia inteiro) |
 | 12 | No simulador da assinatura, "Gerar a cobrança do próximo ciclo"; em Minhas compras, "Pagar" → simulador → "Pagar (aprovar)" | A data de "acesso garantido" avança 1 mês |
-| 13 | "Cancelar assinatura" | Assinatura "Cancelada", mas o acesso continua até a data mostrada |
+| 13 | "Cancelar assinatura" | Assinatura "Cancelada". A data de "acesso garantido" passa para a **véspera do próximo vencimento** (sem os 5 dias de tolerância: não há mais pagamento para esperar) e o acesso continua até lá |
 | 14 | Como ADMIN: **Pedidos** → abra o pedido da 2ª conta → "Reembolsar pedido" | Pedido em reembolso e a aula volta a ficar bloqueada para a 2ª conta |
 | 15 | **Avisos do provedor** | Cada aviso (pago, estorno...) com o que foi feito. Em **Usuários** → aluno: quadro "Compras" |
 | 16 | Matricule a 2ª conta manualmente (Usuários) e revogue | Só a matrícula manual muda: compra e assinatura têm a própria linha ("Origem") |
 | 17 | Abra `/admin/vendas` e `/area-do-aluno/pagamentos/<id de outra pessoa>` com um aluno | "Página não encontrada" nos dois |
+| 18 | Compre com **Boleto**, pague no simulador e peça o reembolso em Minhas compras | "Reembolso em andamento" e a aula bloqueada. No painel, o pedido avisa "Estorno de boleto pendente" |
+| 19 | No simulador desse boleto, clique **"Pagar (aprovar)" de novo** (é o que o Asaas mostraria até alguém fazer o estorno no painel dele) | A aula **continua bloqueada** e o aviso fica registrado como "estorno manual pendente". Depois, "Concluir estorno" → pedido "Reembolsado" |
 
 ### Configurando o Asaas
 

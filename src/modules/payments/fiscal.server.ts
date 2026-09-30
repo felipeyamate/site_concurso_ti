@@ -7,12 +7,15 @@
  * Liga com NFSE_ENABLED=true (e os dados fiscais nas variáveis NFSE_*). Desligada: nada acontece.
  *
  * Cuidados:
- *  - NUNCA duas notas para a mesma cobrança: uma trava por cobrança + a nota só é pedida se ainda
- *    não foi (ou se a anterior deu erro na prefeitura).
+ *  - NUNCA duas notas VÁLIDAS para a mesma cobrança: uma trava por cobrança + a nota só é pedida se
+ *    ainda não foi, se a anterior deu erro na prefeitura ou se a anterior foi cancelada.
  *  - Reembolso/contestação → pede o cancelamento da nota.
+ *  - Estorno NEGADO (ou contestação revertida): a cobrança volta a "paga" e a nota cancelada é
+ *    substituída por uma nova (a venda valeu, então precisa de nota).
  */
 import "server-only";
 
+import type { FiscalInvoiceStatus } from "@/generated/prisma/enums";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import { advisoryLock } from "@/lib/db-locks";
@@ -53,9 +56,14 @@ function errorText(error: unknown): string {
  * Passos (numa transação, com a trava da cobrança — a chamada ao provedor fica DENTRO dela de
  * propósito, para que dois pedidos simultâneos nunca gerem duas notas):
  *  1. Confere se a NFS-e está ligada e se a cobrança está paga.
- *  2. Se já existe nota pedida (e não deu erro), não faz nada.
+ *  2. Se já existe nota valendo (agendada, emitida ou com cancelamento recusado), não faz nada.
+ *     Nota com erro, cancelada ou em cancelamento → pede uma nova (a linha passa a apontar para ela;
+ *     a antiga continua registrada no provedor, ligada à mesma cobrança).
  *  3. Pede ao provedor e guarda o resultado (ou o erro, para tentar de novo pelo painel).
  */
+// Nota que ainda vale (ou vai valer): com ela, não se pede outra para a mesma cobrança.
+const VALID_INVOICE_STATUSES = new Set<FiscalInvoiceStatus>(["SCHEDULED", "AUTHORIZED", "CANCELLATION_DENIED"]);
+
 export async function scheduleFiscalInvoice(paymentId: string, now: Date = new Date()): Promise<void> {
   const config = getFiscalConfig();
   if (!config) return;
@@ -78,13 +86,12 @@ export async function scheduleFiscalInvoice(paymentId: string, now: Date = new D
       });
       if (!payment || !isPaidStatus(payment.status)) return;
       const existing = payment.fiscalInvoice;
-      if (existing?.providerInvoiceId && existing.status !== "ERROR") return;
+      if (existing?.providerInvoiceId && VALID_INVOICE_STATUSES.has(existing.status)) return;
 
-      await tx.fiscalInvoice.upsert({
-        where: { paymentId },
-        create: { paymentId, status: "PENDING" },
-        update: { status: "PENDING", error: null },
-      });
+      // Recomeça a linha do zero (inclusive tirando o ID da nota antiga: um aviso atrasado dela,
+      // como "cancelada", não pode mais mexer nesta linha).
+      const fresh = { status: "PENDING" as const, providerInvoiceId: null, number: null, pdfUrl: null, xmlUrl: null, error: null };
+      await tx.fiscalInvoice.upsert({ where: { paymentId }, create: { paymentId, ...fresh }, update: fresh });
 
       const provider = getProviderForRecord(payment.provider);
       if (!provider) {

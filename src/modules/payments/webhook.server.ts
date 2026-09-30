@@ -19,10 +19,11 @@ import type { PaymentProviderKind } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { isUniqueViolation } from "@/lib/db-errors";
 
+import { syncPaidAccess } from "./access-sync.server";
 import { applyChargeUpdate } from "./charges.server";
 import { runEffects, type PaymentEffect } from "./effects.server";
 import { applyInvoiceUpdate } from "./fiscal.server";
-import { parseAsaasWebhook, type ParsedWebhook } from "./provider/asaas/mapping";
+import { parseAsaasEnvelope, parseAsaasWebhook, type ParsedWebhook } from "./provider/asaas/mapping";
 
 export type WebhookOutcome =
   | { status: "processed"; eventRowId: string; note: string }
@@ -32,17 +33,21 @@ export type WebhookOutcome =
 export type ReceiveWebhookResult = { ok: true; outcome: WebhookOutcome } | { ok: false; error: string };
 
 /**
- * Recebe um aviso: confere o formato, grava (uma vez só) e processa.
+ * Recebe um aviso: confere o envelope (ID e tipo), grava (uma vez só) e processa.
  * `body` = o JSON do aviso já convertido em objeto.
+ *
+ * Só o envelope é conferido antes de gravar: se o resto do aviso vier num formato inesperado,
+ * ele fica GUARDADO com o erro (e a rota responde "recebido"), em vez de ser recusado — recusar
+ * faria o Asaas reenviar sem parar e, no fim, pausar a fila inteira.
  */
 export async function receiveWebhook(params: {
   provider: PaymentProviderKind;
   body: unknown;
   now?: Date;
 }): Promise<ReceiveWebhookResult> {
-  const parsed = parseAsaasWebhook(params.body);
-  if (!parsed.ok) return { ok: false, error: parsed.error };
-  const { eventId, type } = parsed.webhook;
+  const envelope = parseAsaasEnvelope(params.body);
+  if (!envelope.ok) return { ok: false, error: envelope.error };
+  const { eventId, type } = envelope;
 
   let eventRowId: string;
   try {
@@ -86,12 +91,20 @@ async function applyWebhook(
     case "subscription": {
       if (!webhook.subscription.ended) return { note: "Assinatura atualizada no provedor.", effects: [] };
       // Removida/inativada no provedor (ex.: pelo painel do Asaas): não gera mais cobranças.
-      // O período já pago continua valendo (o acesso não muda aqui).
-      const { count } = await prisma.subscription.updateMany({
-        where: { provider, providerSubscriptionId: webhook.subscription.id, status: { not: "CANCELED" } },
-        data: { status: "CANCELED", canceledAt: now },
+      // O período já pago continua valendo, mas sem a tolerância de 5 dias (não há próximo
+      // pagamento para esperar) — por isso o acesso é recalculado.
+      const providerSubscriptionId = webhook.subscription.id;
+      const canceled = await prisma.$transaction(async (tx) => {
+        const subscription = await tx.subscription.findUnique({
+          where: { providerSubscriptionId },
+          select: { id: true, userId: true, provider: true, status: true },
+        });
+        if (!subscription || subscription.provider !== provider || subscription.status === "CANCELED") return false;
+        await tx.subscription.update({ where: { id: subscription.id }, data: { status: "CANCELED", canceledAt: now } });
+        await syncPaidAccess(tx, subscription.userId, now);
+        return true;
       });
-      return { note: count > 0 ? "Assinatura cancelada no provedor." : "Assinatura já cancelada (ou de fora do site).", effects: [] };
+      return { note: canceled ? "Assinatura cancelada no provedor." : "Assinatura já cancelada (ou de fora do site).", effects: [] };
     }
     case "other":
       return { note: `Tipo de aviso não usado pelo site (${webhook.type}).`, effects: [] };

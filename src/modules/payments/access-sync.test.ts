@@ -62,20 +62,27 @@ describe("computeSubscriptionAccess (ciclos pagos)", () => {
 
   it("do 1º pagamento até o fim do ciclo pago mais distante (+ tolerância)", () => {
     const period = computeSubscriptionAccess([
-      { paidAt: new Date("2026-10-01T15:00:00Z"), dueDate: dueDate("2026-10-01"), cycle: "MONTHLY" },
-      { paidAt: new Date("2026-11-01T15:00:00Z"), dueDate: dueDate("2026-11-01"), cycle: "MONTHLY" },
+      { paidAt: new Date("2026-10-01T15:00:00Z"), dueDate: dueDate("2026-10-01"), cycle: "MONTHLY", canceled: false },
+      { paidAt: new Date("2026-11-01T15:00:00Z"), dueDate: dueDate("2026-11-01"), cycle: "MONTHLY", canceled: false },
     ]);
     expect(period).toEqual({
       startsAt: new Date("2026-10-01T15:00:00Z"),
-      expiresAt: new Date("2026-12-06T03:00:00Z"),
+      expiresAt: new Date("2026-12-07T02:59:59.999Z"), // fim do dia 06/12 em Brasília
     });
   });
 
   it("pagar um ciclo atrasado não empurra o calendário (vale até o fim daquele ciclo)", () => {
     const period = computeSubscriptionAccess([
-      { paidAt: new Date("2026-10-20T15:00:00Z"), dueDate: dueDate("2026-10-01"), cycle: "MONTHLY" },
+      { paidAt: new Date("2026-10-20T15:00:00Z"), dueDate: dueDate("2026-10-01"), cycle: "MONTHLY", canceled: false },
     ]);
-    expect(period?.expiresAt).toEqual(new Date("2026-11-06T03:00:00Z"));
+    expect(period?.expiresAt).toEqual(new Date("2026-11-07T02:59:59.999Z"));
+  });
+
+  it("assinatura cancelada: o período pago continua, mas sem os 5 dias de tolerância", () => {
+    const period = computeSubscriptionAccess([
+      { paidAt: new Date("2026-10-01T15:00:00Z"), dueDate: dueDate("2026-10-01"), cycle: "MONTHLY", canceled: true },
+    ]);
+    expect(period?.expiresAt).toEqual(new Date("2026-11-01T02:59:59.999Z")); // fim do dia 31/10 em Brasília
   });
 });
 

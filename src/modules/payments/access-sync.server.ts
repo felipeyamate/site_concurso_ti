@@ -26,6 +26,7 @@ import {
   planAccessChanges,
   type AccessChanges,
 } from "./access-sync";
+import { addMonths, dateOnlyToUtc, toSaoPauloDate } from "./dates";
 
 type Tx = Prisma.TransactionClient;
 
@@ -72,13 +73,14 @@ export async function syncPaidAccess(tx: Tx, userId: string, now: Date): Promise
   // Assinatura: ciclos pagos (mesmo de uma assinatura já cancelada: o período pago continua valendo).
   const paidCycles = await tx.payment.findMany({
     where: { subscription: { userId }, status: { in: ["CONFIRMED", "RECEIVED"] }, paidAt: { not: null } },
-    select: { paidAt: true, dueDate: true, subscription: { select: { cycle: true } } },
+    select: { paidAt: true, dueDate: true, subscription: { select: { cycle: true, status: true } } },
   });
   const period = computeSubscriptionAccess(
     paidCycles.map((cycle) => ({
       paidAt: cycle.paidAt as Date,
       dueDate: cycle.dueDate,
       cycle: cycle.subscription?.cycle ?? "MONTHLY",
+      canceled: cycle.subscription?.status === "CANCELED",
     })),
   );
   const included = await tx.course.findMany({ where: { includedInSubscription: true }, select: { id: true } });
@@ -100,13 +102,18 @@ export async function syncPaidAccessForUser(userId: string, now: Date = new Date
 }
 
 /**
- * Recalcula todos os assinantes (quem tem algum ciclo pago). Usada quando o painel muda os
- * cursos incluídos na assinatura: quem está com a assinatura em dia ganha o curso novo na hora
- * (e um curso retirado deixa de ganhar mais tempo). Um aluno por vez (transações curtas).
+ * Recalcula os assinantes que ainda podem ter acesso pela assinatura. Usada quando o painel muda
+ * os cursos incluídos: quem está com a assinatura em dia ganha o curso novo na hora (e um curso
+ * retirado deixa de ganhar mais tempo). Um aluno por vez (transações curtas).
+ *
+ * Só entra quem tem um ciclo pago com vencimento nos últimos ~13 meses (o ciclo anual + a
+ * tolerância): o acesso de quem pagou antes disso já acabou, e recalcular não mudaria nada.
+ * Assim a lista não cresce com todo mundo que já foi assinante um dia.
  */
 export async function syncAllSubscribers(now: Date = new Date()): Promise<number> {
+  const cutoff = dateOnlyToUtc(addMonths(toSaoPauloDate(now), -13));
   const subscribers = await prisma.subscription.findMany({
-    where: { payments: { some: { status: { in: ["CONFIRMED", "RECEIVED"] } } } },
+    where: { payments: { some: { status: { in: ["CONFIRMED", "RECEIVED"] }, dueDate: { gte: cutoff } } } },
     select: { userId: true },
     distinct: ["userId"],
   });

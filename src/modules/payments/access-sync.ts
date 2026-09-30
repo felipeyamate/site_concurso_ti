@@ -44,19 +44,23 @@ export function computePurchaseAccess(orders: AccessOrder[]): Map<string, Enroll
 }
 
 // Um ciclo pago e válido da assinatura. `dueDate` = coluna de data do banco (meia-noite UTC).
-export type AccessSubscriptionPayment = { paidAt: Date; dueDate: Date; cycle: PlanCycle };
+// `canceled` = a assinatura deste ciclo já foi cancelada (sem tolerância — ver `subscriptionPeriodEnd`).
+export type AccessSubscriptionPayment = { paidAt: Date; dueDate: Date; cycle: PlanCycle; canceled: boolean };
 
 /**
  * Período liberado pela assinatura: do 1º pagamento até o fim do ciclo pago mais distante
- * (+ tolerância — ver `subscriptionPeriodEnd`). `null` = nenhum ciclo pago válido.
+ * (+ tolerância, se a assinatura ainda vale — ver `subscriptionPeriodEnd`). `null` = nenhum ciclo
+ * pago válido.
  */
 export function computeSubscriptionAccess(payments: AccessSubscriptionPayment[]): EnrollmentPeriod | null {
   if (payments.length === 0) return null;
+  const periodEnd = (payment: AccessSubscriptionPayment) =>
+    subscriptionPeriodEnd(utcToDateOnly(payment.dueDate), payment.cycle, { canceled: payment.canceled });
   let startsAt = payments[0].paidAt;
-  let expiresAt = subscriptionPeriodEnd(utcToDateOnly(payments[0].dueDate), payments[0].cycle);
+  let expiresAt = periodEnd(payments[0]);
   for (const payment of payments.slice(1)) {
     if (payment.paidAt < startsAt) startsAt = payment.paidAt;
-    const end = subscriptionPeriodEnd(utcToDateOnly(payment.dueDate), payment.cycle);
+    const end = periodEnd(payment);
     if (end > expiresAt) expiresAt = end;
   }
   return { startsAt, expiresAt };

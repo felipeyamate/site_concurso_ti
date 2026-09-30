@@ -61,7 +61,10 @@ export default async function AdminSubscriptionPage({ params }: PageProps<"/admi
       <Card className="min-w-0">
         <CardHeader>
           <CardTitle>Cobranças (um por ciclo)</CardTitle>
-          <CardDescription>Cada ciclo pago libera os cursos da assinatura até o vencimento seguinte + 5 dias.</CardDescription>
+          <CardDescription>
+            Cada ciclo pago libera os cursos da assinatura até o vencimento seguinte + 5 dias de tolerância (cancelada: até a
+            véspera do vencimento seguinte).
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <PaymentsTable payments={subscription.payments} />

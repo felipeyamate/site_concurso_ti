@@ -6,11 +6,12 @@
  *
  * O que está coberto: compra (Pix, boleto, cartão parcelado), avisos do provedor (pago, repetido,
  * atrasado, estorno, contestação, estorno negado), reembolso em 7 dias, assinatura (ciclos,
- * cancelamento, curso incluído depois), matrícula manual convivendo com a paga, notas fiscais,
- * concorrência e a rota /api/webhooks/asaas (token).
+ * cancelamento, curso incluído depois, falhas do provedor no meio), matrícula manual convivendo
+ * com a paga, notas fiscais (inclusive nova nota depois de estorno negado), estorno manual de
+ * boleto, concorrência (reembolso e assinatura em dobro) e a rota /api/webhooks/asaas (token).
  */
 import { NextRequest } from "next/server";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST as asaasWebhookRoute } from "@/app/api/webhooks/asaas/route";
 import { prisma } from "@/lib/db";
@@ -21,6 +22,8 @@ import { grantEnrollment, revokeEnrollment } from "@/modules/enrollment/grant";
 import { syncAllSubscribers } from "@/modules/payments/access-sync.server";
 import { createOrder, startSubscription } from "@/modules/payments/checkout.server";
 import { buildFakePaymentEvent } from "@/modules/payments/provider/fake/fake-events";
+import { getPaymentProvider } from "@/modules/payments/provider/provider.server";
+import { PaymentProviderError, type PaymentProvider } from "@/modules/payments/provider/types";
 import { cancelSubscription, requestOrderRefund } from "@/modules/payments/refunds.server";
 import { simulateNextCycle, simulatePaymentAction } from "@/modules/payments/simulator.server";
 import { receiveWebhook } from "@/modules/payments/webhook.server";
@@ -90,6 +93,14 @@ async function buy(
   });
 }
 
+// O provedor simulado é um objeto só (criado uma vez): os testes "espionam" os métodos dele para
+// contar chamadas ou simular uma recusa do provedor (como um `mock.patch.object` do Python).
+function fakeProvider(): PaymentProvider {
+  const provider = getPaymentProvider();
+  if (!provider || provider.kind !== "FAKE") throw new Error("Os testes esperam o provedor simulado.");
+  return provider;
+}
+
 async function statusOf(userId: string, courseId: string, now: Date) {
   return getEnrollmentStatus(await getEnrollment(userId, courseId, now), now);
 }
@@ -101,6 +112,14 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await resetAll();
+});
+
+afterEach(() => {
+  // Desfaz os "espiões" do provedor de cada teste (o do console.info fica).
+  for (const method of ["refundCharge", "cancelSubscription", "createCustomer"] as const) {
+    const current = fakeProvider()[method] as unknown as { mockRestore?: () => void };
+    current.mockRestore?.();
+  }
 });
 
 afterAll(async () => {
@@ -329,6 +348,44 @@ describe("reembolso (direito de arrependimento)", () => {
     const result = await requestOrderRefund({ orderId, actor: { userId: "aluno", isAdmin: false }, now: at(2) });
     expect(result).toEqual({ manualRefund: true });
     expect(await statusOf("aluno", course.id, at(2, 1))).toBe("REVOKED");
+
+    // Até alguém fazer o estorno no painel do Asaas, ele continua mostrando "paga". Um aviso (ou um
+    // "Conferir no Asaas") com "paga" NÃO pode devolver o acesso nem emitir nota de novo.
+    await simulatePaymentAction({ paymentId: paymentId as string, action: "PAY", now: at(3) });
+    expect(await prisma.payment.findUniqueOrThrow({ where: { id: paymentId as string } })).toMatchObject({
+      status: "REFUND_REQUESTED",
+      providerStatus: "RECEIVED",
+    });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ status: "REFUND_REQUESTED" });
+    expect(await statusOf("aluno", course.id, at(3, 1))).toBe("REVOKED");
+
+    // O estorno é feito no Asaas: o aviso "estornada" encerra (e limpa a marca do estorno manual).
+    await simulatePaymentAction({ paymentId: paymentId as string, action: "REFUND", now: at(5) });
+    expect(await prisma.payment.findUniqueOrThrow({ where: { id: paymentId as string } })).toMatchObject({
+      status: "REFUNDED",
+      manualRefundRequestedAt: null,
+    });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ status: "REFUNDED" });
+  });
+
+  it("estorno negado: a cobrança volta a paga e ganha uma NOTA NOVA (a antiga foi cancelada no pedido de reembolso)", async () => {
+    const course = await createCourse("a");
+    await createUser("aluno");
+    await createProduct("curso-a", [course.id]);
+    const { orderId, paymentId } = await buy("aluno", "curso-a");
+    await simulatePaymentAction({ paymentId: paymentId as string, action: "PAY", now: at(0, 1) });
+    const first = await prisma.fiscalInvoice.findUniqueOrThrow({ where: { paymentId: paymentId as string } });
+    expect(first.status).toBe("AUTHORIZED");
+
+    await requestOrderRefund({ orderId, actor: { userId: "aluno", isAdmin: false }, now: at(1) });
+    expect(await prisma.fiscalInvoice.findUniqueOrThrow({ where: { paymentId: paymentId as string } })).toMatchObject({
+      status: "PROCESSING_CANCELLATION",
+    });
+
+    await simulatePaymentAction({ paymentId: paymentId as string, action: "REFUND_DENIED", now: at(2) });
+    const renewed = await prisma.fiscalInvoice.findUniqueOrThrow({ where: { paymentId: paymentId as string } });
+    expect(renewed.status).toBe("AUTHORIZED");
+    expect(renewed.providerInvoiceId).not.toBe(first.providerInvoiceId);
   });
 });
 
@@ -380,11 +437,11 @@ describe("assinatura", () => {
 
     await simulatePaymentAction({ paymentId: paymentId as string, action: "PAY", now: at(0, 1) });
     expect(await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionId } })).toMatchObject({ status: "ACTIVE" });
-    // Vencimento da 1ª cobrança (cartão): 30/09 → vale até 30/10 + 5 dias = 04/11 00:00 (Brasília).
+    // Vencimento da 1ª cobrança (cartão): 30/09 → vale até 30/10 + 5 dias = 04/11, o dia todo (Brasília).
     const row = await prisma.enrollment.findUniqueOrThrow({
       where: { userId_courseId_source: { userId: "aluno", courseId: included.id, source: "SUBSCRIPTION" } },
     });
-    expect(row.expiresAt?.toISOString()).toBe("2026-11-04T03:00:00.000Z");
+    expect(row.expiresAt?.toISOString()).toBe("2026-11-05T02:59:59.999Z");
     expect(await statusOf("aluno", outside.id, at(1))).toBe("NONE");
   });
 
@@ -412,11 +469,13 @@ describe("assinatura", () => {
       prisma.enrollment.findUniqueOrThrow({
         where: { userId_courseId_source: { userId: "aluno", courseId: included.id, source: "SUBSCRIPTION" } },
       });
-    expect((await row()).expiresAt?.toISOString()).toBe("2026-12-05T03:00:00.000Z");
+    expect((await row()).expiresAt?.toISOString()).toBe("2026-12-06T02:59:59.999Z"); // 30/11 + 5 dias, o dia todo
 
-    // Cancelar: não gera mais cobranças, mas o período pago continua valendo.
+    // Cancelar: não gera mais cobranças, mas o período pago continua valendo — sem a tolerância
+    // de 5 dias (não há próximo pagamento para esperar): até 29/11, véspera do vencimento seguinte.
     await cancelSubscription({ subscriptionId, actor: { userId: "aluno", isAdmin: false }, now: at(40) });
     expect(await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionId } })).toMatchObject({ status: "CANCELED" });
+    expect((await row()).expiresAt?.toISOString()).toBe("2026-11-30T02:59:59.999Z");
     expect(await statusOf("aluno", included.id, at(60))).toBe("ACTIVE");
     expect(await statusOf("aluno", included.id, at(70))).toBe("EXPIRED");
     // Reembolso pelo aluno: só o 1º pagamento em 7 dias (aqui já são 2 pagamentos).
@@ -438,11 +497,77 @@ describe("assinatura", () => {
     await simulatePaymentAction({ paymentId: paymentId as string, action: "PAY", now: at(0, 1) });
 
     const result = await cancelSubscription({ subscriptionId, actor: { userId: "aluno", isAdmin: false }, refund: true, now: at(2) });
-    expect(result).toEqual({ refunded: true, manualRefund: false });
+    expect(result).toEqual({ refunded: true, manualRefund: false, cancelFailure: null });
     expect(await prisma.payment.findUniqueOrThrow({ where: { id: paymentId as string } })).toMatchObject({
       status: "REFUND_REQUESTED",
     });
     expect(await statusOf("aluno", included.id, at(2, 1))).toBe("REVOKED");
+  });
+
+  it("provedor recusa o ESTORNO: nada muda (dá para tentar de novo); recusa o CANCELAMENTO depois do estorno: o estorno fica", async () => {
+    const { included } = await setupPlan();
+    await createUser("aluno");
+    const { subscriptionId, paymentId } = await startSubscription({
+      buyer: buyer("aluno"),
+      planSlug: "mensal",
+      method: "CREDIT_CARD",
+      billing: { cpf: CPF, phone: null },
+      now: T0,
+    });
+    await simulatePaymentAction({ paymentId: paymentId as string, action: "PAY", now: at(0, 1) });
+    const actor = { userId: "aluno", isAdmin: false };
+    const provider = fakeProvider();
+
+    // 1. O estorno é recusado: a assinatura continua ativa, o acesso também, e nada foi cancelado no provedor.
+    vi.spyOn(provider, "refundCharge").mockRejectedValueOnce(new PaymentProviderError("saldo insuficiente", 400));
+    const cancelSpy = vi.spyOn(provider, "cancelSubscription");
+    await expect(cancelSubscription({ subscriptionId, actor, refund: true, now: at(2) })).rejects.toThrow(/recusou o estorno/);
+    expect(cancelSpy).not.toHaveBeenCalled();
+    expect(await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionId } })).toMatchObject({ status: "ACTIVE" });
+    expect(await statusOf("aluno", included.id, at(2, 1))).toBe("ACTIVE");
+
+    // 2. Tenta de novo: o estorno passa, mas o provedor recusa o cancelamento. O estorno (que
+    //    aconteceu) fica gravado e o acesso sai; a assinatura continua ativa para cancelar de novo.
+    cancelSpy.mockRejectedValueOnce(new PaymentProviderError("instável", 503));
+    const partial = await cancelSubscription({ subscriptionId, actor, refund: true, now: at(3) });
+    expect(partial).toEqual({ refunded: true, manualRefund: false, cancelFailure: "instável" });
+    expect(await prisma.payment.findUniqueOrThrow({ where: { id: paymentId as string } })).toMatchObject({
+      status: "REFUND_REQUESTED",
+    });
+    expect(await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionId } })).toMatchObject({ status: "ACTIVE" });
+    expect(await statusOf("aluno", included.id, at(3, 1))).toBe("REVOKED");
+
+    // 3. "Cancelar assinatura" de novo (sem reembolso): agora cancela.
+    const retry = await cancelSubscription({ subscriptionId, actor, now: at(4) });
+    expect(retry).toEqual({ refunded: false, manualRefund: false, cancelFailure: null });
+    expect(await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionId } })).toMatchObject({ status: "CANCELED" });
+  });
+
+  it("assinatura removida no painel do Asaas: fica cancelada e perde a tolerância de 5 dias", async () => {
+    const { included } = await setupPlan();
+    await createUser("aluno");
+    const { subscriptionId, paymentId } = await startSubscription({
+      buyer: buyer("aluno"),
+      planSlug: "mensal",
+      method: "PIX",
+      billing: { cpf: CPF, phone: null },
+      now: T0,
+    });
+    await simulatePaymentAction({ paymentId: paymentId as string, action: "PAY", now: at(0, 1) });
+    const { providerSubscriptionId } = await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionId } });
+
+    const received = await receiveWebhook({
+      provider: "FAKE",
+      body: { id: "evt_sub_removida", event: "SUBSCRIPTION_DELETED", subscription: { id: providerSubscriptionId, deleted: true } },
+      now: at(10),
+    });
+    expect(received).toMatchObject({ ok: true, outcome: { status: "processed" } });
+    expect(await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionId } })).toMatchObject({ status: "CANCELED" });
+    const row = await prisma.enrollment.findUniqueOrThrow({
+      where: { userId_courseId_source: { userId: "aluno", courseId: included.id, source: "SUBSCRIPTION" } },
+    });
+    // Ciclo de 30/09: até 29/10 (véspera do vencimento seguinte), o dia todo — sem os 5 dias.
+    expect(row.expiresAt?.toISOString()).toBe("2026-10-30T02:59:59.999Z");
   });
 
   it("curso incluído DEPOIS na assinatura: quem está em dia ganha o acesso na hora", async () => {
@@ -462,6 +587,8 @@ describe("assinatura", () => {
     await prisma.course.update({ where: { id: later.id }, data: { includedInSubscription: true } });
     expect(await syncAllSubscribers(at(2))).toBe(1);
     expect(await statusOf("aluno", later.id, at(3))).toBe("ACTIVE");
+    // Quem pagou o último ciclo há mais de ~13 meses já não tem acesso: nem entra no recálculo.
+    expect(await syncAllSubscribers(at(420))).toBe(0);
   });
 });
 
@@ -483,6 +610,42 @@ describe("concorrência", () => {
     expect(row.expiresAt).toEqual(at(730, 1));
     // Uma nota fiscal por cobrança (nunca duplicada).
     expect(await prisma.fiscalInvoice.count()).toBe(2);
+  });
+
+  it("dois pedidos de reembolso AO MESMO TEMPO: um só estorno no provedor; o outro vê 'já foi pedido'", async () => {
+    const course = await createCourse("a");
+    await createUser("aluno");
+    await createUser("admin", "ADMIN");
+    await createProduct("curso-a", [course.id]);
+    const { orderId, paymentId } = await buy("aluno", "curso-a");
+    await simulatePaymentAction({ paymentId: paymentId as string, action: "PAY", now: at(0, 1) });
+    const refundSpy = vi.spyOn(fakeProvider(), "refundCharge");
+
+    const results = await Promise.allSettled([
+      requestOrderRefund({ orderId, actor: { userId: "aluno", isAdmin: false }, now: at(1) }),
+      requestOrderRefund({ orderId, actor: { userId: "admin", isAdmin: true }, now: at(1) }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(String((rejected as PromiseRejectedResult).reason)).toMatch(/já foi pedido/);
+    expect(refundSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("assinar duas vezes AO MESMO TEMPO (duplo clique): só uma assinatura", async () => {
+    await createCourse("incluido", true);
+    await prisma.plan.create({ data: { slug: "mensal", title: "Plano mensal", priceCents: 4990, cycle: "MONTHLY", isActive: true } });
+    await createUser("aluno");
+    const createCustomerSpy = vi.spyOn(fakeProvider(), "createCustomer");
+    const subscribe = () =>
+      startSubscription({ buyer: buyer("aluno"), planSlug: "mensal", method: "PIX", billing: { cpf: CPF, phone: null }, now: T0 });
+
+    const results = await Promise.allSettled([subscribe(), subscribe()]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(String((rejected as PromiseRejectedResult).reason)).toMatch(/esperando o 1º pagamento/);
+    expect(await prisma.subscription.count({ where: { userId: "aluno" } })).toBe(1);
+    // E o aluno foi cadastrado no provedor uma vez só.
+    expect(createCustomerSpy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -508,5 +671,17 @@ describe("rota /api/webhooks/asaas", () => {
     const again = await asaasWebhookRoute(request(headers, validBody));
     expect(await again.json()).toEqual({ received: true, status: "duplicate" });
     expect(await prisma.webhookEvent.count()).toBe(1);
+  });
+
+  it("aviso com ID e tipo, mas dados num formato inesperado: GUARDADO com o erro e respondido com 200", async () => {
+    const headers = { "asaas-access-token": WEBHOOK_TOKEN, "content-type": "application/json" };
+    const weird = JSON.stringify({ id: "evt_estranho", event: "PAYMENT_RECEIVED", payment: { value: "muito" } });
+    const response = await asaasWebhookRoute(request(headers, weird));
+    // 200: se respondêssemos erro, o Asaas reenviaria sem parar e acabaria pausando a fila inteira.
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ received: true, status: "failed" });
+    const stored = await prisma.webhookEvent.findFirstOrThrow({ where: { eventId: "evt_estranho" } });
+    expect(stored.processedAt).toBeNull();
+    expect(stored.error).toMatch(/sem os dados da cobrança/);
   });
 });

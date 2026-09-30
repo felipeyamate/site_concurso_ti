@@ -40,10 +40,18 @@ export function utcToDateOnly(date: Date): DateOnly {
 
 /**
  * O instante em que o dia COMEÇA em Brasília (00:00 de Brasília = 03:00 UTC; o Brasil não tem
- * horário de verão desde 2019). Usado como fim de um acesso: "até 04/11" = até 04/11 00:00.
+ * horário de verão desde 2019).
  */
 export function startOfDayInSaoPaulo(date: DateOnly): Date {
   return new Date(`${date}T03:00:00Z`);
+}
+
+/**
+ * O último instante do dia em Brasília (23:59:59.999). Usado como FIM de um acesso: assim
+ * "acesso até 04/11" (como aparece na tela) vale o dia 04/11 inteiro.
+ */
+export function endOfDayInSaoPaulo(date: DateOnly): Date {
+  return new Date(startOfDayInSaoPaulo(addDays(date, 1)).getTime() - 1);
 }
 
 export function addDays(date: DateOnly, days: number): DateOnly {
