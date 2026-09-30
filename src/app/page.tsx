@@ -50,7 +50,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
   await connection();
   // Depois de excluir a conta (LGPD), a pessoa chega aqui com ?conta=excluida.
   const accountDeleted = (await searchParams).conta === "excluida";
-  const [notices, posts, tracks] = await Promise.all([listPublishedNotices(), listLatestPosts(3), listPublishedTracks()]);
+  const [notices, posts, tracks] = await Promise.all([listPublishedNotices(), listLatestPosts(3), listPublishedTracks(3)]);
   // Concursos que o aluno ainda pode fazer (inscrições abertas ou previstos), até 3.
   const upcoming = notices.filter((notice) => notice.status === "OPEN" || notice.status === "EXPECTED").slice(0, 3);
 
@@ -136,7 +136,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
             </Link>
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
-            {tracks.slice(0, 3).map((track) => (
+            {tracks.map((track) => (
               <Link key={track.id} href={`/trilhas/${track.slug}`} className="hover:bg-muted/50 grid gap-2 rounded-xl border p-5">
                 {track.board ? (
                   <div>

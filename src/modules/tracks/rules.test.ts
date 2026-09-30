@@ -100,6 +100,33 @@ describe("visão da trilha", () => {
     expect(view.nextItemId).toBe("i-3");
   });
 
+  it("próximo passo: pula a aula com cadeado quando há um passo que a pessoa consegue fazer", () => {
+    const paidFirst: TrackSectionInput[] = [
+      {
+        id: "s",
+        title: "Etapa",
+        description: "",
+        subject: security,
+        items: [
+          { id: "paga", kind: "LESSON", note: "", lesson: lesson("paga") },
+          { id: "treino", kind: "PRACTICE", note: "", questionGoal: 5, subject: security, board: null },
+        ],
+      },
+    ];
+    const noCourse = buildTrackView({ sections: paidFirst, role: "STUDENT", enrollmentByCourse: new Map(), completedLessonIds: new Set(), practiceStats: [], now: NOW });
+    expect(noCourse.nextItemId).toBe("treino");
+    // Com o treino feito, sobra só a aula bloqueada: ela é o próximo passo (a página mostra a oferta).
+    const onlyLocked = buildTrackView({
+      sections: paidFirst,
+      role: "STUDENT",
+      enrollmentByCourse: new Map(),
+      completedLessonIds: new Set(),
+      practiceStats: [{ subjectId: "s-seg", boardId: null, answered: 5, attempts: 5, correct: 5 }],
+      now: NOW,
+    });
+    expect(onlyLocked.nextItemId).toBe("paga");
+  });
+
   it("professor vê os rascunhos (com aviso) e tudo liberado; trilha toda feita não tem próximo passo", () => {
     const staff = buildTrackView({ sections, role: "TEACHER", enrollmentByCourse: new Map(), completedLessonIds: new Set(), practiceStats: [], now: NOW });
     expect(staff.sections[1].items[0]).toMatchObject({ id: "i-4", isDraft: true, access: { allowed: true, reason: "STAFF" } });

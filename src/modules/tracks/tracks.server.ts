@@ -14,7 +14,8 @@ import { cache } from "react";
 
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { mergeEnrollments, type EnrollmentSnapshot } from "@/modules/enrollment/access";
+import type { EnrollmentSnapshot } from "@/modules/enrollment/access";
+import { listEnrollments } from "@/modules/enrollment/enrollment.server";
 import { getBoardIncidence } from "@/modules/questions/incidence.server";
 
 import { buildTrackView, type PracticeStat, type TrackSectionInput, type TrackView } from "./rules";
@@ -68,29 +69,38 @@ export type TrackCard = {
   practiceCount: number;
 };
 
-/** As trilhas publicadas (para /trilhas e a página inicial), com quantas aulas e treinos cada uma tem. */
-export async function listPublishedTracks(): Promise<TrackCard[]> {
+/**
+ * As trilhas publicadas (para /trilhas e a página inicial), com quantas aulas e treinos cada uma tem.
+ * `limit`: a página inicial mostra só as primeiras (não precisa buscar todas).
+ * Passos: 1. as trilhas (só os dados do cartão); 2. as contagens numa consulta só, agrupada no banco
+ * (sem carregar as etapas e os passos de todas as trilhas só para contar).
+ * Paralelo em Python: `df.groupby("track_id").agg(...)` em vez de um laço sobre as linhas.
+ */
+export async function listPublishedTracks(limit?: number): Promise<TrackCard[]> {
   const tracks = await prisma.track.findMany({
     where: { isPublished: true },
     orderBy: { title: "asc" },
-    select: {
-      id: true,
-      slug: true,
-      title: true,
-      summary: true,
-      board: { select: { name: true, slug: true } },
-      sections: { select: { items: { select: { kind: true, lesson: { select: { isPublished: true, course: { select: { isPublished: true } } } } } } } },
-    },
+    take: limit,
+    select: { id: true, slug: true, title: true, summary: true, board: { select: { name: true, slug: true } } },
   });
-  return tracks.map(({ sections, ...track }) => {
-    const items = sections.flatMap((section) => section.items);
-    return {
-      ...track,
-      // Aulas em rascunho não contam (o aluno não as vê).
-      lessonCount: items.filter((item) => item.kind === "LESSON" && item.lesson?.isPublished && item.lesson.course.isPublished).length,
-      practiceCount: items.filter((item) => item.kind === "PRACTICE").length,
-    };
-  });
+  if (tracks.length === 0) return [];
+  // Aulas em rascunho (ou de curso em rascunho) não contam: o aluno não as vê.
+  const counts = await prisma.$queryRaw<Array<{ track_id: string; lessons: bigint; practices: bigint }>>`
+    SELECT s.track_id,
+           COUNT(*) FILTER (WHERE i.kind = 'LESSON' AND l.is_published AND c.is_published) AS lessons,
+           COUNT(*) FILTER (WHERE i.kind = 'PRACTICE') AS practices
+    FROM track_items i
+    JOIN track_sections s ON s.id = i.section_id
+    LEFT JOIN lessons l ON l.id = i.lesson_id
+    LEFT JOIN courses c ON c.id = l.course_id
+    WHERE s.track_id IN (${Prisma.join(tracks.map((track) => track.id))})
+    GROUP BY s.track_id`;
+  const byTrack = new Map(counts.map((row) => [row.track_id, row]));
+  return tracks.map((track) => ({
+    ...track,
+    lessonCount: Number(byTrack.get(track.id)?.lessons ?? 0),
+    practiceCount: Number(byTrack.get(track.id)?.practices ?? 0),
+  }));
 }
 
 /**
@@ -168,17 +178,12 @@ export async function getTrackView(
   let practiceStats: PracticeStat[] = [];
   if (viewer) {
     const [enrollments, completed, stats] = await Promise.all([
-      prisma.enrollment.findMany({
-        where: { userId: viewer.userId, courseId: { in: courseIds } },
-        select: { courseId: true, startsAt: true, expiresAt: true, revokedAt: true },
-      }),
+      // Uma matrícula por curso, juntando as origens (manual, compra, assinatura) — como no catálogo.
+      listEnrollments(viewer.userId, now, courseIds),
       prisma.lessonProgress.findMany({ where: { userId: viewer.userId, lessonId: { in: lessonIds }, completedAt: { not: null } }, select: { lessonId: true } }),
       listPracticeStats(viewer.userId, subjectIds),
     ]);
-    // Uma matrícula por curso, juntando as origens (manual, compra, assinatura) — como no catálogo.
-    for (const courseId of courseIds) {
-      enrollmentByCourse.set(courseId, mergeEnrollments(enrollments.filter((row) => row.courseId === courseId), now));
-    }
+    for (const { courseId, ...enrollment } of enrollments) enrollmentByCourse.set(courseId, enrollment);
     completedLessonIds = new Set(completed.map((row) => row.lessonId));
     practiceStats = stats;
   }

@@ -31,10 +31,11 @@
   um `if` solto em página/ação. O vídeo (`getLessonPlayback`) só é pedido DEPOIS do acesso liberado.
 - Trilhas (Fase 8, `src/modules/tracks/`): a trilha NÃO libera aula — o cadeado de cada passo vem de `buildTrackView`
   (`rules.ts`), que usa `checkLessonAccess` com a matrícula no curso DAQUELA aula. Estrutura (etapas/passos) só por
-  `tracks-admin.server.ts`, dentro da trava `track:<id>`; uma aula no máximo uma vez por trilha. Aula, curso, assunto ou
+  `tracks-admin.server.ts`, dentro da trava `track:<id>` (`withTrackLock`, que também atualiza o `updatedAt` da trilha
+  para o sitemap); uma aula no máximo uma vez por trilha. Matrículas da trilha: `listEnrollments(..., courseIds)`. Aula, curso, assunto ou
   banca usados numa trilha não se apagam (FK `Restrict` + conferência com mensagem em `deleteLesson`/`deleteCourse`/
   `deleteSubject`/`deleteBoard`). Treino "feito" = questões DIFERENTES do assunto (`listPracticeStats`).
-- Aula ↔ assunto: gravar só com `setLessonSubjects` (`catalog-admin.server.ts`); ler com `listStudyLessonsBySubject`/
+- Aula ↔ assunto: gravar só com `setLessonSubjects` (`catalog-admin.server.ts`, trava a aula); ler com `listStudyLessonsBySubject`/
   `listLessonSubjects` (`src/modules/catalog/lesson-subjects.server.ts`, que já esconde aulas em rascunho).
 - Cartões de oferta (produto/plano, com ou sem cupom): `OfferCards` (`src/modules/payments/components/offer-cards.tsx`);
   o cupom só entra quando `previewCoupon` diz que vale para aquela oferta.

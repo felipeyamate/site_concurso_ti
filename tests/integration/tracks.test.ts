@@ -131,6 +131,18 @@ describe("aula ↔ assunto", () => {
     expect((await listLessonSubjects(s.phishing.id)).map((subject) => subject.name)).toEqual(["TR Office"]);
     await expect(setLessonSubjects({ lessonId: s.phishing.id, subjectIds: ["nao-existe"] })).rejects.toThrow(/não existe mais/);
   });
+
+  it("duas gravações AO MESMO TEMPO na mesma aula: vale uma lista inteira, nunca a mistura das duas (trava da aula)", async () => {
+    // Algumas rodadas: na primeira, o banco ainda abre a 2ª conexão e as duas gravações quase não se cruzam.
+    for (let round = 0; round < 4; round += 1) {
+      await Promise.all([
+        setLessonSubjects({ lessonId: s.phishing.id, subjectIds: [s.office.id] }),
+        setLessonSubjects({ lessonId: s.phishing.id, subjectIds: [s.security.id, s.networks.id] }),
+      ]);
+      const names = (await listLessonSubjects(s.phishing.id)).map((subject) => subject.name);
+      expect([["TR Office"], ["TR Segurança", "TR Redes"]]).toContainEqual(names);
+    }
+  });
 });
 
 describe("painel: montar pelo 'o que mais cai'", () => {
@@ -149,9 +161,11 @@ describe("painel: montar pelo 'o que mais cai'", () => {
     expect(admin?.sections[1].items.map(describeItem)).toEqual(["Aula internet", "treino TR Redes TR Banca 10"]);
   });
 
-  it("sem banca, ou banca sem questões de prova: explica; em trilha com etapas, não monta de novo", async () => {
-    await expect(saveTrack(track({ title: "TR Sem banca", fromIncidence: "on" }))).rejects.toThrow(/Escolha a banca/);
-    await expect(saveTrack(track({ title: "TR Outra banca", boardId: s.otherBoard.id, fromIncidence: "on" }))).rejects.toThrow(/ainda não tem questões de prova/);
+  it("sem banca: nasce vazia; banca sem questões de prova: explica; em trilha com etapas, não monta de novo", async () => {
+    // A caixa vem marcada no formulário: sem banca, ela não impede criar uma trilha "geral".
+    const general = await saveTrack(track({ title: "TR Sem banca", fromIncidence: "on" }));
+    expect(await prisma.trackSection.count({ where: { trackId: general.id } })).toBe(0);
+    await expect(saveTrack(track({ title: "TR Outra banca", boardId: s.otherBoard.id, fromIncidence: "on" }))).rejects.toThrow(/ainda não tem questões de prova.*desmarque/);
 
     const empty = await saveTrack(track({ title: "TR Vazia", boardId: s.board.id }));
     await fillTrackFromIncidence(empty.id);
@@ -218,6 +232,15 @@ describe("painel: etapas e passos em ordem", () => {
     ]);
     const positions = (await prisma.trackItem.findMany({ where: { sectionId: section.id }, select: { position: true } })).map((item) => item.position).sort();
     expect(positions).toEqual([1, 2, 3]);
+  });
+
+  it("mexer nas etapas/passos marca a trilha como editada (data do sitemap)", async () => {
+    const { id: trackId } = await saveTrack(track({ title: "TR Editada" }));
+    const before = (await prisma.track.findUniqueOrThrow({ where: { id: trackId } })).updatedAt;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await saveSection({ trackId, sectionId: null, title: "Etapa nova", description: "", subjectId: null });
+    const after = (await prisma.track.findUniqueOrThrow({ where: { id: trackId } })).updatedAt;
+    expect(after.getTime()).toBeGreaterThan(before.getTime());
   });
 
   it("aula, curso, assunto e banca usados numa trilha não se apagam (o painel explica)", async () => {

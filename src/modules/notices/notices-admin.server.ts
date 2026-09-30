@@ -14,7 +14,7 @@
  */
 import "server-only";
 
-import { isUniqueViolation } from "@/lib/db-errors";
+import { isForeignKeyViolation, isUniqueViolation } from "@/lib/db-errors";
 import { advisoryLock } from "@/lib/db-locks";
 import { prisma } from "@/lib/db";
 import { UserFacingError } from "@/lib/form-state";
@@ -128,6 +128,8 @@ export async function saveNotice(
     });
   } catch (error) {
     if (isUniqueViolation(error)) throw new UserFacingError("Já existe uma página com este endereço.", { field: "slug" });
+    // Algo escolhido (banca, produto, plano, trilha, assunto) foi apagado entre a conferência e a gravação.
+    if (isForeignKeyViolation(error)) throw new UserFacingError("Algum item escolhido não existe mais (banca, assunto, produto, plano ou trilha). Recarregue a página.");
     throw error;
   }
 }

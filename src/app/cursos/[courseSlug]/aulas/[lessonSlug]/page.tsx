@@ -79,6 +79,9 @@ export default async function LessonPage({ params }: LessonPageProps) {
 
   // 3 e 4. Conteúdo principal: bloqueado ou player.
   let main: ReactNode;
+  // Fase 8: assuntos que a aula ensina → "treinar questões" (do banco de questões). Só para quem
+  // assiste a aula ("treine o que você aprendeu" não faz sentido com o cadeado).
+  let subjects: Awaited<ReturnType<typeof listLessonSubjects>> = [];
   if (!access.allowed) {
     main = (
       <Alert>
@@ -100,7 +103,13 @@ export default async function LessonPage({ params }: LessonPageProps) {
       </Alert>
     );
   } else {
-    const [video, attachments] = await Promise.all([getLessonVideo(lesson.id), listLessonAttachments(lesson.id)]);
+    // As três consultas não dependem uma da outra: vão ao banco ao mesmo tempo (como `asyncio.gather`).
+    const [video, attachments, lessonSubjects] = await Promise.all([
+      getLessonVideo(lesson.id),
+      listLessonAttachments(lesson.id),
+      listLessonSubjects(lesson.id),
+    ]);
+    subjects = lessonSubjects;
     // Se o fornecedor de vídeo falhar, a página continua de pé (título, grade, navegação) e
     // mostra "vídeo indisponível". O erro vai para o log do servidor (Sentry, na Fase 7).
     let playback: VideoPlayback | null = null;
@@ -155,9 +164,6 @@ export default async function LessonPage({ params }: LessonPageProps) {
       </div>
     );
   }
-
-  // Fase 8: assuntos que a aula ensina → "treinar questões" (do banco de questões).
-  const subjects = await listLessonSubjects(lesson.id);
 
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-8 px-4 py-8 lg:grid-cols-[1fr_340px]">

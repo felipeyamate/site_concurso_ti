@@ -80,7 +80,8 @@ export type TrackSectionView = {
 export type TrackView = {
   sections: TrackSectionView[];
   summary: { done: number; total: number; percent: number };
-  // O primeiro passo ainda não feito (null = trilha concluída, ou sem passos).
+  // O próximo passo: o primeiro ainda não feito que a pessoa CONSEGUE fazer (aula liberada ou treino);
+  // se todos os que faltam estão bloqueados, o primeiro que falta. null = trilha concluída (ou sem passos).
   nextItemId: string | null;
 };
 
@@ -121,7 +122,8 @@ export function practiceProgress(stats: readonly PracticeStat[], subjectId: stri
  *  2. Aula: acesso pela MESMA regra das páginas do catálogo (`checkLessonAccess` com a matrícula no
  *     curso da aula); feita = concluída pelo aluno.
  *  3. Treino: feito quando a pessoa respondeu `questionGoal` questões DIFERENTES do assunto (e banca).
- *  4. Resumo (feitos/total, % para baixo, como nos cursos) e o próximo passo = o primeiro não feito.
+ *  4. Resumo (feitos/total, % para baixo, como nos cursos) e o próximo passo = o primeiro não feito que
+ *     a pessoa consegue fazer (uma aula com cadeado não vira "Próximo passo" se há um treino liberado).
  * Visitante sem login: nada feito, e as aulas bloqueadas explicam o porquê (a página oferece o curso).
  */
 export function buildTrackView(input: {
@@ -190,10 +192,12 @@ export function buildTrackView(input: {
   const allItems = sections.flatMap((section) => section.items);
   const done = allItems.filter((item) => item.done).length;
   const total = allItems.length;
+  const pending = allItems.filter((item) => !item.done);
+  const doable = pending.find((item) => item.kind === "PRACTICE" || item.access.allowed);
   return {
     sections,
     summary: { done, total, percent: total === 0 ? 0 : Math.floor((done / total) * 100) },
-    nextItemId: allItems.find((item) => !item.done)?.id ?? null,
+    nextItemId: (doable ?? pending[0])?.id ?? null,
   };
 }
 

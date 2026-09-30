@@ -155,7 +155,7 @@ export default async function TrackPage({ params }: PageProps<"/trilhas/[slug]">
                     key={item.id}
                     className={cn("grid gap-1 rounded-md border p-3 text-sm", item.id === view.nextItemId && session ? "border-primary ring-primary/30 ring-2" : null)}
                   >
-                    <ItemRow item={item} />
+                    <ItemRow item={item} isLoggedIn={Boolean(session)} />
                   </li>
                 ))}
                 {section.items.length === 0 ? <li className="text-muted-foreground text-sm">Etapa em montagem.</li> : null}
@@ -202,11 +202,16 @@ function itemTitle(item: TrackItemView): string {
   return `Treinar ${item.subject.name}${item.board ? ` (${item.board.name})` : ""}`;
 }
 
-/** Uma linha da trilha: ícone da situação, o que fazer (link), detalhes e a dica do professor. */
-function ItemRow({ item }: { item: TrackItemView }) {
+/**
+ * Uma linha da trilha: ícone da situação, o que fazer (link), detalhes e a dica do professor.
+ * Aula grátis para quem NÃO entrou: aparece como grátis, mas avisa que é preciso entrar (a regra de
+ * acesso vale para quem já está logado — a página da aula pede o login).
+ */
+function ItemRow({ item, isLoggedIn }: { item: TrackItemView; isLoggedIn: boolean }) {
   if (item.kind === "LESSON") {
     const Icon = item.done ? CheckCircle2 : item.access.allowed ? PlayCircle : Lock;
-    const status = item.done ? "Aula concluída" : item.access.allowed ? "Aula liberada" : "Aula bloqueada";
+    const status = item.done ? "Aula concluída" : item.access.allowed ? (isLoggedIn ? "Aula liberada" : "Aula grátis") : "Aula bloqueada";
+    const freeNote = isLoggedIn ? " · aula grátis" : " · aula grátis (entre com sua conta para assistir)";
     return (
       <>
         <div className="flex items-start gap-2">
@@ -219,7 +224,7 @@ function ItemRow({ item }: { item: TrackItemView }) {
             <span className="text-muted-foreground text-xs">
               {item.lesson.course.title}
               {item.lesson.durationSeconds > 0 ? ` · ${formatDuration(item.lesson.durationSeconds)}` : ""}
-              {item.access.allowed && item.access.reason === "FREE_PREVIEW" ? " · aula grátis" : ""}
+              {item.access.allowed && item.access.reason === "FREE_PREVIEW" ? freeNote : ""}
               {!item.access.allowed ? " · precisa do curso" : ""}
             </span>
             {item.isDraft ? (

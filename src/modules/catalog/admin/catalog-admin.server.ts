@@ -589,12 +589,15 @@ export async function listSubjectOptions() {
 /**
  * Troca a lista de assuntos que a aula ensina ("estude esta aula" nas questões desses assuntos e o
  * "montar pelo que mais cai" das trilhas).
- * Passos: confere a aula e os assuntos; apaga a lista antiga e grava a nova (numa transação).
+ * Passos (numa transação): 1. trava a aula (`FOR UPDATE`) — dois "Salvar" ao mesmo tempo (duplo clique,
+ * duas abas) esperam um ao outro; sem a trava, cada um apagava só a lista que já existia e a aula
+ * ficava com as DUAS listas misturadas; 2. confere a aula e os assuntos; 3. apaga a lista antiga e grava a nova.
  */
 export async function setLessonSubjects(input: { lessonId: string; subjectIds: string[] }): Promise<void> {
   const subjectIds = [...new Set(input.subjectIds)];
   try {
     await prisma.$transaction(async (tx) => {
+      await lockRows.lesson(tx, input.lessonId);
       const lesson = await tx.lesson.findUnique({ where: { id: input.lessonId }, select: { id: true } });
       if (!lesson) throw new UserFacingError("Aula não encontrada.");
       const found = await tx.subject.count({ where: { id: { in: subjectIds } } });

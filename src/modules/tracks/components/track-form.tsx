@@ -116,7 +116,8 @@ export function TrackForm({ track, options }: { track: TrackFormValues; options:
           <input type="checkbox" name="fromIncidence" defaultChecked className="accent-primary mt-0.5 size-4" />
           <span>
             Já montar as etapas pelo &quot;o que mais cai&quot; da banca: uma etapa por assunto, do que mais cai para o que menos cai,
-            com as aulas do assunto e um treino de questões na banca. Depois você revisa.
+            com as aulas do assunto e um treino de questões na banca. Depois você revisa. Sem banca, a trilha nasce vazia
+            (monte as etapas à mão).
           </span>
         </label>
       )}

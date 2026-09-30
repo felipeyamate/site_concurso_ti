@@ -35,12 +35,24 @@ type Direction = "up" | "down";
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 15_000 } as const;
 
 /**
- * Roda `work` com a trava da trilha. Erros "esperados" do banco viram mensagens claras:
- * posição repetida (outra mudança ao mesmo tempo) e chave estrangeira (algo foi apagado no meio).
+ * Roda `work` com a trava da trilha e, no fim, marca a trilha como editada (`updatedAt`).
+ * Erros "esperados" do banco viram mensagens claras: posição repetida (outra mudança ao mesmo tempo)
+ * e chave estrangeira (algo foi apagado no meio).
  */
 async function withTrackLock<T>(trackId: string, work: (tx: Tx) => Promise<T>): Promise<T> {
   try {
-    return await withAdvisoryLock(prisma, `track:${trackId}`, work, TRANSACTION_OPTIONS);
+    return await withAdvisoryLock(
+      prisma,
+      `track:${trackId}`,
+      async (tx) => {
+        const result = await work(tx);
+        // Mudou a estrutura (etapas/passos) → a trilha conta como editada: o sitemap avisa o Google
+        // (`lastModified`) e a lista do painel sobe a trilha. `updateMany`: não falha se ela sumiu.
+        await tx.track.updateMany({ where: { id: trackId }, data: { updatedAt: new Date() } });
+        return result;
+      },
+      TRANSACTION_OPTIONS,
+    );
   } catch (error) {
     if (isUniqueViolation(error)) throw new UserFacingError("Outra alteração foi feita nesta trilha ao mesmo tempo. Recarregue a página e tente de novo.");
     if (isForeignKeyViolation(error)) throw new UserFacingError("A aula, o assunto ou a banca escolhidos não existem mais. Recarregue a página.");
@@ -109,7 +121,10 @@ export async function listTrackFormOptions() {
 async function draftFromIncidence(boardId: string): Promise<TrackDraftSection[]> {
   const incidence = await getBoardIncidence(boardId);
   if (!incidence || incidence.subjects.length === 0) {
-    throw new UserFacingError("Esta banca ainda não tem questões de prova publicadas: monte as etapas à mão.", { field: "boardId" });
+    throw new UserFacingError(
+      'Esta banca ainda não tem questões de prova publicadas: desmarque "Já montar as etapas" e monte as etapas à mão.',
+      { field: "boardId" },
+    );
   }
   const subjectIds = incidence.subjects.map((subject) => subject.subjectId);
   const lessonsBySubject = await listStudyLessonsBySubject(subjectIds, { includeDrafts: true, perSubject: 100 });
@@ -141,15 +156,13 @@ async function insertDraft(tx: Tx, trackId: string, draft: TrackDraftSection[]):
 
 /**
  * Cria ou edita uma trilha. Passos: confere banca/produto/plano; gera o slug se vier vazio; grava; na
- * edição, registra o endereço antigo se o slug mudou; ao CRIAR com "montar pelo que mais cai", já grava
- * as etapas (o rascunho é montado antes, fora da transação — é só leitura).
+ * edição, registra o endereço antigo se o slug mudou; ao CRIAR com "montar pelo que mais cai" e uma
+ * banca, já grava as etapas (o rascunho é montado antes, fora da transação — é só leitura).
+ * Sem banca, a caixa (que vem marcada) não impede criar: a trilha nasce vazia, para montar à mão —
+ * senão, uma trilha "geral" (sem banca) só seria criada desmarcando a caixa.
  */
 export async function saveTrack(data: TrackFormData, now: Date = new Date()): Promise<{ id: string; slug: string }> {
-  let draft: TrackDraftSection[] | null = null;
-  if (!data.trackId && data.fromIncidence) {
-    if (!data.boardId) throw new UserFacingError("Escolha a banca para montar as etapas pelo que mais cai.", { field: "boardId" });
-    draft = await draftFromIncidence(data.boardId);
-  }
+  const draft = !data.trackId && data.fromIncidence && data.boardId ? await draftFromIncidence(data.boardId) : null;
   try {
     return await prisma.$transaction(async (tx) => {
       const current = data.trackId ? await tx.track.findUnique({ where: { id: data.trackId }, select: { slug: true, publishedAt: true } }) : null;

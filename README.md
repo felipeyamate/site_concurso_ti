@@ -428,12 +428,12 @@ na página de concurso fictícia — pode rodar várias vezes). Uma conta PROFES
 | # | Faça isto | O esperado |
 |---|---|---|
 | 1 | Abra `/trilhas` (menu "Trilhas" no computador; no celular, no rodapé) | O cartão "Exemplo — Trilha Cesgranrio (Banco)" com quantas aulas e treinos ela tem |
-| 2 | Abra a trilha **sem login** | Etapas na ordem do que mais cai, cada uma com "cai em X% das questões da Cesgranrio". Aulas com 🔒 ("precisa do curso"), a aula grátis liberada, e "Entre para acompanhar o seu progresso". No fim, "Para liberar as aulas com cadeado" com a oferta (produto/plano da trilha, se houver) |
-| 3 | Entre com a conta de aluno e abra a trilha de novo | "Você fez 0 de N passos", a barra de progresso e o botão "Próximo passo" (o primeiro passo fica destacado) |
+| 2 | Abra a trilha **sem login** | Etapas na ordem do que mais cai, cada uma com "cai em X% das questões da Cesgranrio". Aulas com 🔒 ("precisa do curso"), a aula grátis com "aula grátis (entre com sua conta para assistir)", e "Entre para acompanhar o seu progresso". No fim, "Para liberar as aulas com cadeado" com a oferta (produto/plano da trilha, se houver) |
+| 3 | Entre com a conta de aluno e abra a trilha de novo | "Você fez 0 de N passos", a barra de progresso e o botão "Próximo passo" (destacado na lista): o primeiro passo que dá para fazer — aula com 🔒 é pulada enquanto houver aula liberada ou treino pendente |
 | 4 | Clique em "Treinar Segurança da Informação (Cesgranrio)" e responda uma questão | Cai em "Resolver questões" já filtrado. Depois de responder: "Estude esta aula antes de tentar de novo:" (se errou) ou "Quer revisar o assunto?" (se acertou), com o link da aula |
 | 5 | Volte à trilha | O treino mostra "1 de 10 questões · X% de acerto". Com 10 questões **diferentes** do assunto na banca, ele ganha o ✓ |
 | 6 | ADMIN: dê acesso ao Curso Base para o aluno (Usuários → matrícula manual). Com o aluno, abra a trilha e conclua uma aula ("Marcar como concluída") | Os cadeados somem (a trilha só **mostra** o acesso; quem libera é a matrícula no curso de cada aula). A aula concluída ganha o ✓ e o "Próximo passo" avança |
-| 7 | Abra a aula `/cursos/informatica-e-ti-do-zero/aulas/pilares-da-seguranca` | "Treine o que você aprendeu nesta aula:" com "Questões de Segurança da Informação" |
+| 7 | Abra a aula `/cursos/informatica-e-ti-do-zero/aulas/pilares-da-seguranca` (com o acesso do passo 6) | "Treine o que você aprendeu nesta aula:" com "Questões de Segurança da Informação" (numa aula com 🔒 esse quadro não aparece) |
 | 8 | Erre 5 ou mais questões de um assunto e abra "Meu desempenho" | Em "Seus pontos fracos", ao lado do assunto: "Estude: <aula>" |
 | 9 | Abra `/concursos/exemplo-banco-escriturario-2026` | O cartão "Trilha de estudos indicada para este concurso" com "Seguir a trilha" |
 
@@ -443,7 +443,7 @@ na página de concurso fictícia — pode rodar várias vezes). Uma conta PROFES
 |---|---|---|
 | 10 | Cursos → Curso Base → uma aula → **Assuntos desta aula**: marque/desmarque e salve | "Assuntos salvos." Embaixo, "Está nas trilhas: ..." (se ela estiver numa trilha) |
 | 11 | Conteúdo do site → **Trilhas de estudo** → Nova trilha: título, banca **Cesgranrio**, deixe marcado "Já montar as etapas pelo que mais cai" → Criar | Abre a edição com as etapas na ordem do que mais cai: as aulas de cada assunto e "Treinar ... · Cesgranrio · meta de 10 questões" |
-| 12 | Nova trilha com a caixa marcada e **sem** banca; depois com a banca **FCC** (sem questões de prova no seed) | "Escolha a banca para montar as etapas pelo que mais cai." / "Esta banca ainda não tem questões de prova publicadas: monte as etapas à mão." |
+| 12 | Nova trilha com a caixa marcada e **sem** banca; depois outra com a banca **FCC** (sem questões de prova no seed) | Sem banca: a trilha é criada **sem etapas** (para montar à mão). FCC: "Esta banca ainda não tem questões de prova publicadas: desmarque "Já montar as etapas" e monte as etapas à mão." |
 | 13 | Na edição: ↑ ↓ nas etapas e nos passos; "Editar passo" (mude a meta para 15 ou mude o passo de etapa); "+ Incluir aula" com uma aula que já está na trilha | As posições se reorganizam. A aula repetida: "Esta aula já está na trilha (etapa "...")" |
 | 14 | Tente apagar uma aula que está numa trilha (Cursos → aula) e um assunto usado num treino (Banco de questões → assuntos) | A aula: botão desativado com "A aula está numa trilha: tire-a da trilha antes de apagar". O assunto: "Este assunto é usado num treino da trilha ..." |
 | 15 | Troque o endereço (slug) da trilha e salve; abra o endereço antigo | Redireciona para o novo (como cursos, posts e concursos) |

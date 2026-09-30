@@ -54,9 +54,12 @@ test("aluno: responder uma questão do treino conta na trilha; depois de respond
   const row = page.getByRole("listitem").filter({ has: page.getByRole("link", { name: practiceName, exact: true }) });
   await expect(row.getByText(/^1 de 10 questões/)).toBeVisible();
 
-  // A página da aula leva às questões do assunto dela.
-  await page.goto("/cursos/informatica-e-ti-do-zero/aulas/pilares-da-seguranca");
+  // A página da aula (liberada: a aula grátis) leva às questões do assunto dela; aula com cadeado não.
+  await page.goto("/cursos/informatica-e-ti-do-zero/aulas/malwares-virus-worm-trojan-ransomware");
   await expect(page.getByRole("link", { name: "Questões de Segurança da Informação" })).toHaveAttribute("href", "/questoes?assunto=seguranca-da-informacao");
+  await page.goto("/cursos/informatica-e-ti-do-zero/aulas/pilares-da-seguranca");
+  await expect(page.getByText("Aula bloqueada")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Questões de Segurança da Informação" })).toHaveCount(0);
 });
 
 test("professor: monta uma trilha pelo 'o que mais cai' no painel, publica e ela aparece em /trilhas", async ({ page }) => {
