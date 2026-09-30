@@ -23,6 +23,7 @@ import { isProductionSite } from "@/lib/runtime";
 import {
   errorState,
   formDataToObject,
+  formDataWithLists,
   invalidState,
   stateFromError,
   successState,
@@ -44,6 +45,7 @@ import {
   moveLesson,
   moveModule,
   renameModule,
+  setLessonSubjects,
   updateCourse,
   updateLesson,
   updateLessonVideo,
@@ -53,6 +55,7 @@ import {
   createLessonSchema,
   createModuleSchema,
   idSchema,
+  lessonSubjectsSchema,
   moveSchema,
   renameModuleSchema,
   updateCourseSchema,
@@ -227,6 +230,20 @@ export async function updateLessonAction(_previous: FormState, formData: FormDat
   }
   refreshCatalogScreens();
   return successState("Aula salva.");
+}
+
+/** Fase 8: os assuntos que a aula ensina (caixas marcadas → lista). */
+export async function setLessonSubjectsAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  if (!(await isStaff())) return errorState(PERMISSION_DENIED_MESSAGE);
+  const parsed = lessonSubjectsSchema.safeParse(formDataWithLists(formData, ["subjectIds"]));
+  if (!parsed.success) return invalidState(parsed.error);
+  try {
+    await setLessonSubjects(parsed.data);
+  } catch (error) {
+    return stateFromError(error, "salvar os assuntos da aula");
+  }
+  refreshCatalogScreens();
+  return successState("Assuntos salvos.");
 }
 
 export async function updateLessonVideoAction(_previous: FormState, formData: FormData): Promise<FormState> {

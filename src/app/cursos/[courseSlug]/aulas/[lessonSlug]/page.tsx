@@ -28,6 +28,7 @@ import { formatDuration } from "@/lib/format";
 import { hasMinimumRole } from "@/modules/auth/roles";
 import { requireSession } from "@/modules/auth/session";
 import { getCourseCurriculum, getLessonVideo } from "@/modules/catalog/catalog.server";
+import { listLessonSubjects } from "@/modules/catalog/lesson-subjects.server";
 import { CurriculumList } from "@/modules/catalog/components/curriculum-list";
 import { findAdjacentLessons } from "@/modules/catalog/curriculum";
 import { LOCKED_LESSON_MESSAGES } from "@/modules/enrollment/access";
@@ -78,6 +79,9 @@ export default async function LessonPage({ params }: LessonPageProps) {
 
   // 3 e 4. Conteúdo principal: bloqueado ou player.
   let main: ReactNode;
+  // Fase 8: assuntos que a aula ensina → "treinar questões" (do banco de questões). Só para quem
+  // assiste a aula ("treine o que você aprendeu" não faz sentido com o cadeado).
+  let subjects: Awaited<ReturnType<typeof listLessonSubjects>> = [];
   if (!access.allowed) {
     main = (
       <Alert>
@@ -99,7 +103,13 @@ export default async function LessonPage({ params }: LessonPageProps) {
       </Alert>
     );
   } else {
-    const [video, attachments] = await Promise.all([getLessonVideo(lesson.id), listLessonAttachments(lesson.id)]);
+    // As três consultas não dependem uma da outra: vão ao banco ao mesmo tempo (como `asyncio.gather`).
+    const [video, attachments, lessonSubjects] = await Promise.all([
+      getLessonVideo(lesson.id),
+      listLessonAttachments(lesson.id),
+      listLessonSubjects(lesson.id),
+    ]);
+    subjects = lessonSubjects;
     // Se o fornecedor de vídeo falhar, a página continua de pé (título, grade, navegação) e
     // mostra "vídeo indisponível". O erro vai para o log do servidor (Sentry, na Fase 7).
     let playback: VideoPlayback | null = null;
@@ -176,6 +186,19 @@ export default async function LessonPage({ params }: LessonPageProps) {
         {main}
 
         {lesson.description ? <p className="leading-relaxed">{lesson.description}</p> : null}
+
+        {subjects.length > 0 ? (
+          <section className="grid gap-2 rounded-lg border p-4" aria-label="Treinar questões">
+            <p className="text-sm font-medium">Treine o que você aprendeu nesta aula:</p>
+            <div className="flex flex-wrap gap-2">
+              {subjects.map((subject) => (
+                <Button key={subject.id} asChild variant="outline" size="sm" className="h-auto min-h-8 shrink py-1.5 text-left whitespace-normal">
+                  <Link href={`/questoes?assunto=${encodeURIComponent(subject.slug)}`}>Questões de {subject.name}</Link>
+                </Button>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <nav className="flex flex-wrap justify-between gap-2" aria-label="Navegação entre aulas">
           {previous ? (

@@ -29,6 +29,16 @@
 - Todo PR segue o guia `docs/COMO-REVISAR.md` (descrição com "como testar" e "por onde revisar").
 - Acesso a aulas: decidir SEMPRE com `checkLessonAccess` (`src/modules/enrollment/access.ts`), nunca com
   um `if` solto em página/ação. O vídeo (`getLessonPlayback`) só é pedido DEPOIS do acesso liberado.
+- Trilhas (Fase 8, `src/modules/tracks/`): a trilha NÃO libera aula — o cadeado de cada passo vem de `buildTrackView`
+  (`rules.ts`), que usa `checkLessonAccess` com a matrícula no curso DAQUELA aula. Estrutura (etapas/passos) só por
+  `tracks-admin.server.ts`, dentro da trava `track:<id>` (`withTrackLock`, que também atualiza o `updatedAt` da trilha
+  para o sitemap); uma aula no máximo uma vez por trilha. Matrículas da trilha: `listEnrollments(..., courseIds)`. Aula, curso, assunto ou
+  banca usados numa trilha não se apagam (FK `Restrict` + conferência com mensagem em `deleteLesson`/`deleteCourse`/
+  `deleteSubject`/`deleteBoard`). Treino "feito" = questões DIFERENTES do assunto (`listPracticeStats`).
+- Aula ↔ assunto: gravar só com `setLessonSubjects` (`catalog-admin.server.ts`, trava a aula); ler com `listStudyLessonsBySubject`/
+  `listLessonSubjects` (`src/modules/catalog/lesson-subjects.server.ts`, que já esconde aulas em rascunho).
+- Cartões de oferta (produto/plano, com ou sem cupom): `OfferCards` (`src/modules/payments/components/offer-cards.tsx`);
+  o cupom só entra quando `previewCoupon` diz que vale para aquela oferta.
 - Server Actions que mexem em aula/progresso conferem login + acesso (ver `src/modules/progress/actions.ts`).
 - Página que consulta o banco sem ler cookies/headers precisa de `await connection()` (de `next/server`);
   senão o `next build` tenta consultar o banco (e o CI não tem banco no build).
@@ -81,7 +91,8 @@
   Migração que apaga/renomeia coluna ou tabela vai em duas entregas (primeiro o código para de usar).
 - Teste de integração que apaga usuários precisa limpar antes os dados de venda, cupons e afiliados (itens de repasse, repasses,
   cupons, afiliados — ver `resetSales` em `tests/integration/payments.test.ts`) e os aceites (`legal_consents`, `onDelete: Restrict`);
-  o que apaga questões precisa limpar antes `question_attempts` e `mock_exam_questions` (`onDelete: Restrict` na questão).
+  o que apaga questões precisa limpar antes `question_attempts` e `mock_exam_questions` (`onDelete: Restrict` na questão);
+  o que apaga aulas, cursos, assuntos ou bancas precisa apagar antes as trilhas que os usam (`track_items`, `Restrict`).
 - Banco de questões: o nível de acesso sai SEMPRE de `getQuestionBankLevelFor` + `checkAnswerPermission`
   (`src/modules/questions/`), nunca de um `if` solto. Gabarito (`correctAnswer`) e comentário (`explanation`) nunca entram
   no `select` de listas nem de simulado em andamento: só saem em `answerQuestion` e no simulado finalizado.
@@ -104,7 +115,7 @@
   Caminho "do site" (link `/r/...`, links do Markdown, voltar do login): sempre `safeRedirectPath`, nunca um `startsWith` solto.
 - Texto do blog/concursos só com `<Markdown>`/`parseMarkdown` (`src/lib/markdown/`); nunca `dangerouslySetInnerHTML`
   (única exceção: `<JsonLd>`, que escapa o conteúdo em `serializeJsonLd`).
-- Trocar o slug de curso, aula, post ou página de concurso chama `recordSlugChange` na mesma transação; a página pública
+- Trocar o slug de curso, aula, post, página de concurso ou trilha chama `recordSlugChange` na mesma transação; a página pública
   chama `redirectOldCatalogPathOrNotFound`/`redirectOldSlugOrNotFound` (com `canSeeDrafts`) antes de dar 404 — endereço
   antigo de rascunho nunca redireciona para o público (o 308 revelaria o endereço novo).
 - Função de busca usada pela página E pelo `generateMetadata` leva o `cache` do React (ex.: `getPostForViewer`).

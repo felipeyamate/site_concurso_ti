@@ -49,6 +49,7 @@ export default async function NewNoticePage() {
           planId: "",
           couponCode: "",
           subjectIds: [],
+          trackId: "",
           isPublished: false,
         }}
         options={options}

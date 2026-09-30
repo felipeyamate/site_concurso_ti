@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * content-nav.tsx — Submenu da seção "Conteúdo do site" do painel (Blog, Concursos).
+ * content-nav.tsx — Submenu da seção "Conteúdo do site" do painel (Blog, Concursos, Trilhas).
  *
  * Quem chama: `src/app/admin/conteudo/layout.tsx`.
  * "use client" porque destaca a página atual (`usePathname`). O menu só ESCONDE links; quem protege
@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 const LINKS = [
   { href: "/admin/conteudo/blog", label: "Blog" },
   { href: "/admin/conteudo/concursos", label: "Concursos (páginas de edital)" },
+  { href: "/admin/conteudo/trilhas", label: "Trilhas de estudo" },
 ];
 
 export function ContentNav() {

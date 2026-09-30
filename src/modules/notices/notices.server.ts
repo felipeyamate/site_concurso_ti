@@ -65,6 +65,7 @@ export const getNoticeForViewer = cache(async (slug: string, canSeeDrafts: boole
       subjects: { select: { subject: { select: { id: true, name: true, slug: true, position: true } } } },
       product: { select: { id: true, slug: true, title: true, priceCents: true, accessDays: true, maxInstallments: true, isActive: true } },
       plan: { select: { id: true, slug: true, title: true, priceCents: true, cycle: true, isActive: true } },
+      track: { select: { slug: true, title: true, summary: true, isPublished: true } },
     },
   });
   if (!notice || (!notice.isPublished && !canSeeDrafts)) return null;
@@ -85,6 +86,8 @@ export const getNoticeForViewer = cache(async (slug: string, canSeeDrafts: boole
     // desativado, esgotado, de outro produto...) — a página então não promete o desconto.
     product: product ? { ...product, coupon: productCoupon } : null,
     plan: plan ? { ...plan, coupon: planCoupon } : null,
+    // Fase 8: a trilha indicada — só publicada (rascunho só na prévia do professor/admin).
+    track: notice.track && (notice.track.isPublished || canSeeDrafts) ? notice.track : null,
     topSubjects: incidence ? incidence.subjects.slice(0, 5) : [],
     incidenceTotal: incidence?.total ?? 0,
   };

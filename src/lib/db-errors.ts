@@ -6,6 +6,7 @@
  *
  * Códigos do Prisma usados (documentação "Prisma error reference"):
  *   P2002 = valor repetido numa coluna que precisa ser única (UNIQUE);
+ *   P2003 = chave estrangeira: aponta para algo que não existe (ou apagar algo que ainda é usado);
  *   P2025 = o registro a alterar/apagar não existe;
  *   P2034 = conflito entre duas transações simultâneas (numa transação "serializável", o banco
  *           cancela uma delas em vez de deixar as duas gravarem um resultado inconsistente).
@@ -21,6 +22,10 @@ function hasPrismaCode(error: unknown, code: string): boolean {
 
 export function isUniqueViolation(error: unknown): boolean {
   return hasPrismaCode(error, "P2002");
+}
+
+export function isForeignKeyViolation(error: unknown): boolean {
+  return hasPrismaCode(error, "P2003");
 }
 
 export function isRecordNotFound(error: unknown): boolean {

@@ -6,7 +6,7 @@
  * Regras:
  *  - Slug único; vazio = gerado do título. Mudou o slug → o endereço antigo redireciona.
  *  - A data de publicação é a da PRIMEIRA publicação.
- *  - Banca, assuntos, produto, plano e cupom escolhidos precisam existir. Um cupom que ainda não
+ *  - Banca, assuntos, produto, plano, trilha (Fase 8) e cupom escolhidos precisam existir. Um cupom que ainda não
  *    vale (ex.: começa amanhã) pode ser escolhido: a página só mostra o desconto quando ele valer.
  *  - O CUPOM da página só o ADMIN escolhe (`canChooseCoupon`): cupons são dados de venda, que o
  *    professor não vê. Quando o professor salva, o cupom que já estava na página é mantido — e o
@@ -14,7 +14,7 @@
  */
 import "server-only";
 
-import { isUniqueViolation } from "@/lib/db-errors";
+import { isForeignKeyViolation, isUniqueViolation } from "@/lib/db-errors";
 import { advisoryLock } from "@/lib/db-locks";
 import { prisma } from "@/lib/db";
 import { UserFacingError } from "@/lib/form-state";
@@ -35,15 +35,16 @@ export async function getNoticeForAdmin(noticeId: string) {
   return prisma.examNotice.findUnique({ where: { id: noticeId }, include: { subjects: { select: { subjectId: true } } } });
 }
 
-/** O que o formulário oferece: bancas, assuntos, produtos e planos. */
+/** O que o formulário oferece: bancas, assuntos, produtos, planos e trilhas. */
 export async function listNoticeFormOptions() {
-  const [boards, subjects, products, plans] = await Promise.all([
+  const [boards, subjects, products, plans, tracks] = await Promise.all([
     prisma.board.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.subject.findMany({ orderBy: [{ position: "asc" }, { name: "asc" }], select: { id: true, name: true } }),
     prisma.product.findMany({ orderBy: { title: "asc" }, select: { id: true, title: true, isActive: true } }),
     prisma.plan.findMany({ orderBy: { title: "asc" }, select: { id: true, title: true, isActive: true } }),
+    prisma.track.findMany({ orderBy: { title: "asc" }, select: { id: true, title: true, isPublished: true } }),
   ]);
-  return { boards, subjects, products, plans };
+  return { boards, subjects, products, plans, tracks };
 }
 
 /**
@@ -70,16 +71,18 @@ export async function saveNotice(
         if (chosen) await advisoryLock(tx, `coupon:${chosen.id}`);
       }
 
-      const [board, product, plan, coupon, subjects] = await Promise.all([
+      const [board, product, plan, track, coupon, subjects] = await Promise.all([
         data.boardId ? tx.board.count({ where: { id: data.boardId } }) : 1,
         data.productId ? tx.product.count({ where: { id: data.productId } }) : 1,
         data.planId ? tx.plan.count({ where: { id: data.planId } }) : 1,
+        data.trackId ? tx.track.count({ where: { id: data.trackId } }) : 1,
         options.canChooseCoupon && couponCode ? tx.coupon.count({ where: { code: couponCode } }) : 1,
         tx.subject.count({ where: { id: { in: data.subjectIds } } }),
       ]);
       if (board === 0) throw new UserFacingError("Banca não encontrada.", { field: "boardId" });
       if (product === 0) throw new UserFacingError("Produto não encontrado.", { field: "productId" });
       if (plan === 0) throw new UserFacingError("Plano não encontrado.", { field: "planId" });
+      if (track === 0) throw new UserFacingError("Trilha não encontrada.", { field: "trackId" });
       if (coupon === 0) throw new UserFacingError("Não existe cupom com este código (crie em Vendas → Cupons).", { field: "couponCode" });
       if (subjects !== data.subjectIds.length) throw new UserFacingError("Algum assunto escolhido não existe mais. Recarregue a página.");
 
@@ -99,6 +102,7 @@ export async function saveNotice(
         productId: data.productId,
         planId: data.planId,
         couponCode,
+        trackId: data.trackId,
         isPublished: data.isPublished,
       };
 
@@ -124,6 +128,8 @@ export async function saveNotice(
     });
   } catch (error) {
     if (isUniqueViolation(error)) throw new UserFacingError("Já existe uma página com este endereço.", { field: "slug" });
+    // Algo escolhido (banca, produto, plano, trilha, assunto) foi apagado entre a conferência e a gravação.
+    if (isForeignKeyViolation(error)) throw new UserFacingError("Algum item escolhido não existe mais (banca, assunto, produto, plano ou trilha). Recarregue a página.");
     throw error;
   }
 }

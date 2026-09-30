@@ -19,7 +19,7 @@ const RESET_SALES_SQL = `TRUNCATE TABLE affiliate_payout_items, affiliate_payout
   coupon_products, coupon_plans, coupons, affiliates, billing_profiles, product_courses,
   exam_notice_subjects, exam_notices, blog_posts, slug_redirects, products, plans,
   question_attempts, mock_exam_questions, mock_exams, question_options, questions, exams, subjects, boards,
-  legal_consents, access_logs;`;
+  legal_consents, access_logs, track_items, track_sections, tracks, lesson_subjects;`;
 
 export default function globalSetup(): void {
   configureTestEnv();

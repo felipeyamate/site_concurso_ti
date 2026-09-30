@@ -38,6 +38,7 @@ export type NoticeFormValues = {
   planId: string;
   couponCode: string;
   subjectIds: string[];
+  trackId: string;
   isPublished: boolean;
 };
 
@@ -46,6 +47,7 @@ type Options = {
   subjects: Array<{ id: string; name: string }>;
   products: Array<{ id: string; title: string; isActive: boolean }>;
   plans: Array<{ id: string; title: string; isActive: boolean }>;
+  tracks: Array<{ id: string; title: string; isPublished: boolean }>;
 };
 
 export function NoticeForm({ notice, options, canChooseCoupon }: { notice: NoticeFormValues; options: Options; canChooseCoupon: boolean }) {
@@ -165,6 +167,20 @@ export function NoticeForm({ notice, options, canChooseCoupon }: { notice: Notic
           ? text("couponCode", "Cupom já aplicado nos botões (opcional)", { placeholder: "Ex.: BB10" })
           : text("couponCode", "Cupom já aplicado nos botões", { readOnly: true, hint: "Só o administrador escolhe o cupom." })}
       </fieldset>
+
+      <div className="grid gap-2">
+        <Label htmlFor="notice-track">Trilha de estudos indicada (botão &quot;Seguir a trilha&quot;)</Label>
+        <NativeSelect id="notice-track" name="trackId" defaultValue={notice.trackId}>
+          <option value="">Nenhuma</option>
+          {options.tracks.map((track) => (
+            <option key={track.id} value={track.id}>
+              {track.title}
+              {track.isPublished ? "" : " (rascunho — não aparece até publicar)"}
+            </option>
+          ))}
+        </NativeSelect>
+        <FieldError id="notice-track-error" message={errors.trackId} />
+      </div>
 
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" name="isPublished" defaultChecked={notice.isPublished} className="accent-primary size-4" />

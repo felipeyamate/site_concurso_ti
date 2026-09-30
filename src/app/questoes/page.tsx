@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { requireSession } from "@/modules/auth/session";
+import { listStudyLessonsBySubject } from "@/modules/catalog/lesson-subjects.server";
 import { QuestionCard } from "@/modules/questions/components/question-card";
 import { PRACTICE_STATUS_LABELS, questionsCountLabel } from "@/modules/questions/labels";
 import { getQuestionBankStatus, listFilterOptions, listPracticeQuestions, PRACTICE_PAGE_SIZE } from "@/modules/questions/questions.server";
@@ -35,6 +36,8 @@ export default async function QuestionsPage({ searchParams }: PageProps<"/questo
     listFilterOptions(),
     listPracticeQuestions({ userId: user.id, filters }),
   ]);
+  // Fase 8: "estude esta aula" — as aulas que ensinam o assunto de cada questão da página (uma consulta só).
+  const studyLessons = await listStudyLessonsBySubject([...new Set(result.questions.map((question) => question.subject.id))]);
   const hrefFor = (page: number) => `/questoes${practiceFiltersToQuery(filters, page)}`;
   const firstNumber = (result.page - 1) * PRACTICE_PAGE_SIZE + 1;
 
@@ -146,7 +149,7 @@ export default async function QuestionsPage({ searchParams }: PageProps<"/questo
       ) : (
         <div className="grid gap-4">
           {result.questions.map((question, index) => (
-            <QuestionCard key={question.id} question={question} number={firstNumber + index} />
+            <QuestionCard key={question.id} question={question} number={firstNumber + index} studyLessons={studyLessons.get(question.subject.id) ?? []} />
           ))}
         </div>
       )}

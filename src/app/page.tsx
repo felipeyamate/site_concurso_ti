@@ -3,7 +3,7 @@
  *
  * Quem chama: o Next.js, na raiz do site.
  * Mostra: a proposta (TI para concursos, do zero), os diferenciais, os concursos com inscrições
- * abertas/previstos (páginas de edital) e os últimos posts do blog (Fase 6).
+ * abertas/previstos (páginas de edital), as trilhas de estudo (Fase 8) e os últimos posts do blog (Fase 6).
  * SEO: endereço canônico e dados estruturados da escola e do site (JSON-LD).
  * `await connection()`: consulta o banco sem ler cookies (regra do CLAUDE.md).
  */
@@ -20,6 +20,7 @@ import { listLatestPosts } from "@/modules/blog/blog.server";
 import { PostCard } from "@/modules/blog/components/post-card";
 import { NOTICE_STATUS_LABELS } from "@/modules/notices/labels";
 import { listPublishedNotices } from "@/modules/notices/notices.server";
+import { listPublishedTracks } from "@/modules/tracks/tracks.server";
 import { formatDateOnly } from "@/modules/payments/dates";
 import { organizationJsonLd, websiteJsonLd } from "@/modules/seo/json-ld";
 import { JsonLd } from "@/modules/seo/json-ld-script";
@@ -49,7 +50,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
   await connection();
   // Depois de excluir a conta (LGPD), a pessoa chega aqui com ?conta=excluida.
   const accountDeleted = (await searchParams).conta === "excluida";
-  const [notices, posts] = await Promise.all([listPublishedNotices(), listLatestPosts(3)]);
+  const [notices, posts, tracks] = await Promise.all([listPublishedNotices(), listLatestPosts(3), listPublishedTracks(3)]);
   // Concursos que o aluno ainda pode fazer (inscrições abertas ou previstos), até 3.
   const upcoming = notices.filter((notice) => notice.status === "OPEN" || notice.status === "EXPECTED").slice(0, 3);
 
@@ -119,6 +120,32 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
                 <span className="font-semibold">{notice.title}</span>
                 <span className="text-muted-foreground text-sm">
                   {notice.examDate ? `Prova em ${formatDateOnly(notice.examDate)}` : "Data da prova a definir"}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {tracks.length > 0 ? (
+        <section className="grid gap-4">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <h2 className="text-2xl font-semibold tracking-tight">Trilhas de estudo</h2>
+            <Link href="/trilhas" className="text-sm underline">
+              Ver todas
+            </Link>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {tracks.map((track) => (
+              <Link key={track.id} href={`/trilhas/${track.slug}`} className="hover:bg-muted/50 grid gap-2 rounded-xl border p-5">
+                {track.board ? (
+                  <div>
+                    <Badge variant="outline">{track.board.name}</Badge>
+                  </div>
+                ) : null}
+                <span className="font-semibold">{track.title}</span>
+                <span className="text-muted-foreground text-sm">
+                  {track.lessonCount} aula(s) · {track.practiceCount} treino(s), na ordem do que mais cai
                 </span>
               </Link>
             ))}

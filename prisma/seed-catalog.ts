@@ -243,6 +243,18 @@ async function assertNoStudentProgressWouldBeDeleted(prisma: PrismaClient): Prom
           "Nada foi gravado. Devolva essas aulas aos dados de exemplo ou use um banco de desenvolvimento limpo.",
       );
     }
+    // Fase 8: aula numa trilha não se apaga (chave estrangeira `Restrict`); avisa ANTES de gravar qualquer coisa.
+    const lessonsInTracks = await prisma.lesson.findMany({
+      where: { course: { slug: seedCourse.slug }, slug: { notIn: seedSlugs }, trackItems: { some: {} } },
+      select: { slug: true },
+    });
+    if (lessonsInTracks.length > 0) {
+      const slugs = lessonsInTracks.map((lesson) => lesson.slug).join(", ");
+      throw new Error(
+        `O seed apagaria aulas que estão em trilhas (${seedCourse.slug}: ${slugs}). ` +
+          "Nada foi gravado. Tire essas aulas das trilhas (painel → Conteúdo do site → Trilhas) ou use um banco de desenvolvimento limpo.",
+      );
+    }
   }
 }
 

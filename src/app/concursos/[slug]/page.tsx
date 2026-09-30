@@ -3,8 +3,9 @@
  *
  * Quem chama: o Next.js (lista de concursos, Google, anúncios, afiliados).
  * Mostra: situação e datas, o que estudar de TI (com atalho para as questões do assunto na banca),
- * o "o que mais cai" da banca (Fase 5), o texto da página, o edital oficial e a oferta — produto e/ou
- * plano, com o cupom da página já aplicado no botão (`?cupom=`).
+ * o "o que mais cai" da banca (Fase 5), o texto da página, o edital oficial, a oferta — produto e/ou
+ * plano, com o cupom da página já aplicado no botão (`?cupom=`, só na oferta em que ele VALE, conferido
+ * em `getNoticeForViewer`) — e a trilha de estudos indicada (Fase 8).
  * Professor/admin veem RASCUNHOS (prévia sem indexação). Slug antigo → redireciona.
  */
 import "server-only";
@@ -19,12 +20,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Markdown } from "@/lib/markdown/markdown";
 import { hasMinimumRole } from "@/modules/auth/roles";
 import { getCurrentSession } from "@/modules/auth/session";
-import { COUPON_PARAM } from "@/modules/coupons/components/coupon-box";
 import { NOTICE_STATUS_LABELS } from "@/modules/notices/labels";
 import { getNoticeForViewer } from "@/modules/notices/notices.server";
 import { formatDateOnly } from "@/modules/payments/dates";
-import { PLAN_CYCLE_PERIOD, accessDaysLabel } from "@/modules/payments/labels";
-import { formatBRL } from "@/modules/payments/money";
+import { OfferCards } from "@/modules/payments/components/offer-cards";
 import { breadcrumbJsonLd } from "@/modules/seo/json-ld";
 import { JsonLd } from "@/modules/seo/json-ld-script";
 import { redirectOldSlugOrNotFound } from "@/modules/seo/redirects.server";
@@ -57,8 +56,6 @@ export default async function NoticePage({ params }: PageProps<"/concursos/[slug
     // Endereço antigo (o slug mudou): leva ao atual (rascunho só para quem vê rascunhos).
     return redirectOldSlugOrNotFound("EXAM_NOTICE", slug, { canSeeDrafts: await canSeeDrafts() });
   }
-  // O cupom só vai no link da oferta para a qual ele VALE (conferido em `getNoticeForViewer`).
-  const withCoupon = (path: string, coupon: OfferCoupon | null) => (coupon ? `${path}?${COUPON_PARAM}=${encodeURIComponent(coupon.code)}` : path);
   const facts = [
     ["Situação", NOTICE_STATUS_LABELS[notice.status]],
     ["Banca", notice.board?.name ?? "A definir"],
@@ -67,7 +64,6 @@ export default async function NoticePage({ params }: PageProps<"/concursos/[slug
     ...(notice.vacancies ? [["Vagas", notice.vacancies]] : []),
     ...(notice.salary ? [["Salário", notice.salary]] : []),
   ];
-  const hasOffers = Boolean(notice.product || notice.plan);
 
   return (
     <div className="mx-auto grid w-full max-w-4xl gap-8 px-4 py-10">
@@ -119,44 +115,22 @@ export default async function NoticePage({ params }: PageProps<"/concursos/[slug
         ))}
       </dl>
 
-      {hasOffers ? (
-        <section className="grid gap-4 sm:grid-cols-2" aria-label="Como se preparar">
-          {notice.product ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>{notice.product.title}</CardTitle>
-                <CardDescription>
-                  <OfferPrice priceCents={notice.product.priceCents} coupon={notice.product.coupon} /> · acesso{" "}
-                  {accessDaysLabel(notice.product.accessDays)}
-                  {notice.product.maxInstallments > 1 ? ` · até ${notice.product.maxInstallments}x no cartão` : ""}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-2">
-                <CouponNote coupon={notice.product.coupon} />
-                <Button asChild>
-                  <Link href={withCoupon(`/comprar/${notice.product.slug}`, notice.product.coupon)}>Quero me preparar</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ) : null}
-          {notice.plan ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>{notice.plan.title}</CardTitle>
-                <CardDescription>
-                  <OfferPrice priceCents={notice.plan.priceCents} coupon={notice.plan.coupon} /> {PLAN_CYCLE_PERIOD[notice.plan.cycle]} · todos
-                  os cursos da assinatura
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-2">
-                <CouponNote coupon={notice.plan.coupon} />
-                <Button asChild variant={notice.product ? "outline" : "default"}>
-                  <Link href={withCoupon(`/assinar/${notice.plan.slug}`, notice.plan.coupon)}>Assinar</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ) : null}
-        </section>
+      <OfferCards product={notice.product} plan={notice.plan} />
+
+      {notice.track ? (
+        <Card className="border-primary/40">
+          <CardHeader>
+            <CardDescription>Trilha de estudos indicada para este concurso</CardDescription>
+            <CardTitle>{notice.track.title}</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {notice.track.summary ? <p className="text-sm leading-relaxed">{notice.track.summary}</p> : null}
+            <p className="text-muted-foreground text-sm">O roteiro passo a passo — aulas e treinos de questões — na ordem do que mais cai.</p>
+            <Button asChild className="h-auto min-h-9 w-fit shrink py-2 text-left whitespace-normal">
+              <Link href={`/trilhas/${notice.track.slug}`}>Seguir a trilha</Link>
+            </Button>
+          </CardContent>
+        </Card>
       ) : null}
 
       {notice.subjects.length > 0 ? (
@@ -216,26 +190,5 @@ export default async function NoticePage({ params }: PageProps<"/concursos/[slug
         </Button>
       </div>
     </div>
-  );
-}
-
-type OfferCoupon = { code: string; finalPriceCents: number };
-
-/** Preço da oferta: com o cupom valendo, o antigo riscado e o novo. */
-function OfferPrice({ priceCents, coupon }: { priceCents: number; coupon: OfferCoupon | null }) {
-  if (!coupon) return <>{formatBRL(priceCents)}</>;
-  return (
-    <>
-      <span className="line-through">{formatBRL(priceCents)}</span> <strong className="text-foreground">{formatBRL(coupon.finalPriceCents)}</strong>
-    </>
-  );
-}
-
-function CouponNote({ coupon }: { coupon: OfferCoupon | null }) {
-  if (!coupon) return null;
-  return (
-    <p className="text-sm">
-      Com o cupom <strong>{coupon.code}</strong> já aplicado.
-    </p>
   );
 }

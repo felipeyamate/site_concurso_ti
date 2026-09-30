@@ -32,14 +32,16 @@ export async function getEnrollment(
 
 /**
  * Todas as matrículas da pessoa, uma por curso (já juntando as origens), com o ID do curso.
- * A área do aluno usa para listar "Meus cursos".
+ * A área do aluno usa para listar "Meus cursos"; a trilha passa `courseIds` para buscar só os cursos
+ * das aulas dela (a mesma junção das origens, sem repetir a regra em outro lugar).
  */
 export async function listEnrollments(
   userId: string,
   now: Date = new Date(),
+  courseIds?: string[],
 ): Promise<Array<EnrollmentSnapshot & { courseId: string }>> {
   const rows = await prisma.enrollment.findMany({
-    where: { userId },
+    where: { userId, ...(courseIds ? { courseId: { in: courseIds } } : {}) },
     select: { courseId: true, ...enrollmentSnapshotSelect },
   });
 

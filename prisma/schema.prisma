@@ -286,6 +286,10 @@ model Lesson {
   updatedAt       DateTime           @updatedAt @map("updated_at")
   progress        LessonProgress[]
   attachments     LessonAttachment[]
+  // Fase 8: assuntos que a aula ensina ("estude esta aula" ao errar uma questão do assunto) e as
+  // trilhas em que ela aparece.
+  subjects        LessonSubject[]
+  trackItems      TrackItem[]
 
   @@unique([courseId, slug])
   @@unique([moduleId, position])
@@ -427,6 +431,8 @@ model Product {
   // Fase 6: cupons restritos a este produto e páginas de edital que o oferecem.
   coupons         CouponProduct[]
   examNotices     ExamNotice[]
+  // Fase 8: trilhas que oferecem este produto.
+  tracks          Track[]
 
   @@map("products")
 }
@@ -463,6 +469,8 @@ model Plan {
   // Fase 6: cupons restritos a este plano e páginas de edital que o oferecem.
   coupons       CouponPlan[]
   examNotices   ExamNotice[]
+  // Fase 8: trilhas que oferecem este plano.
+  tracks        Track[]
 
   @@map("plans")
 }
@@ -726,16 +734,19 @@ enum AttemptSource {
 
 // Banca organizadora de concursos (ex.: Cesgranrio, Cebraspe, FGV, FCC).
 model Board {
-  id        String       @id @default(cuid())
+  id         String       @id @default(cuid())
   // Identificador usado nos filtros da URL (?banca=cesgranrio).
-  slug      String       @unique
-  name      String       @unique
-  createdAt DateTime     @default(now()) @map("created_at")
-  updatedAt DateTime     @updatedAt @map("updated_at")
-  exams     Exam[]
-  questions Question[]
+  slug       String       @unique
+  name       String       @unique
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  exams      Exam[]
+  questions  Question[]
   // Fase 6: páginas de edital desta banca.
-  notices   ExamNotice[]
+  notices    ExamNotice[]
+  // Fase 8: trilhas desta banca e treinos de trilha filtrados por ela.
+  tracks     Track[]
+  trackItems TrackItem[]
 
   @@map("boards")
 }
@@ -743,17 +754,21 @@ model Board {
 // Assunto cobrado (ex.: "Segurança da Informação — malware"). É a base do mapa "o que mais cai"
 // e do desempenho do aluno por assunto.
 model Subject {
-  id        String              @id @default(cuid())
-  slug      String              @unique
-  name      String              @unique
+  id            String              @id @default(cuid())
+  slug          String              @unique
+  name          String              @unique
   // Ordem nas listas (menor primeiro; empate = ordem alfabética).
-  position  Int                 @default(0)
-  createdAt DateTime            @default(now()) @map("created_at")
-  updatedAt DateTime            @updatedAt @map("updated_at")
-  questions Question[]
+  position      Int                 @default(0)
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  questions     Question[]
   // Fase 6: editais que cobram este assunto e posts do blog sobre ele.
-  notices   ExamNoticeSubject[]
-  blogPosts BlogPost[]
+  notices       ExamNoticeSubject[]
+  blogPosts     BlogPost[]
+  // Fase 8: aulas que ensinam o assunto, treinos e etapas de trilhas.
+  lessons       LessonSubject[]
+  trackItems    TrackItem[]
+  trackSections TrackSection[]
 
   @@map("subjects")
 }
@@ -1054,6 +1069,9 @@ model ExamNotice {
   planId             String?             @map("plan_id")
   plan               Plan?               @relation(fields: [planId], references: [id], onDelete: SetNull)
   couponCode         String?             @map("coupon_code")
+  // Fase 8: a trilha de estudos indicada para este concurso ("Siga a trilha").
+  trackId            String?             @map("track_id")
+  track              Track?              @relation(fields: [trackId], references: [id], onDelete: SetNull)
   isPublished        Boolean             @default(false) @map("is_published")
   publishedAt        DateTime?           @map("published_at")
   createdAt          DateTime            @default(now()) @map("created_at")
@@ -1105,6 +1123,7 @@ enum SlugRedirectKind {
   LESSON
   BLOG_POST
   EXAM_NOTICE
+  TRACK
 }
 
 // Endereço antigo → item atual. Quando o slug de um curso/aula/post/edital muda, o endereço antigo
@@ -1121,4 +1140,101 @@ model SlugRedirect {
 
   @@unique([kind, scope, oldSlug])
   @@map("slug_redirects")
+}
+
+// =============================================================================================
+// Fase 8 — Trilhas de estudo por concurso/banca
+// =============================================================================================
+// Uma trilha é um ROTEIRO de estudo (ex.: "TI para o Banco do Brasil — Cesgranrio"): etapas em
+// ordem, cada uma com aulas (de QUALQUER curso — o Curso Base e aulas próprias) e treinos de
+// questões (assunto + banca, com uma meta). Ela NÃO libera acesso: cada aula continua decidida pela
+// matrícula no curso dela (`checkLessonAccess`); a trilha só diz o que estudar e em que ordem.
+
+// A aula ensina estes assuntos (Fase 5). Liga "errei uma questão de X" → "estude esta aula" e a aula
+// → "treinar questões de X". Uma aula pode ter vários assuntos e um assunto, várias aulas.
+model LessonSubject {
+  lessonId  String  @map("lesson_id")
+  lesson    Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  subjectId String  @map("subject_id")
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@id([lessonId, subjectId])
+  @@index([subjectId])
+  @@map("lesson_subjects")
+}
+
+model Track {
+  id          String         @id @default(cuid())
+  // Endereço público: /trilhas/<slug>.
+  slug        String         @unique
+  title       String
+  // Resumo (lista de trilhas e descrição para o Google) e apresentação (Markdown simples).
+  summary     String         @default("")
+  body        String         @default("")
+  // A banca da trilha: ordena pelo "o que mais cai" e é o filtro padrão dos treinos.
+  boardId     String?        @map("board_id")
+  board       Board?         @relation(fields: [boardId], references: [id], onDelete: SetNull)
+  // O que oferecer na página (como nas páginas de concurso): um produto e/ou um plano.
+  productId   String?        @map("product_id")
+  product     Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+  planId      String?        @map("plan_id")
+  plan        Plan?          @relation(fields: [planId], references: [id], onDelete: SetNull)
+  isPublished Boolean        @default(false) @map("is_published")
+  // Primeira publicação (como nos posts e concursos).
+  publishedAt DateTime?      @map("published_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  sections    TrackSection[]
+  notices     ExamNotice[]
+
+  @@index([isPublished, title])
+  @@map("tracks")
+}
+
+// Uma etapa da trilha (ex.: "1. Segurança da Informação"), em ordem.
+model TrackSection {
+  id          String      @id @default(cuid())
+  trackId     String      @map("track_id")
+  track       Track       @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  title       String
+  description String      @default("")
+  // Assunto da etapa (opcional): a página mostra, ao vivo, quanto ele cai na banca da trilha.
+  subjectId   String?     @map("subject_id")
+  subject     Subject?    @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  position    Int
+  items       TrackItem[]
+
+  @@unique([trackId, position])
+  @@map("track_sections")
+}
+
+enum TrackItemKind {
+  LESSON // assistir uma aula
+  PRACTICE // treinar questões de um assunto (e banca)
+}
+
+// Um passo da etapa. As travas CHECK da migração garantem: aula → só `lessonId`; treino → assunto
+// (e banca opcional) + meta de questões.
+model TrackItem {
+  id           String        @id @default(cuid())
+  sectionId    String        @map("section_id")
+  section      TrackSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  position     Int
+  kind         TrackItemKind
+  // Restrict: aula, assunto ou banca usados numa trilha não se apagam sem sair dela antes (o painel avisa).
+  lessonId     String?       @map("lesson_id")
+  lesson       Lesson?       @relation(fields: [lessonId], references: [id], onDelete: Restrict)
+  subjectId    String?       @map("subject_id")
+  subject      Subject?      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  boardId      String?       @map("board_id")
+  board        Board?        @relation(fields: [boardId], references: [id], onDelete: Restrict)
+  // Treino: quantas questões DIFERENTES do assunto responder para dar o passo como feito.
+  questionGoal Int           @default(10) @map("question_goal")
+  // Dica curta do professor (ex.: "Foque em backup: cai toda prova").
+  note         String        @default("")
+
+  @@unique([sectionId, position])
+  @@index([lessonId])
+  @@index([subjectId])
+  @@map("track_items")
 }
