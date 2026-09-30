@@ -23,6 +23,7 @@ import { getEnrollmentStatus, type EnrollmentStatus } from "@/modules/enrollment
 import { revokeEnrollmentAction } from "@/modules/enrollment/admin-actions";
 import { GrantEnrollmentForm } from "@/modules/enrollment/components/grant-enrollment-form";
 import { OrderStatusBadge, SubscriptionStatusBadge } from "@/modules/payments/components/status-badge";
+import { AdminDeleteAccountForm } from "@/modules/privacy/components/privacy-forms";
 import { PLAN_CYCLE_PERIOD } from "@/modules/payments/labels";
 import { formatBRL } from "@/modules/payments/money";
 
@@ -55,9 +56,12 @@ export default async function AdminUserPage({ params }: PageProps<"/admin/usuari
         <Link href="/admin/usuarios" className="text-muted-foreground text-sm hover:underline">
           ← Usuários
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{user.name}</h1>
+        <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
+          {user.name}
+          {user.deletedAt ? <Badge variant="secondary">Excluída em {formatDateTime(user.deletedAt)}</Badge> : null}
+        </h1>
         <p className="text-muted-foreground text-sm">
-          {user.email} · {user.emailVerified ? "e-mail confirmado" : "e-mail não confirmado"} · cadastro em{" "}
+          <span className="break-all">{user.email}</span> · {user.emailVerified ? "e-mail confirmado" : "e-mail não confirmado"} · cadastro em{" "}
           {formatDateTime(user.createdAt)} · {user._count.sessions} dispositivo(s) conectado(s)
         </p>
       </div>
@@ -177,6 +181,23 @@ export default async function AdminUserPage({ params }: PageProps<"/admin/usuari
           ))}
         </CardContent>
       </Card>
+
+      {/* LGPD (Fase 7): pedido de exclusão que chegou pelo suporte. Mesmas regras da exclusão pela
+          própria pessoa (assinatura ativa ou pagamento aguardando impedem; compras ficam guardadas). */}
+      {!user.deletedAt && user.id !== admin.id ? (
+        <Card className="border-destructive/40">
+          <CardHeader>
+            <CardTitle>Excluir conta (LGPD)</CardTitle>
+            <CardDescription>
+              Para pedidos feitos pelo suporte. Apaga logins, estudo, nome e e-mail; compras e pagamentos ficam guardados sem o
+              nome, pela lei fiscal. A própria pessoa também pode excluir em &quot;Minha conta e privacidade&quot;.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AdminDeleteAccountForm userId={user.id} />
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

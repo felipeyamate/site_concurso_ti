@@ -1,8 +1,11 @@
 # =============================================================================
 # ci.yml — Verificação automática a cada push e pull request (GitHub Actions).
 #
-# O que roda, em ordem: lint → checagem de tipos → testes unitários →
-# testes de integração (com um PostgreSQL temporário) → build de produção.
+# Dois trabalhos, em paralelo:
+#  - check: lint → checagem de tipos → testes unitários → testes de integração
+#    (com um PostgreSQL temporário) → build de produção;
+#  - e2e (Fase 7): sobe o site com o conteúdo de exemplo e clica nele com um navegador de
+#    verdade (Playwright): cadastro, LGPD, compra simulada, reembolso, celular...
 # Se qualquer etapa falhar, o GitHub marca o commit com um X vermelho.
 #
 # Os valores abaixo são FALSOS e servem só para o CI. Segredos reais ficam
@@ -69,3 +72,64 @@ jobs:
 
       - name: Build de produção
         run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # Outro banco descartável: os testes E2E criam contas e compras de verdade nele.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: concurso_ti_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://app:app@localhost:5432/concurso_ti_e2e
+      BETTER_AUTH_SECRET: segredo-falso-apenas-para-o-ci-com-32-caracteres
+      BETTER_AUTH_URL: http://localhost:3100
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # O navegador usado nos testes (só o Chromium, com as bibliotecas do sistema).
+      - name: Instalar o navegador do Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Criar as tabelas e o conteúdo de exemplo
+        run: |
+          npm run db:deploy
+          npm run db:seed
+
+      # O playwright.config.ts sobe o site (npm run dev, porta 3100) e espera o /api/health.
+      - name: Testes E2E
+        run: npm run test:e2e
+
+      # Se falhar: o relatório com fotos da tela e o "trace" (passo a passo) fica para baixar
+      # na página do CI (Summary → Artifacts).
+      - name: Guardar o relatório dos testes
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

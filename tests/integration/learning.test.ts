@@ -52,6 +52,7 @@ beforeAll(async () => {
 
 // Cada teste começa sem usuários (apagar usuários apaga matrículas e progresso junto).
 beforeEach(async () => {
+  await prisma.legalConsent.deleteMany(); // aceites da LGPD (Fase 7) não deixam apagar o usuário
   await prisma.user.deleteMany();
 });
 

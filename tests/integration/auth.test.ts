@@ -18,6 +18,7 @@ const PASSWORD = "senhaForte123";
 
 // Começa cada teste com o banco de teste limpo (apagar usuários apaga sessões e contas junto).
 beforeEach(async () => {
+  await prisma.legalConsent.deleteMany(); // aceites da LGPD (Fase 7) não deixam apagar o usuário
   await prisma.user.deleteMany();
   await prisma.verification.deleteMany();
   await prisma.rateLimit.deleteMany();
@@ -133,6 +134,9 @@ describe("limite de sessões", () => {
     expect(tokens).not.toContain(first.token); // o mais antigo saiu
     expect(tokens).toContain(second.token);
     expect(tokens).toContain(third.token); // o mais novo sempre fica
+
+    // Registro de acesso (Marco Civil): cada um dos 3 logins fica guardado, mesmo o derrubado.
+    expect(await prisma.accessLog.count({ where: { user: { email } } })).toBe(3);
   });
 
   it("apaga sessões vencidas e nunca mexe nas sessões de outra pessoa", async () => {

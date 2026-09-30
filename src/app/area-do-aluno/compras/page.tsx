@@ -22,7 +22,9 @@ export const metadata: Metadata = {
 };
 
 export default async function MyPurchasesPage() {
-  const { user } = await requireSession("/area-do-aluno/compras");
+  // Abre mesmo sem o aceite da versão nova dos Termos: cancelar a assinatura e pedir reembolso são
+  // direitos de quem já comprou (e a exclusão da conta manda cancelar aqui antes). Comprar de novo exige o aceite.
+  const { user } = await requireSession("/area-do-aluno/compras", { allowPendingLegal: true });
   const purchases = await listMyPurchases(user.id);
 
   return (

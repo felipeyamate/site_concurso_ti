@@ -80,11 +80,13 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await prisma.legalConsent.deleteMany(); // aceites da LGPD (Fase 7) não deixam apagar o usuário
   await prisma.user.deleteMany();
   await removeTestCourses();
 });
 
 afterAll(async () => {
+  await prisma.legalConsent.deleteMany(); // aceites da LGPD (Fase 7) não deixam apagar o usuário
   await prisma.user.deleteMany();
   await removeTestCourses();
   await rm(storageDir, { recursive: true, force: true });

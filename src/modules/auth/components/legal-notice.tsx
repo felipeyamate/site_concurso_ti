@@ -1,8 +1,8 @@
 /**
  * legal-notice.tsx — Aviso "Ao continuar, você concorda com os Termos...".
  *
- * Quem chama: as telas de login e de cadastro.
- * (O registro formal do consentimento, exigido pela LGPD, está previsto para a Fase 7.)
+ * Quem chama: a tela de login. (No cadastro, o aceite é uma caixa a marcar e fica registrado — Fase 7;
+ * quem entra pelo Google ou pelo link mágico sem ter aceitado passa pela tela /aceitar-termos.)
  */
 import Link from "next/link";
 

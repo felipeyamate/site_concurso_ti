@@ -12,7 +12,9 @@ import { Button } from "@/components/ui/button";
 
 import { authClient } from "../auth-client";
 
-export function SignOutButton() {
+// `afterSignOut`: para onde ir depois de sair (padrão: página inicial). A página "Minha conta"
+// usa o login com volta, para quem precisa entrar de novo antes de excluir a conta.
+export function SignOutButton({ afterSignOut = "/" }: { afterSignOut?: string } = {}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -28,7 +30,7 @@ export function SignOutButton() {
         setFailed(true);
         return;
       }
-      router.push("/");
+      router.push(afterSignOut);
       router.refresh();
     } catch {
       setFailed(true);

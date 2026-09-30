@@ -41,6 +41,8 @@ export const signUpSchema = z
     email,
     password,
     confirmPassword: z.string(),
+    // Fase 7 (LGPD): o aceite dos Termos e da Política de privacidade é obrigatório para criar a conta.
+    acceptLegal: z.literal(true, { error: "Para criar a conta, aceite os Termos de uso e a Política de privacidade." }),
   })
   .refine((values) => values.password === values.confirmPassword, {
     error: "As senhas não são iguais.",

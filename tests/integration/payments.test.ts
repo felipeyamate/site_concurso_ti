@@ -55,6 +55,7 @@ async function resetSales() {
 
 async function resetAll() {
   await resetSales();
+  await prisma.legalConsent.deleteMany(); // aceites da LGPD (Fase 7) não deixam apagar o usuário
   await prisma.user.deleteMany();
   await prisma.course.deleteMany({ where: { slug: { startsWith: "teste-vendas" } } });
 }

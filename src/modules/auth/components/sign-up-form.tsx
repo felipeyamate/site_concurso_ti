@@ -5,15 +5,20 @@
  *
  * Quem chama: `src/app/(auth)/cadastro/page.tsx`.
  * O que acontece ao enviar:
- *   1. valida os campos no navegador;
+ *   1. valida os campos no navegador (inclusive a caixa "Li e aceito os Termos e a Política");
  *   2. o servidor cria o usuário (sempre com perfil STUDENT) e já faz o login;
- *   3. um e-mail de confirmação é enviado;
- *   4. a pessoa é levada para a área do aluno.
+ *   3. grava o aceite dos termos (LGPD: data, versão, IP e navegador) — se falhar, a área logada
+ *      pede o aceite de novo, então nada se perde;
+ *   4. um e-mail de confirmação é enviado;
+ *   5. a pessoa é levada para a área do aluno.
  */
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
+
+import { recordSignUpConsentAction } from "@/modules/privacy/actions";
 
 import { authClient } from "../auth-client";
 import { getAuthErrorMessage } from "../error-messages";
@@ -31,6 +36,7 @@ export function SignUpForm({ redirectTo, googleEnabled }: SignUpFormProps) {
   const router = useRouter();
   // Um único objeto com todos os campos (como um dict do Python).
   const [values, setValues] = useState({ name: "", email: "", password: "", confirmPassword: "" });
+  const [acceptLegal, setAcceptLegal] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -45,7 +51,7 @@ export function SignUpForm({ redirectTo, googleEnabled }: SignUpFormProps) {
     setFieldErrors({});
     setFormError(null);
 
-    const parsed = signUpSchema.safeParse(values);
+    const parsed = signUpSchema.safeParse({ ...values, acceptLegal });
     if (!parsed.success) {
       setFieldErrors(getFieldErrors(parsed.error));
       return;
@@ -59,12 +65,19 @@ export function SignUpForm({ redirectTo, googleEnabled }: SignUpFormProps) {
       // Para onde o link de confirmação de e-mail leva depois de confirmar.
       callbackURL: redirectTo,
     });
-    setPending(false);
-
     if (error) {
+      setPending(false);
       setFormError(getAuthErrorMessage(error));
       return;
     }
+    // Conta criada e logada: registra o aceite dos termos. Uma falha aqui não impede de seguir
+    // (a área logada pediria o aceite de novo).
+    try {
+      await recordSignUpConsentAction();
+    } catch {
+      // segue: o aceite será pedido na próxima página
+    }
+    setPending(false);
     router.push(redirectTo);
     router.refresh();
   }
@@ -109,6 +122,35 @@ export function SignUpForm({ redirectTo, googleEnabled }: SignUpFormProps) {
           onChange={(event) => updateField("confirmPassword", event.target.value)}
           error={fieldErrors.confirmPassword}
         />
+        <div className="grid gap-1">
+          <label className="flex items-start gap-2 text-sm leading-relaxed">
+            <input
+              type="checkbox"
+              name="acceptLegal"
+              checked={acceptLegal}
+              onChange={(event) => setAcceptLegal(event.target.checked)}
+              className="accent-primary mt-1 size-4 shrink-0"
+              aria-invalid={fieldErrors.acceptLegal ? true : undefined}
+              aria-describedby={fieldErrors.acceptLegal ? "acceptLegal-error" : undefined}
+            />
+            <span>
+              Li e aceito os{" "}
+              <Link href="/termos" target="_blank" className="underline">
+                Termos de uso
+              </Link>{" "}
+              e a{" "}
+              <Link href="/privacidade" target="_blank" className="underline">
+                Política de privacidade
+              </Link>
+              .
+            </span>
+          </label>
+          {fieldErrors.acceptLegal ? (
+            <p id="acceptLegal-error" className="text-destructive text-sm">
+              {fieldErrors.acceptLegal}
+            </p>
+          ) : null}
+        </div>
         <Button type="submit" className="w-full" disabled={pending}>
           {pending ? "Criando sua conta..." : "Criar conta"}
         </Button>

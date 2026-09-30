@@ -11,6 +11,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { AnalyticsConsent } from "@/modules/analytics/components/analytics-consent";
 import { SITE_DESCRIPTION, SITE_NAME } from "@/modules/seo/site";
 import { siteUrl } from "@/modules/seo/site.server";
 
@@ -55,6 +56,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <SiteHeader />
         <main className="flex flex-1 flex-col">{children}</main>
         <SiteFooter />
+        {/* Aviso de cookies + análise (PostHog), só se configurado e só com o aceite (Fase 7, LGPD). */}
+        <AnalyticsConsent />
       </body>
     </html>
   );

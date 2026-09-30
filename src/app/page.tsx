@@ -13,6 +13,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { listLatestPosts } from "@/modules/blog/blog.server";
@@ -44,8 +45,10 @@ const HIGHLIGHTS: Array<{ title: string; text: string; link?: { href: string; la
   },
 ];
 
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: PageProps<"/">) {
   await connection();
+  // Depois de excluir a conta (LGPD), a pessoa chega aqui com ?conta=excluida.
+  const accountDeleted = (await searchParams).conta === "excluida";
   const [notices, posts] = await Promise.all([listPublishedNotices(), listLatestPosts(3)]);
   // Concursos que o aluno ainda pode fazer (inscrições abertas ou previstos), até 3.
   const upcoming = notices.filter((notice) => notice.status === "OPEN" || notice.status === "EXPECTED").slice(0, 3);
@@ -58,6 +61,14 @@ export default async function HomePage() {
           websiteJsonLd({ siteUrl: siteUrl(), name: SITE_NAME }),
         ]}
       />
+      {accountDeleted ? (
+        <Alert role="status">
+          <AlertTitle>Sua conta foi excluída</AlertTitle>
+          <AlertDescription>
+            Apagamos seus dados de acesso e de estudo. Compras e pagamentos ficam guardados sem o seu nome, pelo prazo da lei fiscal.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <section className="grid gap-6 text-center">
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
           Informática e TI para concursos, do zero

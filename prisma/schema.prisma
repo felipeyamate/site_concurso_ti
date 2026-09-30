@@ -74,8 +74,62 @@ model User {
   affiliate        Affiliate?
   affiliatePayouts AffiliatePayout[] @relation("AffiliatePayoutCreatedBy")
   blogPosts        BlogPost[]
+  // Fase 7 (LGPD): versão dos Termos/Política de privacidade que a pessoa aceitou por último
+  // (null = ainda não aceitou a versão atual → a área logada pede o aceite antes de continuar),
+  // o histórico dos aceites e quando a conta foi EXCLUÍDA a pedido (a linha fica, anonimizada,
+  // porque pedidos e pagamentos precisam ser guardados pela lei fiscal).
+  legalVersion     String?           @map("legal_version")
+  legalConsents    LegalConsent[]
+  accessLogs       AccessLog[]
+  deletedAt        DateTime?         @map("deleted_at")
 
   @@map("users")
+}
+
+// ============================================================================================
+// Fase 7 — LGPD
+// ============================================================================================
+
+// Como o aceite aconteceu: no cadastro (caixa marcada no formulário) ou na tela de aceite
+// (quem entrou pelo Google/link mágico, ou quando os textos mudaram de versão).
+enum ConsentSource {
+  SIGN_UP
+  REVIEW
+}
+
+// Registro de consentimento (LGPD, art. 8º: cabe a nós provar que a pessoa concordou).
+// Cada aceite vira uma linha — nunca é apagada nem alterada (nem na exclusão da conta).
+model LegalConsent {
+  id         String        @id @default(cuid())
+  userId     String        @map("user_id")
+  user       User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  // Versão dos Termos de uso + Política de privacidade aceitos juntos (ex.: "2026-10-01").
+  version    String
+  source     ConsentSource
+  // De onde veio o aceite (prova). IP e navegador informados pela requisição.
+  ipAddress  String?       @map("ip_address")
+  userAgent  String?       @map("user_agent")
+  acceptedAt DateTime      @default(now()) @map("accepted_at")
+
+  @@index([userId, acceptedAt])
+  @@map("legal_consents")
+}
+
+// Registro de acesso exigido pelo Marco Civil da Internet (Lei 12.965/2014, art. 15): data, hora e
+// IP de cada login, guardados por 6 meses (a limpeza diária apaga os mais velhos). Fica mesmo se a
+// conta for excluída (a conta é anonimizada, não apagada). `Cascade` só importa nos testes, que
+// apagam usuários de verdade; no site, usuário nunca é apagado.
+model AccessLog {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("access_logs")
 }
 
 // Um login ativo em um dispositivo/navegador. O navegador guarda só o `token` (num cookie).
@@ -585,6 +639,9 @@ model Payment {
   // mostra a cobrança como paga até alguém fazer o estorno lá. Enquanto isto estiver preenchido,
   // "paga" vinda do provedor NÃO devolve o acesso. Limpo quando o provedor mostra o estorno.
   manualRefundRequestedAt DateTime?            @map("manual_refund_requested_at")
+  // Fase 7: última vez que a tarefa agendada conferiu esta cobrança direto no provedor (para
+  // pegar um aviso/webhook perdido). A tarefa confere primeiro as que estão há mais tempo sem conferir.
+  providerCheckedAt       DateTime?            @map("provider_checked_at")
   createdAt               DateTime             @default(now()) @map("created_at")
   updatedAt               DateTime             @updatedAt @map("updated_at")
   fiscalInvoice           FiscalInvoice?
@@ -593,6 +650,7 @@ model Payment {
 
   @@index([orderId])
   @@index([subscriptionId])
+  @@index([status, providerCheckedAt])
   @@map("payments")
 }
 

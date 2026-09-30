@@ -34,7 +34,7 @@ import {
   mockExamDeadline,
   scoreMockExam,
 } from "./mock-exam";
-import { getQuestionBankLevelFor, type QuestionViewer } from "./questions.server";
+import { ensureAccountNotDeleted, getQuestionBankLevelFor, type QuestionViewer } from "./questions.server";
 
 // Aleatório de qualidade criptográfica (o aluno não consegue prever o sorteio).
 const cryptoRandom = () => randomInt(0, 2 ** 32) / 2 ** 32;
@@ -67,6 +67,7 @@ export async function createMockExam(input: {
 }): Promise<{ mockExamId: string }> {
   const now = input.now ?? new Date();
   return withAdvisoryLock(prisma, `questions:${input.viewer.id}`, async (tx) => {
+    await ensureAccountNotDeleted(tx, input.viewer.id);
     await ensureMockExamAccess(tx, input.viewer, now);
     const open = await tx.mockExam.count({ where: { userId: input.viewer.id, finishedAt: null } });
     if (open >= MAX_OPEN_MOCK_EXAMS) {

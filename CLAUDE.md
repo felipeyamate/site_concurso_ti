@@ -8,7 +8,8 @@
 - Ao concluir uma fase ou tomar/mudar uma decisão, atualize o `PROJECT.md` (seções 7, 8 e 10)
   e o passo a passo de testes no `README.md`.
 - Antes de dar algo como pronto, rode: `npm run lint`, `npm run typecheck`, `npm test`,
-  `npm run test:integration` (precisa de `TEST_DATABASE_URL`) e `npm run build`.
+  `npm run test:integration` (precisa de `TEST_DATABASE_URL`), `npm run build` e `npm run test:e2e`
+  (Playwright; usa o banco do `.env.local` com o `npm run db:seed`).
 - Versões com mudanças grandes em relação a versões antigas — consulte a documentação instalada:
   - Next.js 16: `proxy.ts` substitui `middleware.ts`; `params`/`searchParams`/`headers()` são assíncronos.
     Docs em `node_modules/next/dist/docs/`.
@@ -18,7 +19,11 @@
   - Better Auth 1.7, Zod 4, Tailwind CSS 4.
 - Código de servidor que acessa banco/segredos começa com `import "server-only"`.
 - Toda página protegida chama `requireSession`/`requireRole` (`src/modules/auth/session.ts`);
-  o `proxy.ts` sozinho não basta.
+  o `proxy.ts` sozinho não basta. O `requireSession` também exige o aceite da versão atual dos Termos/Privacidade
+  (`LEGAL_VERSION`, `src/modules/legal/version.ts`); `allowPendingLegal` só em `/aceitar-termos`, "Minha conta", "Minhas compras"
+  e a página de um pagamento (direitos de quem já comprou não dependem do aceite novo). Ação que cria um contrato novo
+  (comprar, assinar) confere `needsLegalAcceptance` também na própria ação.
+  Aceite só se grava com `recordLegalConsent` (`src/modules/privacy/consent.server.ts`). Mudança relevante nos textos → nova `LEGAL_VERSION`.
 - Sessão: Server Components só LEEM a sessão (`getCurrentSession` usa `disableRefresh`); quem renova o login
   é o `SessionRefresher`. Toda nova área logada precisa de um `layout.tsx` que inclua o `SessionRefresher`.
 - Todo PR segue o guia `docs/COMO-REVISAR.md` (descrição com "como testar" e "por onde revisar").
@@ -60,8 +65,22 @@
   Depois que algo foi CRIADO no provedor, não transformar uma falha posterior em "erro ao criar" (ver `createSubscription`
   no Asaas e a assinatura "órfã" em `charges.server.ts`). Erros do provedor para a tela: `providerErrorMessage`.
   Registros financeiros (pedido, pagamento, nota) usam `onDelete: Restrict` e nunca são apagados.
+- LGPD: usuário nunca é apagado no site. Excluir conta só por `deleteOwnAccount`/`adminDeleteAccount`
+  (`src/modules/privacy/account-deletion.server.ts`), que anonimiza e guarda o fiscal, pega as travas de tudo o que grava
+  algo da pessoa (`lockEverythingThatWritesForUser` — trava nova de escrita por aluno entra lá) e apaga os códigos de
+  "redefinir senha"; conta excluída não ganha login/senha (`isDeletedAccount` nos ganchos do `auth.ts`) nem resposta
+  (`ensureAccountNotDeleted`). Tabela nova com dado pessoal:
+  decidir em `anonymizeAccount` (apagar ou guardar, com o motivo) e incluir em `buildPersonalDataExport` ("Baixar meus dados").
+  Registro de acesso (Marco Civil): `access_logs`, gravado no login (`recordAccessLog`), 6 meses, apagado pela limpeza diária.
+- Sentry sem dado pessoal: tudo passa por `scrubSentryEvent` (`src/lib/observability/scrub.ts`); nada de `sendDefaultPii`,
+  gravação de tela ou tracing sem decisão registrada. PostHog (ou outro script de análise) só depois do aceite dos cookies
+  (`AnalyticsConsent`, `src/modules/analytics/`), nunca carregado direto no layout, e com `sanitizeAnalyticsEvent` (endereços sem `?...`).
+- Tarefa agendada: rota em `src/app/api/cron/...` que confere `isAuthorizedCronRequest` (`src/lib/cron-auth.ts`) antes de tudo,
+  registrada no `vercel.json`; a lógica fica num `*.server.ts` que os testes chamam direto.
+- Migrações rodam sozinhas no deploy de PRODUÇÃO (`scripts/vercel-build.sh`); preview nunca migra o banco de produção.
+  Migração que apaga/renomeia coluna ou tabela vai em duas entregas (primeiro o código para de usar).
 - Teste de integração que apaga usuários precisa limpar antes os dados de venda, cupons e afiliados (itens de repasse, repasses,
-  cupons, afiliados — ver `resetSales` em `tests/integration/payments.test.ts`);
+  cupons, afiliados — ver `resetSales` em `tests/integration/payments.test.ts`) e os aceites (`legal_consents`, `onDelete: Restrict`);
   o que apaga questões precisa limpar antes `question_attempts` e `mock_exam_questions` (`onDelete: Restrict` na questão).
 - Banco de questões: o nível de acesso sai SEMPRE de `getQuestionBankLevelFor` + `checkAnswerPermission`
   (`src/modules/questions/`), nunca de um `if` solto. Gabarito (`correctAnswer`) e comentário (`explanation`) nunca entram
@@ -95,6 +114,7 @@
   `whitespace-nowrap`; sem isso ele alarga a página no celular).
 - Componente com `"use client"` só exporta componentes: função usada também no servidor (ex.: `choicesFor`) fica num
   arquivo "puro" (senão a página quebra ao ser montada no servidor).
+- Texto sem espaços que vem do usuário (e-mail, link, código) leva `break-all`: senão, no celular, ele alarga a página.
 - Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`
   escapam e alargam a página no celular); e o Card/item de grid que contém a tabela leva `min-w-0`
   (senão a tabela estica o item e a página inteira rola para o lado).
