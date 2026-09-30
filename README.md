@@ -4,11 +4,12 @@ Plataforma de cursos que ensina Informática/TI para candidatos de concursos que
 área de TI**. Visão, regras de negócio, stack e roteiro estão em **[PROJECT.md](./PROJECT.md)**
 (leia primeiro).
 
-**Estado atual:** Fase 4 concluída — vendas: produtos (curso avulso ou pacote) e assinaturas, pagos
-com Pix, boleto ou cartão parcelado pelo Asaas; o acesso é liberado pelo aviso de pagamento (webhook)
-e retirado no reembolso; nota fiscal automática (opcional). Sem conta no Asaas, os pagamentos são
-**simulados** em desenvolvimento. (Fase 1: projeto, banco, login e perfis. Fase 2: catálogo, player,
-matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs.)
+**Estado atual:** Fase 5 concluída — banco de questões: questões comentadas com filtros (banca, assunto,
+prova, tipo), simulados com tempo de prova, "meu desempenho" por assunto e o mapa público "o que mais
+cai" por banca; o professor cadastra questões pelo painel ou importa uma planilha (CSV). Quem não tem
+curso nem assinatura resolve 10 questões grátis por dia. (Fase 1: projeto, banco, login e perfis. Fase 2:
+catálogo, player, matrículas e progresso. Fase 3: painel admin, Panda Video e PDFs. Fase 4: vendas com o
+Asaas — Pix, boleto, cartão, assinaturas, reembolso e nota fiscal.)
 
 ---
 
@@ -34,7 +35,7 @@ cp .env.example .env.local
 # 3. Crie as tabelas no banco
 npm run db:deploy
 
-# 4. Crie o curso de EXEMPLO (dados de desenvolvimento; nunca rode no banco de produção)
+# 4. Crie o curso e as questões de EXEMPLO (dados de desenvolvimento; nunca rode no banco de produção)
 npm run db:seed
 
 # 5. Suba o site
@@ -250,7 +251,43 @@ CPFs de teste (válidos na conta, não pertencem a ninguém): `529.982.247-25`, 
 
 ---
 
-## 6. Comandos do dia a dia
+## 6. Como testar a Fase 5 (passo a passo)
+
+Pré-requisitos: rode `npm run db:seed` de novo (agora ele grava também o **banco de questões de exemplo**:
+4 bancas, 6 assuntos, 3 provas **fictícias** e 30 questões comentadas — pode rodar várias vezes, não
+duplica), uma conta PROFESSOR ou ADMIN (seção 1) e duas contas de aluno (navegadores anônimos). Dê acesso
+completo à 2ª conta com uma matrícula: `npm run enroll -- email-do-aluno-2 informatica-e-ti-do-zero`.
+
+| # | Faça isto | O esperado |
+|---|---|---|
+| 1 | Sem login, abra `/o-que-mais-cai` (também no rodapé: "O que mais cai") | "O que mais cai de TI nos concursos", "3 provas, 24 questões" e os assuntos em ordem, com a % de cada um |
+| 2 | Clique na aba **Cesgranrio** | "Segurança da Informação" em 1º: "40% · 4 questões". "Treinar" pede login e depois abre as questões desse assunto e dessa banca |
+| 3 | Com a 1ª conta (sem curso): Área do aluno → **Treinar com questões** → "Resolver questões" | "Hoje você ainda tem 10 questões grátis" e os filtros (assunto, banca, prova, tipo, situação) |
+| 4 | Antes de responder, veja o código da página (Ctrl+U) e procure um trecho do comentário do professor | Não aparece: o gabarito e o comentário só saem do servidor **depois** da resposta |
+| 5 | Marque uma alternativa errada e clique em **Responder** | "Você errou. Gabarito: X.", o comentário do professor e "Restam 9 questões grátis hoje." Com "Tentar de novo", responda de novo |
+| 6 | Filtre a banca **Cebraspe** | Questões de **Certo ou errado** (opções "Certo" e "Errado") |
+| 7 | Situação **"Que errei"** | Só as questões que você errou e ainda **não** acertou |
+| 8 | Responda até acabar a cota do dia (10 respostas, contando as repetidas) | "Suas questões grátis de hoje acabaram" com o link "Ver planos"; a próxima resposta é recusada. A cota volta à meia-noite (Brasília) |
+| 9 | Abra `/simulados` com a 1ª conta | "Simulados são para alunos" e o convite para os planos |
+| 10 | Com a 2ª conta (matriculada): `/simulados` → Banca **Cesgranrio (10)**, 10 questões, "Sem limite de tempo" → **Começar simulado** | As 10 questões, sem gabarito. Responda 3 e recarregue a página: "3 de 10 respondidas" (salva a cada clique) |
+| 11 | **Finalizar simulado** | Pergunta "Ainda há 7 questão(ões) em branco...". Confirme: nota "X de 10 (Y%)", "7 em branco (contam como erro).", acertos por assunto e a correção com o comentário de cada questão |
+| 12 | Novo simulado com **Tempo de prova** de 15 minutos | O relógio "Tempo restante" corre. Ao zerar, o simulado é finalizado sozinho (as respostas marcadas valem) |
+| 13 | Área do aluno → **Meu desempenho** | Total de respostas, taxa de acerto, a tabela por assunto e os últimos simulados. Com 5+ respostas num assunto e menos de 60% de acerto, ele aparece em "Seus pontos fracos" |
+| 14 | Como PROFESSOR: `/admin` → **Questões** → **Nova questão**; preencha sem escolher o gabarito e clique em "Criar questão" | Erro "O gabarito precisa ser uma das alternativas." e o texto digitado continua |
+| 15 | Escolha o gabarito e crie; clique em **Publicar** | A questão nasce como **rascunho** e passa a aparecer para os alunos depois de publicada |
+| 16 | Responda essa questão com um aluno; volte ao painel, troque o **gabarito** e salve | Recusado: "Esta questão já foi respondida por alunos: dá para corrigir os textos, mas não o tipo, as alternativas (letras) nem o gabarito..." Corrigir o texto funciona. "Apagar questão" também é recusado (despublique) |
+| 17 | **Bancas, assuntos e provas**: crie uma banca, um assunto e uma prova; tente apagar a banca "Cesgranrio" | Criados. A Cesgranrio não pode ser apagada (tem provas e questões) |
+| 18 | **Importar planilha** → "Baixar o modelo (CSV)"; abra no Excel/LibreOffice, troque o gabarito de uma linha para `F` e envie | "Linha N: O gabarito precisa ser uma das alternativas." e **nada** é importado |
+| 19 | Corrija a linha e envie de novo; envie o mesmo arquivo uma terceira vez | "2 questões importadas como rascunho" (confira e publique na lista). Na terceira vez: erro de código repetido (a coluna `codigo` evita importar duas vezes) |
+| 20 | Com um aluno, abra `/admin/questoes` e `/simulados/<id do simulado da outra conta>` | "Página não encontrada" nos dois |
+
+> As 3 provas do seed são **fictícias** (questões originais "no estilo" de cada banca), só para testar. O mapa
+> "o que mais cai" fica bom de verdade quando o professor cadastrar provas reais já aplicadas (com a banca e o
+> ano) e as questões delas: **só questões de prova publicadas** entram na conta.
+
+---
+
+## 7. Comandos do dia a dia
 
 | Comando | Para que serve |
 |---|---|
@@ -259,28 +296,32 @@ CPFs de teste (válidos na conta, não pertencem a ninguém): `529.982.247-25`, 
 | `npm run lint` | Procura problemas comuns no código |
 | `npm run typecheck` | Checa os tipos do TypeScript (como o `mypy`) |
 | `npm test` | Testes unitários (rápidos, sem banco) |
-| `npm run test:integration` | Testes com banco de verdade (ver seção 7) |
+| `npm run test:integration` | Testes com banco de verdade (ver seção 8) |
 | `npm run db:migrate -- --name descricao` | Depois de **alterar** `prisma/schema.prisma`: cria e aplica uma nova migração |
 | `npm run db:deploy` | Aplica migrações já existentes (primeira vez, produção) |
 | `npm run db:studio` | Abre uma interface visual para ver/editar os dados do banco |
-| `npm run db:seed` | Grava o curso de exemplo (só desenvolvimento; pode rodar várias vezes) |
+| `npm run db:seed` | Grava o curso e as questões de exemplo (só desenvolvimento; pode rodar várias vezes) |
 | `npm run user:set-role -- email PERFIL` | Muda o perfil de um usuário (STUDENT, TEACHER, ADMIN). No dia a dia, use o painel (/admin/usuarios); o script serve para criar o primeiro ADMIN |
 | `npm run enroll -- email curso [dias \| --revogar]` | Matrícula MANUAL num curso (sem data de fim ou por N dias), renova, ou revoga — o mesmo que o painel faz. Compras e assinaturas não mudam (acesso pago sai pelo reembolso) |
 
 ---
 
-## 7. Testes automáticos
+## 8. Testes automáticos
 
 - **Unitários** (`npm test`): regras puras — perfis, limite de sessões, proteção de redirecionamento,
   validação de formulários, variáveis de ambiente, e-mails, **acesso às aulas** (matrícula),
   progresso, "continuar de onde parou", link, mensagens e regras de progresso do player do Panda,
   token da marca d'água, links assinados dos PDFs, as travas de perfil e as **vendas**: dinheiro em
   centavos, parcelas, CPF, datas de cobrança (fuso de Brasília), situação do pedido, prazo de reembolso,
-  recálculo do acesso pago, tradução dos dados do Asaas e o provedor do Asaas com um `fetch` falso.
+  recálculo do acesso pago, tradução dos dados do Asaas e o provedor do Asaas com um `fetch` falso; e o
+  **banco de questões**: letras e gabarito, cota grátis do dia, sorteio e nota do simulado, desempenho por
+  assunto, mapa "o que mais cai", leitura de planilha CSV e importação.
 - **Integração** (`npm run test:integration`): cadastro, login, limite de sessões, seed do catálogo,
   acesso às aulas, progresso, painel de cursos (criar, reordenar, apagar com proteção), envio e
   download de PDFs, matrículas e perfis, e as vendas (compra, avisos repetidos/atrasados, reembolso,
-  contestação, assinatura, concorrência e a rota do webhook), gravando num PostgreSQL de verdade.
+  contestação, assinatura, concorrência e a rota do webhook) e o banco de questões (responder, cota grátis com
+  respostas simultâneas, simulados, mapa, painel com a proteção do histórico, importação e o seed), gravando
+  num PostgreSQL de verdade.
   Os pagamentos nos testes são sempre SIMULADOS (a chave do Asaas é ignorada). **Os testes apagam os dados do banco que usam**, por isso exigem um banco
   SEPARADO na variável `TEST_DATABASE_URL`:
   1. Na Neon, crie uma branch chamada `test` (Branches → New branch).
@@ -292,23 +333,24 @@ CPFs de teste (válidos na conta, não pertencem a ninguém): `529.982.247-25`, 
 
 ---
 
-## 8. Onde fica cada coisa
+## 9. Onde fica cada coisa
 
 ```
 prisma/
   schema.prisma          Tabelas do banco (como os models.py do Django/SQLAlchemy)
   migrations/            Histórico de alterações do banco (SQL gerado pelo Prisma)
-  seed.ts, seed-catalog.ts  Curso de EXEMPLO para desenvolvimento (npm run db:seed)
+  seed.ts, seed-catalog.ts, seed-questions.ts  Curso e questões de EXEMPLO para desenvolvimento (npm run db:seed)
 scripts/                 set-role.ts (perfil) e enroll.ts (matrícula)
 src/
   app/                   Páginas e rotas (cada pasta = um endereço do site)
     (auth)/              /entrar, /cadastro, /esqueci-senha, /redefinir-senha
-    area-do-aluno/       Área do aluno: meus cursos, dispositivos, compras/ e pagamentos/[id] (exige login)
+    area-do-aluno/       Área do aluno: meus cursos, dispositivos, compras/, pagamentos/[id] e desempenho/ (exige login)
+    questoes/, simulados/  Resolver questões e simulados (exige login); o-que-mais-cai/ = mapa público por banca
     comprar/, assinar/   Checkout de produto e de assinatura (exige login); planos/ = vitrine da assinatura
     dev/pagamentos/      SIMULADOR de pagamento (só desenvolvimento, sem conta no Asaas)
     cursos/              /cursos (catálogo), /cursos/[curso], /cursos/[curso]/aulas/[aula] (player)
                          e .../materiais/[id] (download do PDF, confere o acesso a cada clique)
-    admin/               Painel: visão geral, cursos/[id]/aulas/[id] (TEACHER+), usuarios/[id] e vendas/ (ADMIN)
+    admin/               Painel: visão geral, cursos/[id]/aulas/[id] e questoes/ (TEACHER+), usuarios/[id] e vendas/ (ADMIN)
     api/auth/[...all]/   API de autenticação (/api/auth/*)
     api/dev-storage/     Envio/download de PDFs SEM o R2 (só desenvolvimento)
     api/webhooks/asaas/  Onde o Asaas avisa os pagamentos (confere o token)
@@ -324,6 +366,8 @@ src/
     materials/           PDFs das aulas: envio, lista, download
     payments/            Vendas: checkout, avisos do provedor, recálculo do acesso pago (access-sync),
                          reembolsos, notas fiscais; provider/ = Asaas e o simulado; admin/ = painel de vendas
+    questions/           Banco de questões: acesso e cota grátis (access.ts), respostas, simulados, desempenho,
+                         mapa de incidência, planilha CSV; admin/ = cadastro e importação pelo painel
     storage/             Armazenamento de arquivos: Cloudflare R2 ou pasta local (desenvolvimento)
     email/               Envio de e-mails e modelos de texto
   proxy.ts               Barreira rápida das áreas protegidas
@@ -333,7 +377,7 @@ tests/integration/       Testes que usam o banco de verdade
 
 ---
 
-## 9. Publicando na Vercel (quando for a hora)
+## 10. Publicando na Vercel (quando for a hora)
 
 1. Na Vercel: **Add New → Project** e importe este repositório do GitHub.
 2. Em **Settings → Environment Variables**, cadastre as mesmas variáveis do `.env.example`,

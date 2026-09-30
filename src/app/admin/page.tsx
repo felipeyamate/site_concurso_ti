@@ -4,7 +4,7 @@
  * Quem chama: o Next.js. O `requireRole` confere login + perfil no banco;
  * quem não tem o perfil recebe "página não encontrada" (404).
  *
- * Mostra: atalhos para cursos, usuários e vendas, e a situação das integrações (Panda Video, pagamentos e
+ * Mostra: atalhos para cursos, questões, usuários e vendas, e a situação das integrações (Panda Video, pagamentos e
  * armazenamento de PDFs) — só "configurado / não configurado", nunca os valores das chaves.
  */
 import "server-only";
@@ -22,6 +22,7 @@ import { SignOutButton } from "@/modules/auth/components/sign-out-button";
 import { ROLE_LABELS, hasMinimumRole } from "@/modules/auth/roles";
 import { requireRole } from "@/modules/auth/session";
 import { getPaymentsSetup } from "@/modules/payments/provider/provider.server";
+import { getQuestionBankOverview } from "@/modules/questions/admin/questions-admin.server";
 import { getStorageKind } from "@/modules/storage/storage.server";
 
 export const metadata: Metadata = {
@@ -33,11 +34,12 @@ export default async function AdminPage() {
   const { user } = await requireRole("TEACHER", "/admin");
   const isAdmin = hasMinimumRole(user.role, "ADMIN");
 
-  const [courseCount, publishedCount, lessonCount, userCount] = await Promise.all([
+  const [courseCount, publishedCount, lessonCount, userCount, questionBank] = await Promise.all([
     prisma.course.count(),
     prisma.course.count({ where: { isPublished: true } }),
     prisma.lesson.count(),
     isAdmin ? prisma.user.count() : Promise.resolve(0),
+    getQuestionBankOverview(),
   ]);
 
   const isProduction = env.NODE_ENV === "production";
@@ -73,6 +75,20 @@ export default async function AdminPage() {
           <CardContent>
             <Button asChild>
               <Link href="/admin/cursos">Gerenciar cursos e aulas</Link>
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Questões</CardTitle>
+            <CardDescription>
+              {questionBank.published} publicada(s), {questionBank.drafts} rascunho(s) · {questionBank.attempts} resposta(s) de alunos
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link href="/admin/questoes">Gerenciar questões</Link>
             </Button>
           </CardContent>
         </Card>

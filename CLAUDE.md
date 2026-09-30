@@ -57,7 +57,15 @@
   Depois que algo foi CRIADO no provedor, não transformar uma falha posterior em "erro ao criar" (ver `createSubscription`
   no Asaas e a assinatura "órfã" em `charges.server.ts`). Erros do provedor para a tela: `providerErrorMessage`.
   Registros financeiros (pedido, pagamento, nota) usam `onDelete: Restrict` e nunca são apagados.
-- Teste de integração que apaga usuários precisa limpar antes os dados de venda (ver `tests/integration/payments.test.ts`).
+- Teste de integração que apaga usuários precisa limpar antes os dados de venda (ver `tests/integration/payments.test.ts`);
+  o que apaga questões precisa limpar antes `question_attempts` e `mock_exam_questions` (`onDelete: Restrict` na questão).
+- Banco de questões: o nível de acesso sai SEMPRE de `getQuestionBankLevelFor` + `checkAnswerPermission`
+  (`src/modules/questions/`), nunca de um `if` solto. Gabarito (`correctAnswer`) e comentário (`explanation`) nunca entram
+  no `select` de listas nem de simulado em andamento: só saem em `answerQuestion` e no simulado finalizado.
+  Responder, criar/salvar/finalizar simulado rodam com `withAdvisoryLock` (`questions:<aluno>` / `mock-exam:<id>`).
+  Questão com resposta de aluno não muda tipo/letras/gabarito nem se apaga (`questions-admin.server.ts`).
+- Componente com `"use client"` só exporta componentes: função usada também no servidor (ex.: `choicesFor`) fica num
+  arquivo "puro" (senão a página quebra ao ser montada no servidor).
 - Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`
   escapam e alargam a página no celular); e o Card/item de grid que contém a tabela leva `min-w-0`
   (senão a tabela estica o item e a página inteira rola para o lado).

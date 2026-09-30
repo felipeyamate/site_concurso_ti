@@ -1,5 +1,5 @@
 /**
- * site-footer.tsx — Rodapé do site (planos de assinatura e links legais).
+ * site-footer.tsx — Rodapé do site (o que mais cai, planos de assinatura e links legais).
  *
  * Quem chama: `src/app/layout.tsx`, em todas as páginas.
  */
@@ -11,6 +11,9 @@ export function SiteFooter() {
       <div className="text-muted-foreground mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-6 text-sm">
         <span>© {new Date().getFullYear()} Concurso TI</span>
         <nav className="flex flex-wrap gap-4">
+          <Link href="/o-que-mais-cai" className="hover:underline">
+            O que mais cai
+          </Link>
           <Link href="/planos" className="hover:underline">
             Planos
           </Link>

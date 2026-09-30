@@ -10,9 +10,10 @@
  */
 import "server-only";
 
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 
-import { checkLessonAccess, mergeEnrollments, type EnrollmentSnapshot, type LessonAccess } from "./access";
+import { checkLessonAccess, getEnrollmentStatus, mergeEnrollments, type EnrollmentSnapshot, type LessonAccess } from "./access";
 
 const enrollmentSnapshotSelect = { startsAt: true, expiresAt: true, revokedAt: true } as const;
 
@@ -53,6 +54,20 @@ export async function listEnrollments(
     if (enrollment) merged.push({ courseId, ...enrollment });
   }
   return merged;
+}
+
+/**
+ * A pessoa tem ALGUMA matrícula ativa agora (em qualquer curso, de qualquer origem)?
+ * Usada pelo banco de questões (Fase 5): questões sem limite e simulados são de quem é aluno.
+ * `db` = o cliente do banco ou a transação em andamento (para conferir dentro de uma trava).
+ */
+export async function hasAnyActiveEnrollment(
+  userId: string,
+  now: Date = new Date(),
+  db: Pick<Prisma.TransactionClient, "enrollment"> = prisma,
+): Promise<boolean> {
+  const rows = await db.enrollment.findMany({ where: { userId, revokedAt: null }, select: enrollmentSnapshotSelect });
+  return rows.some((row) => getEnrollmentStatus(row, now) === "ACTIVE");
 }
 
 export type LessonAccessResult = {

@@ -5,8 +5,8 @@
  * aqui o `requireSession` confere a sessão de verdade no banco.
  *
  * Mostra os dados da conta, avisos (e-mail não confirmado, conta sem senha), "Meus cursos"
- * com o progresso e o botão "Continuar", o atalho para "Minhas compras" (Fase 4) e os
- * dispositivos conectados (limite de sessões).
+ * com o progresso e o botão "Continuar", o atalho para "Minhas compras" (Fase 4), os atalhos do
+ * banco de questões (Fase 5) e os dispositivos conectados (limite de sessões).
  */
 import "server-only";
 
@@ -112,6 +112,27 @@ export default async function StudentAreaPage() {
       )}
 
       <MyCourses courses={myCourses} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Treinar com questões</CardTitle>
+          <CardDescription>Questões comentadas, simulados com tempo de prova e o seu desempenho por assunto.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button asChild size="sm">
+            <Link href="/questoes">Resolver questões</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/simulados">Simulados</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/area-do-aluno/desempenho">Meu desempenho</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/o-que-mais-cai">O que mais cai</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

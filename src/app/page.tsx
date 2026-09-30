@@ -8,7 +8,7 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 
-const HIGHLIGHTS = [
+const HIGHLIGHTS: Array<{ title: string; text: string; link?: { href: string; label: string } }> = [
   {
     title: "Linguagem simples",
     text: "TI explicada para quem nunca estudou tecnologia.",
@@ -16,10 +16,12 @@ const HIGHLIGHTS = [
   {
     title: "Foco no que mais cai",
     text: "Conteúdo priorizado pela incidência real nas provas, por banca e por assunto.",
+    link: { href: "/o-que-mais-cai", label: "Ver o que mais cai" },
   },
   {
     title: "Prática guiada",
     text: "Questões comentadas, filtráveis por banca, assunto e concurso.",
+    link: { href: "/questoes", label: "Resolver questões" },
   },
 ];
 
@@ -49,6 +51,11 @@ export default function HomePage() {
           <div key={item.title} className="rounded-xl border p-6">
             <h2 className="mb-2 font-semibold">{item.title}</h2>
             <p className="text-muted-foreground text-sm">{item.text}</p>
+            {item.link ? (
+              <Link href={item.link.href} className="mt-3 inline-block text-sm underline">
+                {item.link.label}
+              </Link>
+            ) : null}
           </div>
         ))}
       </section>
