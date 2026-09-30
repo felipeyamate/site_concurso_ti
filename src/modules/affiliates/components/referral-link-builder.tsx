@@ -12,13 +12,15 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { safeRedirectPath } from "@/modules/auth/redirect";
 
 import { referralLink } from "../rules";
 
 export function ReferralLinkBuilder({ siteUrl, code }: { siteUrl: string; code: string }) {
   const [path, setPath] = useState("/");
   const [copied, setCopied] = useState(false);
-  const safePath = path.startsWith("/") && !path.startsWith("//") ? path : "/";
+  // A MESMA conferência que o link `/r/...` faz no servidor: o que aparece aqui é o que funciona lá.
+  const safePath = safeRedirectPath(path, "/");
   const link = referralLink(siteUrl, code, safePath);
 
   return (

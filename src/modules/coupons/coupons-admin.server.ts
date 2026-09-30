@@ -7,8 +7,11 @@
  * Regras:
  *  - O código é único. Depois de aparecer numa venda (qualquer pedido/assinatura, mesmo vencido), o
  *    código não muda (o pedido guarda o código; para outro código, crie outro cupom).
- *  - Editar e apagar usam a MESMA trava do checkout (`coupon:<id>`): uma compra com o cupom que está
- *    sendo gravada naquele instante termina antes, e a conferência já a enxerga.
+ *  - Editar, ativar/desativar e apagar usam a MESMA trava do checkout (`coupon:<id>`): uma compra com o
+ *    cupom que está sendo gravada naquele instante termina antes, e a conferência já a enxerga.
+ *  - Páginas de concurso guardam o CÓDIGO do cupom: trocar o código leva junto as páginas que o usam
+ *    (senão elas perdiam o desconto — ou, pior, passariam a usar um cupom novo com o código antigo);
+ *    cupom usado numa página não se apaga (tire da página antes).
  *  - Cupom usado não se apaga (a chave estrangeira do pedido impede): desative.
  *  - Mudar o desconto não altera vendas feitas: cada pedido guarda o desconto que teve.
  *  - Datas: o cupom vale do COMEÇO do dia inicial até o FIM do dia final (dias de Brasília).
@@ -145,6 +148,10 @@ export async function saveCoupon(data: CouponFormData): Promise<{ id: string }> 
           throw new UserFacingError("Este cupom já aparece em vendas: o código não muda. Para outro código, crie outro cupom.", { field: "code" });
         }
         await tx.coupon.update({ where: { id: couponId }, data: fields });
+        // As páginas de concurso que usavam o código antigo passam a usar o novo (mesmo cupom).
+        if (current.code !== data.code) {
+          await tx.examNotice.updateMany({ where: { couponCode: current.code }, data: { couponCode: data.code } });
+        }
         await tx.couponProduct.deleteMany({ where: { couponId } });
         await tx.couponPlan.deleteMany({ where: { couponId } });
       } else {
@@ -161,8 +168,12 @@ export async function saveCoupon(data: CouponFormData): Promise<{ id: string }> 
   }
 }
 
+/** Ativa/desativa, com a trava do cupom: uma compra que já reservou o cupom termina antes. */
 export async function setCouponActive(couponId: string, isActive: boolean): Promise<void> {
-  const { count } = await prisma.coupon.updateMany({ where: { id: couponId }, data: { isActive } });
+  const { count } = await prisma.$transaction(async (tx) => {
+    await advisoryLock(tx, `coupon:${couponId}`);
+    return tx.coupon.updateMany({ where: { id: couponId }, data: { isActive } });
+  });
   if (count === 0) throw new UserFacingError("Cupom não encontrado.");
 }
 
@@ -174,6 +185,13 @@ export async function setCouponActive(couponId: string, isActive: boolean): Prom
 export async function deleteCoupon(couponId: string): Promise<void> {
   const { count } = await prisma.$transaction(async (tx) => {
     await advisoryLock(tx, `coupon:${couponId}`);
+    const coupon = await tx.coupon.findUnique({ where: { id: couponId }, select: { code: true } });
+    const notices = coupon ? await tx.examNotice.findMany({ where: { couponCode: coupon.code }, select: { title: true }, take: 3 }) : [];
+    if (notices.length > 0) {
+      throw new UserFacingError(
+        `Este cupom está na página de concurso "${notices[0].title}"${notices.length > 1 ? " (e em outras)" : ""}. Tire o cupom da página antes de apagar, ou desative o cupom.`,
+      );
+    }
     return tx.coupon.deleteMany({ where: { id: couponId, orders: { none: {} }, subscriptions: { none: {} } } });
   });
   if (count === 0) {

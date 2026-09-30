@@ -12,8 +12,10 @@
  *  - pedido VENCIDO sem pagamento ou cancelado NÃO conta: o uso volta (o aluno que desistiu do Pix pode
  *    usar o cupom de novo). Se um boleto vencido for pago mesmo assim, ele volta a contar — o limite
  *    pode passar em 1 nesse caso raro (aceito);
- *  - assinatura: com algum ciclo pago (conta para sempre, como o pedido) ou com a 1ª cobrança ainda
- *    aguardando pagamento (reserva). Criada com erro no provedor não conta.
+ *  - assinatura: com algum ciclo pago (conta para sempre, como o pedido) ou ainda sem pagamento e sem
+ *    cobrança vencida/cancelada (reserva) — inclusive ANTES de a 1ª cobrança ser gravada: a assinatura
+ *    é criada aqui (com a trava) e a cobrança só chega depois da resposta do provedor (ou do aviso).
+ *    Criada com erro no provedor ou cancelada sem pagamento não conta.
  *
  * A trava: "o cupom ainda tem uso? → cria o pedido" é um "confere e grava" (regra do CLAUDE.md).
  * `reserveCoupon` trava o cupom (`coupon:<id>`) dentro da MESMA transação que cria o pedido: dois
@@ -69,12 +71,13 @@ export async function findCoupon(db: Db, code: string): Promise<CouponRecord | n
 const PAID_ORDER_STATUSES = ["PAID", "REFUND_REQUESTED", "REFUNDED", "CHARGEBACK"] as const;
 const paidOrder: Prisma.OrderWhereInput = { status: { in: [...PAID_ORDER_STATUSES] } };
 const pendingOrder: Prisma.OrderWhereInput = { status: "PENDING" };
-// Assinatura com algum ciclo pago; ou, sem nenhum, com a 1ª cobrança ainda em aberto (e não cancelada).
+// Assinatura com algum ciclo pago; ou, sem nenhum, ainda em aberto: não cancelada e sem cobrança
+// vencida/cancelada — o que inclui a assinatura recém-criada, que ainda não tem cobrança gravada.
 const paidSubscription: Prisma.SubscriptionWhereInput = { failureReason: null, payments: { some: { paidAt: { not: null } } } };
 const pendingSubscription: Prisma.SubscriptionWhereInput = {
   failureReason: null,
   status: { not: "CANCELED" },
-  payments: { some: { status: "PENDING" }, none: { paidAt: { not: null } } },
+  payments: { none: { OR: [{ paidAt: { not: null } }, { status: { in: ["OVERDUE", "CANCELED"] } }] } },
 };
 
 /** Onde (pedidos e assinaturas) um cupom conta como usado — ver o cabeçalho. Usado também pelas listas do painel. */

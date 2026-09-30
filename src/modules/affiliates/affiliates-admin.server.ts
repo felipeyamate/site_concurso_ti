@@ -18,6 +18,7 @@ import { isUniqueViolation } from "@/lib/db-errors";
 import { withAdvisoryLock } from "@/lib/db-locks";
 import { prisma } from "@/lib/db";
 import { UserFacingError } from "@/lib/form-state";
+import { formatBRL } from "@/modules/payments/money";
 
 import { listAffiliateCommissions, listCommissionsByAffiliate } from "./affiliates.server";
 import { summarizeCommissions } from "./rules";
@@ -67,15 +68,19 @@ export async function updateAffiliate(input: { affiliateId: string; commissionBp
 
 /**
  * Registra o pagamento das comissões LIBERADAS de um afiliado.
+ * `expectedPaymentIds`: as comissões que a página MOSTRAVA quando o admin conferiu e pagou (fora do
+ * site). Se a lista mudou até o clique (uma comissão saiu da carência, outra foi estornada), o
+ * registro é recusado — senão ficaria "paga" uma comissão que ninguém pagou.
  * Passos (com a trava do afiliado — dois cliques não registram dois pagamentos):
  *  1. Calcula as comissões e pega as liberadas (depois dos 7 dias, sem estorno, ainda não pagas).
- *  2. Nenhuma (ou soma zero) → recusa.
+ *  2. Nenhuma (ou soma zero) → recusa. Diferente do que a página mostrava → recusa.
  *  3. Grava o pagamento e um item por cobrança (a chave única garante: cada cobrança uma vez só).
  */
 export async function registerAffiliatePayout(input: {
   affiliateId: string;
   adminId: string;
   note: string;
+  expectedPaymentIds: string[];
   now?: Date;
 }): Promise<{ payoutId: string; amountCents: number; count: number }> {
   const now = input.now ?? new Date();
@@ -85,6 +90,14 @@ export async function registerAffiliatePayout(input: {
     const available = (await listAffiliateCommissions(tx, input.affiliateId, now)).filter((row) => row.status === "AVAILABLE");
     const amountCents = available.reduce((sum, row) => sum + row.amountCents, 0);
     if (available.length === 0 || amountCents <= 0) throw new UserFacingError("Não há comissões liberadas para pagar agora.");
+    // Mesmo conjunto de comissões que a página mostrava? (a ordem não importa)
+    const expected = new Set(input.expectedPaymentIds);
+    const sameSet = expected.size === available.length && available.every((row) => expected.has(row.paymentId));
+    if (!sameSet) {
+      throw new UserFacingError(
+        `As comissões liberadas mudaram desde que a página abriu (agora: ${formatBRL(amountCents)} em ${available.length} comissão(ões)). Recarregue a página, confira o valor e registre de novo.`,
+      );
+    }
     const payout = await tx.affiliatePayout.create({
       data: {
         affiliateId: input.affiliateId,

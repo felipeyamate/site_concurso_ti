@@ -19,6 +19,7 @@
  *  - dentro do texto: **negrito**, *itálico* (ou _itálico_), `código` e [link](endereço).
  *    Links só para https://, http://, mailto:, "/" (páginas do site) ou "#" (âncoras).
  */
+import { safeRedirectPath } from "@/modules/auth/redirect";
 
 export type Inline =
   | { type: "text"; value: string }
@@ -38,9 +39,14 @@ export type Block =
 // Um pedaço especial do texto, na ordem de prioridade: código, negrito, link, itálico (* ou _).
 const INLINE_PATTERN = /(`[^`\n]+`)|(\*\*[^*\n]+?\*\*)|(\[[^\]\n]+\]\([^)\s]+\))|(\*[^*\s][^*\n]*?\*)|((?<![\p{L}\p{N}])_[^_\s][^_\n]*?_(?![\p{L}\p{N}]))/u;
 
-/** Endereço de link aceito? (Nada de "javascript:" e afins.) */
+/**
+ * Endereço de link aceito? (Nada de "javascript:" e afins.)
+ * Caminho do site: a MESMA conferência do login (`safeRedirectPath`) — recusa "//outro-site" e
+ * "/\\outro-site" (o navegador trata os dois como outro site) e caracteres de controle.
+ */
 export function isSafeHref(href: string): boolean {
-  return /^(https?:\/\/|mailto:)/i.test(href) || (href.startsWith("/") && !href.startsWith("//")) || href.startsWith("#");
+  if (/^(https?:\/\/|mailto:)/i.test(href) || href.startsWith("#")) return true;
+  return href.startsWith("/") && safeRedirectPath(href, "") === href;
 }
 
 /**
@@ -124,7 +130,7 @@ const RULE = /^(-{3,}|\*{3,}|_{3,})$/;
 export function parseMarkdown(source: string): Block[] {
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const blocks: Block[] = [];
-  const usedIds = new Map<string, number>();
+  const usedIds = new Set<string>();
   let paragraph: string[] = [];
   let list: { ordered: boolean; items: string[] } | null = null;
   let quote: string[] = [];
@@ -138,12 +144,14 @@ export function parseMarkdown(source: string): Block[] {
     quote = [];
   }
 
-  // Âncoras únicas: o segundo "Resumo" vira "resumo-2".
+  // Âncoras únicas: o segundo "Resumo" vira "resumo-2". Confere o endereço FINAL (não só o
+  // título): com "Resumo", "Resumo" e "Resumo 2", o terceiro vira "resumo-2-2", nunca um repetido.
   function uniqueId(text: string): string {
     const base = headingId(text);
-    const seen = usedIds.get(base) ?? 0;
-    usedIds.set(base, seen + 1);
-    return seen === 0 ? base : `${base}-${seen + 1}`;
+    let candidate = base;
+    for (let counter = 2; usedIds.has(candidate); counter += 1) candidate = `${base}-${counter}`;
+    usedIds.add(candidate);
+    return candidate;
   }
 
   for (let index = 0; index < lines.length; index += 1) {

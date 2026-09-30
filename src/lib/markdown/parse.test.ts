@@ -47,6 +47,10 @@ describe("parseInline", () => {
     expect(parseInline("[clique](javascript:void)")).toEqual([{ type: "text", value: "clique" }]);
     expect(parseInline('<script>alert("x")</script>')).toEqual([{ type: "text", value: '<script>alert("x")</script>' }]);
     expect(isSafeHref("//outro-site.com")).toBe(false);
+    // "/\\golpe.com" o navegador trata como "//golpe.com" (outro site): recusado, como no login.
+    expect(isSafeHref("/\\golpe.com")).toBe(false);
+    expect(parseInline("[edital](/\\golpe.com)")).toEqual([{ type: "text", value: "edital" }]);
+    expect(isSafeHref("/cursos/base?cupom=BB10#topo")).toBe(true);
     expect(isSafeHref("mailto:contato@exemplo.com")).toBe(true);
     expect(isSafeHref("#resumo")).toBe(true);
   });
@@ -89,6 +93,12 @@ describe("parseMarkdown", () => {
     expect(blocks[6]).toEqual({ type: "code", value: "<b>não é HTML</b>" });
     expect(blocks[8]).toMatchObject({ id: "como-se-proteger-2" });
     expect(extractHeadings(blocks).map((heading) => heading.id)).toEqual(["o-que-e-phishing", "como-se-proteger", "como-se-proteger-2"]);
+  });
+
+  it("âncoras nunca repetem, mesmo com um título que já termina no número do sufixo", () => {
+    const ids = extractHeadings(parseMarkdown("## Resumo\n\n## Resumo\n\n## Resumo 2")).map((heading) => heading.id);
+    expect(ids).toEqual(["resumo", "resumo-2", "resumo-2-2"]);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('título que termina em "#" (C#, F#) não perde o caractere; "##" de fechamento sai', () => {

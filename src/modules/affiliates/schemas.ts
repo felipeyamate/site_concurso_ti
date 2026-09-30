@@ -43,6 +43,15 @@ export const createAffiliateSchema = z.object({
 
 export const updateAffiliateSchema = z.object({ affiliateId: id, commissionBps: commissionPercent, payoutInfo, isActive: checkbox });
 
-export const payoutSchema = z.object({ affiliateId: id, note: z.string().trim().max(300, "No máximo 300 caracteres.") });
+// `paymentIds`: as comissões liberadas que a página mostrava ("id1,id2,..."), para o servidor conferir.
+export const payoutSchema = z.object({
+  affiliateId: id,
+  note: z.string().trim().max(300, "No máximo 300 caracteres."),
+  paymentIds: z
+    .string()
+    .default("")
+    .transform((value) => value.split(",").map((item) => item.trim()).filter(Boolean))
+    .pipe(z.array(id).max(5000)),
+});
 
 export const ownPayoutInfoSchema = z.object({ payoutInfo });

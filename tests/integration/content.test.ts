@@ -11,7 +11,7 @@ import { deletePost, savePost, setPostPublished } from "@/modules/blog/blog-admi
 import { getPostForViewer, listPublishedPosts, listRelatedPosts } from "@/modules/blog/blog.server";
 import { blogPostSchema } from "@/modules/blog/schemas";
 import { createCourse, createLesson, createModule, updateCourse, updateLesson } from "@/modules/catalog/admin/catalog-admin.server";
-import { saveCoupon } from "@/modules/coupons/coupons-admin.server";
+import { deleteCoupon, saveCoupon } from "@/modules/coupons/coupons-admin.server";
 import { couponFormSchema } from "@/modules/coupons/schemas";
 import { saveNotice } from "@/modules/notices/notices-admin.server";
 import { getNoticeForViewer, listPublishedNotices } from "@/modules/notices/notices.server";
@@ -131,6 +131,21 @@ describe("páginas de edital", () => {
     // Cupom desativado (ou vencido/esgotado): a página para de prometer o desconto.
     await prisma.coupon.update({ where: { id: coupon.id }, data: { isActive: false } });
     expect((await getNoticeForViewer(page.slug, false))?.product?.coupon).toBeNull();
+  });
+
+  it("trocar o código do cupom leva junto as páginas de concurso; cupom usado numa página não se apaga", async () => {
+    const coupon = await saveCoupon(
+      couponFormSchema.parse({ code: "CT-VELHO", description: "", discountType: "PERCENT", percentOff: "10", appliesToProducts: "on", maxPerUser: "1", isActive: "on" }),
+    );
+    const page = await saveNotice(notice({ couponCode: "CT-VELHO" }), { canChooseCoupon: true, now: T0 });
+    await saveCoupon(
+      couponFormSchema.parse({ couponId: coupon.id, code: "CT-NOVO", description: "", discountType: "PERCENT", percentOff: "10", appliesToProducts: "on", maxPerUser: "1", isActive: "on" }),
+    );
+    expect(await prisma.examNotice.findUniqueOrThrow({ where: { id: page.id } })).toMatchObject({ couponCode: "CT-NOVO" });
+    await expect(deleteCoupon(coupon.id)).rejects.toThrow(/página de concurso/);
+    await saveNotice(notice({ noticeId: page.id, couponCode: "" }), { canChooseCoupon: true, now: T0 });
+    await deleteCoupon(coupon.id);
+    expect(await prisma.coupon.findUnique({ where: { id: coupon.id } })).toBeNull();
   });
 
   it("só o ADMIN escolhe o cupom: o professor salva e o cupom atual fica (sem conferir o código digitado)", async () => {

@@ -12,7 +12,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { previewCoupon } from "@/modules/coupons/coupons.server";
 import type { CouponTarget } from "@/modules/coupons/rules";
-import { getIncidenceMap } from "@/modules/questions/incidence.server";
+import { getBoardIncidence } from "@/modules/questions/incidence.server";
 
 import { NOTICE_STATUS_ORDER } from "./labels";
 
@@ -72,12 +72,12 @@ export const getNoticeForViewer = cache(async (slug: string, canSeeDrafts: boole
   // Oferta desativada não aparece (o link daria "não está à venda").
   const product = notice.product?.isActive ? notice.product : null;
   const plan = notice.plan?.isActive ? notice.plan : null;
-  const [incidenceMap, productCoupon, planCoupon] = await Promise.all([
-    notice.board ? getIncidenceMap() : null,
+  const [incidence, productCoupon, planCoupon] = await Promise.all([
+    // Só a banca desta página (não o mapa inteiro).
+    notice.board ? getBoardIncidence(notice.board.id) : null,
     product ? noticeCouponFor(notice.couponCode, { kind: "PRODUCT", id: product.id, priceCents: product.priceCents }) : null,
     plan ? noticeCouponFor(notice.couponCode, { kind: "PLAN", id: plan.id, priceCents: plan.priceCents }) : null,
   ]);
-  const incidence = incidenceMap?.boards.find((board) => board.boardId === notice.board?.id) ?? null;
   return {
     ...notice,
     subjects: notice.subjects.map((item) => item.subject).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name)),

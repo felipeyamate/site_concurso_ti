@@ -95,7 +95,18 @@ export function AffiliateSettingsForm({
   );
 }
 
-export function PayoutForm({ affiliateId, availableLabel, disabled }: { affiliateId: string; availableLabel: string; disabled: boolean }) {
+export function PayoutForm({
+  affiliateId,
+  availableLabel,
+  paymentIds,
+  disabled,
+}: {
+  affiliateId: string;
+  availableLabel: string;
+  // As comissões liberadas mostradas agora: o servidor recusa se, no clique, a lista for outra.
+  paymentIds: string[];
+  disabled: boolean;
+}) {
   const { state, onSubmit, pending, formRef } = useAdminForm(registerPayoutAction, { resetOnSuccess: true });
   return (
     <form
@@ -110,6 +121,7 @@ export function PayoutForm({ affiliateId, availableLabel, disabled }: { affiliat
       className="grid gap-3"
     >
       <input type="hidden" name="affiliateId" value={affiliateId} />
+      <input type="hidden" name="paymentIds" value={paymentIds.join(",")} />
       <div className="grid gap-2">
         <Label htmlFor="payout-note">Anotação (ex.: Pix de 10/10, comprovante 123)</Label>
         <Input id="payout-note" name="note" maxLength={300} />

@@ -306,6 +306,7 @@ ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegad
 | 4b | Pague o Pix no simulador (como na Fase 4) | Em "Minhas compras": "(cupom BEMVINDO20: −R$ ...)". No painel, o pedido mostra o cupom e o desconto |
 | 5 | Abra de novo `/comprar/<produto>?cupom=BEMVINDO20` | "Você já usou o cupom BEMVINDO20." Na lista de cupons: "1 uso(s)" |
 | 6 | Crie um cupom de R$ 500,00 e aplique num produto mais barato | "...deixaria o valor abaixo do mínimo de cobrança (R$ 5,00)." |
+| 6b | Crie um produto novo (sem vendas), escolha-o na lista de um cupom e tente **apagar** o produto | "Este produto está na lista de um cupom..." (apagar tiraria o produto da lista, e um cupom com a lista vazia vale para todos os produtos) |
 
 **Afiliados (ADMIN + a 2ª conta de aluno como afiliada)**
 
@@ -320,7 +321,9 @@ ADMIN, uma PROFESSOR (pode ser a mesma do admin) e duas contas de aluno (navegad
 
 > Para testar o pagamento da comissão sem esperar 7 dias, no `npm run db:studio` mude a data "paid_at" do pagamento
 > para 8 dias antes. Na ficha: "Liberada" → "Registrar pagamento de R$ X" → vira "Paga" (e "Já recebido" para a afiliada).
-> O dinheiro é pago **fora do site** (Pix); o botão só registra que foi pago.
+> O dinheiro é pago **fora do site** (Pix); o botão só registra que foi pago — e só o que a página mostrava: se outra
+> comissão foi liberada (ou estornada) depois que você abriu a página, aparece "As comissões liberadas mudaram..." e é só
+> recarregar e conferir de novo.
 
 **Blog e páginas de concurso (PROFESSOR)**
 

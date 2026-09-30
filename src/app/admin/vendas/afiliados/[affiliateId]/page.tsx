@@ -31,7 +31,7 @@ export default async function AdminAffiliatePage({ params }: PageProps<"/admin/v
   await requireRole("ADMIN", `/admin/vendas/afiliados/${affiliateId}`);
   const report = await getAffiliateForAdmin(affiliateId);
   if (!report) notFound();
-  const { affiliate, totals } = report;
+  const { affiliate, totals, commissions } = report;
 
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-6">
@@ -76,7 +76,12 @@ export default async function AdminAffiliatePage({ params }: PageProps<"/admin/v
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <PayoutForm affiliateId={affiliate.id} availableLabel={formatBRL(totals.AVAILABLE)} disabled={totals.AVAILABLE <= 0} />
+          <PayoutForm
+            affiliateId={affiliate.id}
+            availableLabel={formatBRL(totals.AVAILABLE)}
+            paymentIds={commissions.filter((row) => row.status === "AVAILABLE").map((row) => row.paymentId)}
+            disabled={totals.AVAILABLE <= 0}
+          />
         </CardContent>
       </Card>
 

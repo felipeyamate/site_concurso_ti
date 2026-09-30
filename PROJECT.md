@@ -236,6 +236,7 @@ atualizado.
 | 2026-09-30 | **SEO:** endereço canônico e OpenGraph em todas as páginas públicas, `sitemap.xml`, `robots.txt` (bloqueia painel, área do aluno, checkout e `/r/`), dados estruturados (escola, site, curso, artigo, trilha) e RSS do blog. Trocar o endereço (slug) de curso, aula, post ou página de concurso grava o antigo e ele **redireciona** para o novo (permanente) | Pendência da Fase 3 resolvida; o Google não perde as páginas já indexadas |
 | 2026-09-30 | Páginas públicas continuam montadas **a cada acesso** (sem cache): o `sitemap`, o RSS e as páginas usam `connection()` | Simples e sempre atualizado; cache entra quando o movimento pedir (Fase 7) |
 | 2026-09-30 | **Revisão da Fase 6:** pedido **vencido** sem pagamento devolve o uso do cupom (o aguardando pagamento continua sendo uma reserva, com a mensagem "você já tem um pedido com o cupom aguardando pagamento"); a página de concurso só mostra o cupom na oferta em que ele vale hoje; o **cupom da página só o ADMIN escolhe** (o professor edita o resto e o cupom atual fica); endereço antigo de **rascunho** não redireciona para o público; editar/apagar cupom usa a **mesma trava do checkout**; "vendas indicadas" do afiliado contam só vendas pagas | Achados da revisão: um Pix esquecido travava o cupom do aluno para sempre; a página prometia desconto que o checkout recusava; o professor podia "adivinhar" cupons pela mensagem de erro; o 308 revelava o endereço novo de um rascunho; trocar o código no instante de uma compra deixava o pedido com um código que não existe mais |
+| 2026-09-30 | **Segunda revisão da Fase 6:** assinatura recém-criada (antes de a 1ª cobrança ser gravada) já reserva o cupom; produto/plano que está na lista de um cupom **não se apaga** (a lista vazia faria o cupom valer para tudo); registrar o pagamento ao afiliado confere se as comissões liberadas são **as mesmas que a página mostrava**; trocar o código de um cupom **leva junto** as páginas de concurso que o usam (e cupom usado numa página não se apaga); links do Markdown e do afiliado usam a mesma conferência do login (`safeRedirectPath`); cada página do blog tem o seu endereço canônico | Achados da revisão: dois alunos levavam o último uso de um cupom de assinatura; apagar um produto sem vendas transformava um cupom restrito em cupom para tudo; uma comissão liberada no meio-tempo era registrada como paga sem ter sido paga; a página de concurso perdia o desconto (ou passava a usar outro cupom) ao renomear o cupom; um link "/\\site" do Markdown levava para fora do site |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -437,8 +438,8 @@ explicando o erro do Google para contas não confirmadas.
 - **SEO** (`src/modules/seo`): canonical, OpenGraph, sitemap, robots, JSON-LD, RSS e redirecionamento de endereços antigos
   (cursos, aulas, posts e concursos). Página inicial nova, com os concursos abertos e os últimos posts.
 - Seed: 3 posts de exemplo e 1 página de concurso **fictícia**.
-- Testes: 327 unitários + 126 de integração (inclusive um cupom disputado por duas compras ao mesmo tempo, que falha sem a
-  trava); 88 cenários novos no navegador (inclusive celular de 360 px) e os das Fases 2, 3, 4 e 5 repetidos sem
+- Testes: 328 unitários + 130 de integração (inclusive um cupom disputado por duas compras ao mesmo tempo, que falha sem a
+  trava); 89 cenários novos no navegador (inclusive celular de 360 px) e os das Fases 2, 3, 4 e 5 repetidos sem
   regressão (36 + 48 + 55 + 57).
 - Os testes no navegador acharam 1 problema, corrigido: botões com texto longo (na página de concurso, no post com
   assunto e no "Registrar pagamento") não quebravam a linha e alargavam a página no celular.
@@ -448,6 +449,11 @@ explicando o erro do Google para contas não confirmadas.
   cupom não esperava uma compra em andamento; título do blog terminado em "#" (C#) perdia o caractere; comissões como
   "0,29%" eram recusadas; as listas de cupons e afiliados faziam uma consulta por item. O caso da trava tem um teste que
   falha sem a correção.
+- Segunda revisão (antes do merge): mais 10 achados, todos corrigidos — os principais: o último uso de um cupom de
+  assinatura podia ir para dois alunos; apagar um produto transformava um cupom restrito em cupom para tudo; o registro de
+  pagamento ao afiliado podia incluir comissões que o admin não viu (nem pagou); renomear um cupom quebrava a página de
+  concurso; link "/\\site" no Markdown saía do site; a página de concurso montava o mapa de incidência inteiro a cada
+  acesso. 3 testes novos falham sem as correções.
 
 **Como testar:** [README.md → "Como testar a Fase 6"](./README.md#7-como-testar-a-fase-6-passo-a-passo).
 

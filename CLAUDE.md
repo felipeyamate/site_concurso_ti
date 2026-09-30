@@ -76,11 +76,13 @@
   Planilha: bytes → texto só com `decodeCsvBytes` (UTF-8 ou Windows-1252 do Excel), nunca `file.text()`.
 - Cupom: preço com desconto só por `previewCoupon` (tela) e `reserveCoupon` (checkout, dentro da trava do checkout, com a
   trava `coupon:<id>`), em `src/modules/coupons/`; regras puras em `coupons/rules.ts`. Nunca calcular desconto solto na página.
-  O que conta como uso: `redemptionWhere` (pago, mesmo reembolsado, + aguardando pagamento). Quem altera/apaga cupom pega a
-  mesma trava `coupon:<id>`. O cupom da página de concurso só o ADMIN escolhe (`canChooseCoupon` em `saveNotice`).
+  O que conta como uso: `redemptionWhere` (pago, mesmo reembolsado, + aguardando pagamento, inclusive a assinatura ainda sem
+  cobrança). Quem altera/ativa/apaga cupom pega a mesma trava `coupon:<id>`. O cupom da página de concurso só o ADMIN escolhe
+  (`canChooseCoupon` em `saveNotice`); renomear o cupom leva junto as páginas. Produto/plano na lista de um cupom não se apaga.
 - Afiliado: quem indicou a venda só sai de `resolveSaleAttribution` (cupom do afiliado ganha do cookie `ct_afiliado`).
   Comissões são CALCULADAS dos pagamentos (`listAffiliateCommissions`), não gravadas; o que foi pago fica nos itens de
-  repasse (`registerAffiliatePayout`, com trava). Link `/r/...` só redireciona para caminhos do site (`safeRedirectPath`).
+  repasse (`registerAffiliatePayout`, com trava e com `expectedPaymentIds` = o que a página mostrou).
+  Caminho "do site" (link `/r/...`, links do Markdown, voltar do login): sempre `safeRedirectPath`, nunca um `startsWith` solto.
 - Texto do blog/concursos só com `<Markdown>`/`parseMarkdown` (`src/lib/markdown/`); nunca `dangerouslySetInnerHTML`
   (única exceção: `<JsonLd>`, que escapa o conteúdo em `serializeJsonLd`).
 - Trocar o slug de curso, aula, post ou página de concurso chama `recordSlugChange` na mesma transação; a página pública

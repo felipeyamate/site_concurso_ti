@@ -21,6 +21,7 @@ import { getAffiliateDashboard, getAffiliateForAdmin } from "@/modules/affiliate
 import { AFFILIATE_COOKIE } from "@/modules/affiliates/rules";
 import { deleteCoupon, saveCoupon } from "@/modules/coupons/coupons-admin.server";
 import { couponFormSchema } from "@/modules/coupons/schemas";
+import { deletePlan, deleteProduct } from "@/modules/payments/admin/sales-admin.server";
 import { createOrder, startSubscription } from "@/modules/payments/checkout.server";
 import { requestOrderRefund } from "@/modules/payments/refunds.server";
 import { simulateNextCycle, simulatePaymentAction } from "@/modules/payments/simulator.server";
@@ -178,6 +179,32 @@ describe("cupons no checkout", () => {
     expect(await prisma.order.count({ where: { couponCode: "BEMVINDO10" } })).toBe(1);
   });
 
+  it("assinatura recém-criada (1ª cobrança ainda não gravada) já reserva o cupom", async () => {
+    const { plan } = await setupCatalog();
+    await createUser("mk-aluno");
+    await createUser("mk-outro");
+    const { id: couponId } = await createCoupon({ code: "ASSINA1", appliesToProducts: undefined, appliesToPlans: "on", maxRedemptions: "1" });
+    // O checkout grava a assinatura (com a trava) e só depois, fora da trava, chama o provedor e grava a
+    // cobrança: neste meio-tempo a assinatura existe SEM cobrança nenhuma.
+    await prisma.subscription.create({
+      data: {
+        userId: "mk-aluno",
+        planId: plan.id,
+        planTitle: plan.title,
+        priceCents: 4491,
+        discountCents: 499,
+        couponId,
+        couponCode: "ASSINA1",
+        cycle: "MONTHLY",
+        method: "PIX",
+        provider: "FAKE",
+      },
+    });
+    await expect(
+      startSubscription({ buyer: buyer("mk-outro"), planSlug: "mensal", method: "PIX", billing: { cpf: CPF, phone: null }, couponCode: "ASSINA1", now: T0 }),
+    ).rejects.toThrow(/número máximo/);
+  });
+
   it("assinatura com cupom: desconto na 1ª cobrança e nas renovações", async () => {
     await setupCatalog();
     await createUser("mk-aluno");
@@ -212,6 +239,19 @@ describe("cupons no checkout", () => {
     const unused = await createCoupon({ code: "NUNCAUSADO" });
     await deleteCoupon(unused.id);
     expect(await prisma.coupon.findUnique({ where: { id: unused.id } })).toBeNull();
+  });
+
+  it("produto/plano na lista de um cupom não se apaga (a lista vazia faria o cupom valer para TUDO)", async () => {
+    await setupCatalog();
+    const extra = await prisma.product.create({ data: { slug: "trilha-bb", title: "Trilha BB", priceCents: 9700, isActive: true } });
+    const extraPlan = await prisma.plan.create({ data: { slug: "anual", title: "Plano anual", priceCents: 49900, cycle: "YEARLY", isActive: true } });
+    await createCoupon({ code: "BB50", percentOff: "50", productIds: [extra.id] });
+    await createCoupon({ code: "ANUAL10", appliesToProducts: undefined, appliesToPlans: "on", planIds: [extraPlan.id] });
+    await expect(deleteProduct(extra.id)).rejects.toThrow(/lista de um cupom/);
+    await expect(deletePlan(extraPlan.id)).rejects.toThrow(/lista de um cupom/);
+    expect(await prisma.couponProduct.count({ where: { productId: extra.id } })).toBe(1);
+    // Sem cupom nem venda, apaga normalmente.
+    await deletePlan((await prisma.plan.create({ data: { slug: "sobra", title: "Sobra", priceCents: 1000, cycle: "MONTHLY" } })).id);
   });
 
   it("painel: trocar o código ESPERA a compra com o cupom que está sendo gravada (a mesma trava do checkout)", async () => {
@@ -263,6 +303,13 @@ describe("afiliados", () => {
   async function setupAffiliate(code = "joao", commission = "20") {
     await createUser("mk-joao");
     return createAffiliate({ email: "mk-joao@exemplo.com", code, commissionBps: Number(commission) * 100, payoutInfo: "Pix: joao@exemplo.com" });
+  }
+
+  // O que a página do painel faz: registra o pagamento das comissões liberadas QUE ELA MOSTRA.
+  async function payAvailable(affiliateId: string, now: Date, note = "", shownAt: Date = now) {
+    const shown = await getAffiliateForAdmin(affiliateId, shownAt);
+    const expectedPaymentIds = (shown?.commissions ?? []).filter((row) => row.status === "AVAILABLE").map((row) => row.paymentId);
+    return registerAffiliatePayout({ affiliateId, adminId: "mk-joao", note, now, expectedPaymentIds });
   }
 
   function hitReferral(path: string) {
@@ -320,15 +367,15 @@ describe("afiliados", () => {
     const early = await getAffiliateForAdmin(joao.id, at(2));
     expect(early?.commissions.map((row) => row.status).sort()).toEqual(["HOLD", "HOLD"]);
     expect(early?.totals.HOLD).toBe(3940 * 2);
-    await expect(registerAffiliatePayout({ affiliateId: joao.id, adminId: "mk-joao", note: "", now: at(2) })).rejects.toThrow(/Não há comissões/);
+    await expect(payAvailable(joao.id, at(2))).rejects.toThrow(/Não há comissões/);
 
     await requestOrderRefund({ orderId: refunded.orderId, actor: { userId: "mk-outro", isAdmin: false }, now: at(3) });
     const later = await getAffiliateForAdmin(joao.id, at(9));
     expect(later?.totals).toEqual({ HOLD: 0, AVAILABLE: 3940, PAID_OUT: 0, CANCELED: 3940 });
 
-    const payout = await registerAffiliatePayout({ affiliateId: joao.id, adminId: "mk-joao", note: "Pix 10/10", now: at(9) });
+    const payout = await payAvailable(joao.id, at(9), "Pix 10/10");
     expect(payout).toMatchObject({ amountCents: 3940, count: 1 });
-    await expect(registerAffiliatePayout({ affiliateId: joao.id, adminId: "mk-joao", note: "", now: at(9) })).rejects.toThrow(/Não há comissões/);
+    await expect(payAvailable(joao.id, at(9))).rejects.toThrow(/Não há comissões/);
     const dashboard = await getAffiliateDashboard("mk-joao", at(9));
     expect(dashboard?.totals).toMatchObject({ AVAILABLE: 0, PAID_OUT: 3940 });
     expect(dashboard?.sales).toBe(2); // o 3º pedido nunca foi pago: não é "venda"
@@ -368,9 +415,25 @@ describe("afiliados", () => {
     await createUser("mk-aluno");
     const sale = await buy("mk-aluno", { affiliateCode: "joao" });
     await simulatePaymentAction({ paymentId: sale.paymentId as string, action: "PAY", now: at(0, 1) });
-    const results = await Promise.allSettled([1, 2, 3].map(() => registerAffiliatePayout({ affiliateId: joao.id, adminId: "mk-joao", note: "", now: at(9) })));
+    const results = await Promise.allSettled([1, 2, 3].map(() => payAvailable(joao.id, at(9))));
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(await prisma.affiliatePayout.count()).toBe(1);
+  });
+
+  it("registrar pagamento: se as comissões liberadas mudaram desde que a página abriu, recusa", async () => {
+    await setupCatalog();
+    const joao = await setupAffiliate();
+    await createUser("mk-aluno");
+    await createUser("mk-outro");
+    const first = await buy("mk-aluno", { affiliateCode: "joao" });
+    const second = await buy("mk-outro", { affiliateCode: "joao" });
+    await simulatePaymentAction({ paymentId: first.paymentId as string, action: "PAY", now: at(0, 1) });
+    await simulatePaymentAction({ paymentId: second.paymentId as string, action: "PAY", now: at(3) });
+    // A página abriu no dia 9 (só a 1ª liberada: R$ 39,40) e o clique foi no dia 11 (as duas liberadas).
+    await expect(payAvailable(joao.id, at(11), "Pix", at(9))).rejects.toThrow(/mudaram desde que a página abriu/);
+    expect(await prisma.affiliatePayout.count()).toBe(0);
+    // Recarregou: agora registra as duas, que foi o que o admin viu (e pagou).
+    await expect(payAvailable(joao.id, at(11), "Pix")).resolves.toMatchObject({ amountCents: 3940 * 2, count: 2 });
   });
 
   it("painel: e-mail sem conta, pessoa já afiliada e código repetido", async () => {

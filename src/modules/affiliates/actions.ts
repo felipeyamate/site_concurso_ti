@@ -59,7 +59,12 @@ export async function registerPayoutAction(_previous: FormState, formData: FormD
   const parsed = payoutSchema.safeParse(formDataToObject(formData));
   if (!parsed.success) return invalidState(parsed.error);
   try {
-    const result = await registerAffiliatePayout({ affiliateId: parsed.data.affiliateId, adminId: session.user.id, note: parsed.data.note });
+    const result = await registerAffiliatePayout({
+      affiliateId: parsed.data.affiliateId,
+      adminId: session.user.id,
+      note: parsed.data.note,
+      expectedPaymentIds: parsed.data.paymentIds,
+    });
     refreshScreens();
     return successState(`Pagamento de ${formatBRL(result.amountCents)} registrado (${result.count} comissão(ões)).`);
   } catch (error) {

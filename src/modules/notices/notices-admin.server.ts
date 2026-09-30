@@ -15,6 +15,7 @@
 import "server-only";
 
 import { isUniqueViolation } from "@/lib/db-errors";
+import { advisoryLock } from "@/lib/db-locks";
 import { prisma } from "@/lib/db";
 import { UserFacingError } from "@/lib/form-state";
 import { findAvailableSlug } from "@/modules/catalog/admin/slug";
@@ -62,6 +63,12 @@ export async function saveNotice(
         : null;
       if (data.noticeId && !current) throw new UserFacingError("Página não encontrada.");
       const couponCode = options.canChooseCoupon ? data.couponCode : (current?.couponCode ?? null);
+      // Cupom escolhido agora: pega a trava dele (a mesma de editar/apagar cupom), para ele não ser
+      // renomeado ou apagado entre a conferência abaixo e a gravação da página.
+      if (options.canChooseCoupon && couponCode) {
+        const chosen = await tx.coupon.findUnique({ where: { code: couponCode }, select: { id: true } });
+        if (chosen) await advisoryLock(tx, `coupon:${chosen.id}`);
+      }
 
       const [board, product, plan, coupon, subjects] = await Promise.all([
         data.boardId ? tx.board.count({ where: { id: data.boardId } }) : 1,
