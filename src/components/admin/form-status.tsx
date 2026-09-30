@@ -1,5 +1,6 @@
 /**
- * form-status.tsx — Mensagem do resultado de um formulário do painel ("Curso salvo." / erro).
+ * form-status.tsx — Mensagem do resultado de um formulário do painel ("Curso salvo." / erro),
+ * com a lista de detalhes quando houver (ex.: erros por linha da planilha importada).
  *
  * Quem chama: os formulários do painel admin.
  */
@@ -12,7 +13,16 @@ export function FormStatus({ state }: { state: FormState }) {
   }
   return (
     <Alert variant={state.status === "error" ? "destructive" : "default"} role="status">
-      <AlertDescription>{state.message}</AlertDescription>
+      <AlertDescription>
+        {state.message}
+        {state.details && state.details.length > 0 ? (
+          <ul className="list-disc pl-4">
+            {state.details.map((detail, index) => (
+              <li key={index}>{detail}</li>
+            ))}
+          </ul>
+        ) : null}
+      </AlertDescription>
     </Alert>
   );
 }

@@ -33,8 +33,9 @@ type RunnerItem = {
 type MockExamRunnerProps = {
   mockExamId: string;
   items: RunnerItem[];
-  // Hora em que o tempo acaba (texto ISO) — null = sem limite.
-  deadline: string | null;
+  // Quanto tempo falta (em milissegundos), medido pelo SERVIDOR ao montar a página — null = sem limite.
+  // O relógio conta a partir daqui: se o relógio do aparelho do aluno estiver errado, não importa.
+  remainingMs: number | null;
   timeIsUp: boolean;
 };
 
@@ -47,18 +48,24 @@ function formatRemaining(milliseconds: number): string {
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
 }
 
-export function MockExamRunner({ mockExamId, items, deadline, timeIsUp }: MockExamRunnerProps) {
+export function MockExamRunner({ mockExamId, items, remainingMs, timeIsUp }: MockExamRunnerProps) {
   const [answers, setAnswers] = useState<Record<string, string | null>>(() =>
     Object.fromEntries(items.map((item) => [item.question.id, item.answer])),
   );
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
   const [finishState, finishDispatch, finishing] = useActionState(finishMockExamAction, initialFormState);
-  const [now, setNow] = useState(() => Date.now());
+  // `start` e `deadlineMs` no relógio DESTE aparelho: agora + o que o servidor disse que falta.
+  // Só a diferença entre dois instantes do mesmo relógio importa (como `time.monotonic()` no Python).
+  const [clock] = useState(() => {
+    const start = Date.now();
+    return { start, deadlineMs: remainingMs === null ? null : start + remainingMs };
+  });
+  const [now, setNow] = useState(clock.start);
   const [expired, setExpired] = useState(timeIsUp);
   const autoFinished = useRef(false);
 
   const answeredCount = Object.values(answers).filter((answer) => answer !== null).length;
-  const deadlineMs = deadline ? new Date(deadline).getTime() : null;
+  const deadlineMs = clock.deadlineMs;
 
   function finish() {
     const formData = new FormData();

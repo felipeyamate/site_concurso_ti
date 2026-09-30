@@ -275,11 +275,12 @@ completo à 2ª conta com uma matrícula: `npm run enroll -- email-do-aluno-2 in
 | 13 | Área do aluno → **Meu desempenho** | Total de respostas, taxa de acerto, a tabela por assunto e os últimos simulados. Com 5+ respostas num assunto e menos de 60% de acerto, ele aparece em "Seus pontos fracos" |
 | 14 | Como PROFESSOR: `/admin` → **Questões** → **Nova questão**; preencha sem escolher o gabarito e clique em "Criar questão" | Erro "O gabarito precisa ser uma das alternativas." e o texto digitado continua |
 | 15 | Escolha o gabarito e crie; clique em **Publicar** | A questão nasce como **rascunho** e passa a aparecer para os alunos depois de publicada |
-| 16 | Responda essa questão com um aluno; volte ao painel, troque o **gabarito** e salve | Recusado: "Esta questão já foi respondida por alunos: dá para corrigir os textos, mas não o tipo, as alternativas (letras) nem o gabarito..." Corrigir o texto funciona. "Apagar questão" também é recusado (despublique) |
+| 16 | Responda essa questão como PROFESSOR (em `/questoes`) e troque o gabarito no painel; depois responda com um **aluno** e tente trocar de novo | O teste do professor não trava nada. Depois da resposta do aluno: "Esta questão já foi respondida por alunos: dá para corrigir os textos, mas não o tipo, as alternativas (letras) nem o gabarito..." Corrigir o texto funciona. "Apagar questão" também é recusado (despublique) |
 | 17 | **Bancas, assuntos e provas**: crie uma banca, um assunto e uma prova; tente apagar a banca "Cesgranrio" | Criados. A Cesgranrio não pode ser apagada (tem provas e questões) |
-| 18 | **Importar planilha** → "Baixar o modelo (CSV)"; abra no Excel/LibreOffice, troque o gabarito de uma linha para `F` e envie | "Linha N: O gabarito precisa ser uma das alternativas." e **nada** é importado |
+| 18 | **Importar planilha** → "Baixar o modelo (CSV)"; abra no Excel/LibreOffice, troque o gabarito de uma linha para `F` e envie | "Linha N: O gabarito precisa ser uma das alternativas." e **nada** é importado (limite: 500 questões e 900 KB por arquivo) |
 | 19 | Corrija a linha e envie de novo; envie o mesmo arquivo uma terceira vez | "2 questões importadas como rascunho" (confira e publique na lista). Na terceira vez: erro de código repetido (a coluna `codigo` evita importar duas vezes) |
 | 20 | Com um aluno, abra `/admin/questoes` e `/simulados/<id do simulado da outra conta>` | "Página não encontrada" nos dois |
+| 21 | Com a 2ª conta, comece um simulado e revogue a matrícula dela no painel (Usuários); recarregue o simulado | "Seu acesso aos simulados terminou": o simulado fica guardado e continua quando o acesso voltar |
 
 > As 3 provas do seed são **fictícias** (questões originais "no estilo" de cada banca), só para testar. O mapa
 > "o que mais cai" fica bom de verdade quando o professor cadastrar provas reais já aplicadas (com a banca e o

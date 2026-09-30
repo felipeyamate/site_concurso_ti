@@ -22,6 +22,12 @@ import { normalizeHeader } from "./csv";
 import { QUESTION_LIMITS } from "./limits";
 
 export const MAX_IMPORT_ROWS = 500;
+// Tamanho máximo do arquivo. As Server Actions do Next aceitam até 1 MB por envio (o padrão, que
+// protege TODAS as ações do site contra envios enormes); a folga cobre o "envelope" do envio
+// (multipart). 500 questões de tamanho comum cabem com sobra. O formulário confere antes de enviar.
+export const MAX_IMPORT_BYTES = 900 * 1024;
+export const IMPORT_TOO_LARGE_MESSAGE =
+  "Arquivo grande demais (máximo 900 KB). Divida a planilha em partes menores e importe uma de cada vez.";
 // Mostra no máximo estes erros (uma planilha toda errada não precisa de 500 mensagens).
 const MAX_REPORTED_ERRORS = 50;
 
@@ -56,6 +62,19 @@ export type ImportedQuestion = {
 
 export type ImportError = { line: number; message: string };
 export type ImportResult = { ok: true; questions: ImportedQuestion[] } | { ok: false; errors: ImportError[] };
+
+/**
+ * Os códigos (coluna `codigo`) da planilha, já sem espaços nas pontas e sem repetição — do mesmo
+ * jeito que `parseQuestionImport` os lê. Quem importa usa isto para buscar no banco só os códigos
+ * que importam (no máximo MAX_IMPORT_ROWS), antes de conferir as linhas.
+ */
+export function importCodes(rows: string[][]): string[] {
+  const [header, ...dataRows] = rows;
+  const index = header ? header.map(normalizeHeader).indexOf("codigo") : -1;
+  if (index < 0) return [];
+  const codes = dataRows.slice(0, MAX_IMPORT_ROWS).map((row) => (row[index] ?? "").trim());
+  return [...new Set(codes.filter(Boolean))];
+}
 
 // "Múltipla escolha", "ME", "multipla" → MULTIPLE_CHOICE; "Certo/Errado", "CE" → TRUE_FALSE.
 function parseType(value: string): QuestionType | null {

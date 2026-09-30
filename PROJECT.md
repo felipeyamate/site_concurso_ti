@@ -220,6 +220,9 @@ atualizado.
 | 2026-09-30 | Histórico do aluno protegido: questão respondida (na prática ou em simulado) não se apaga (despublicar) e não muda de **tipo**, **letras** nem **gabarito** — só os textos. Banca, assunto e prova com questões não se apagam. Trocar a banca de uma prova leva junto a banca das questões dela | Mudar o gabarito depois reescreveria o "acertou/errou" que o aluno já viu; mesma regra de "nunca apagar histórico" das Fases 2–4 |
 | 2026-09-30 | Importação por planilha CSV (`;` ou `,`, com acentos do Excel) **tudo ou nada**, até 500 linhas; as questões entram como **rascunho**; a coluna `codigo` (opcional, única) impede importar a mesma questão duas vezes | O professor corrige a planilha e importa de novo sem duplicar nada; revisa antes de publicar |
 | 2026-09-30 | Conteúdo de exemplo do banco de questões no seed (4 bancas, 6 assuntos, 30 questões) com provas **fictícias** ("Prova de exemplo — ...") | Testar tudo sem copiar provas reais; o conteúdo real entra pelo painel |
+| 2026-09-30 | **Revisão da Fase 5:** "histórico de aluno" numa questão = resposta ou simulado de quem é **aluno** ou tem/teve matrícula (mesma regra das aulas); o professor testando não trava a questão, e apagá-la leva junto os testes dele. Responder trava a linha da questão para leitura (`FOR SHARE`), esperando um professor que esteja trocando o gabarito naquele instante | Achados da revisão: um teste do professor impedia corrigir o gabarito; uma resposta no mesmo instante da troca era corrigida com o gabarito antigo |
+| 2026-09-30 | Salvar e finalizar um simulado conferem o acesso completo de novo: quem perdeu o acesso (reembolso, fim da assinatura) vê um aviso e o simulado fica aberto até o acesso voltar. O relógio do simulado conta a partir do tempo restante medido pelo **servidor** | Finalizar entrega o gabarito e os comentários; um relógio errado no aparelho do aluno encurtava (ou alongava) a prova |
+| 2026-09-30 | Planilha de importação com no máximo **900 KB** (conferido no navegador antes de enviar) | O Next aceita até 1 MB por envio numa Server Action; aumentar esse limite valeria para todas as ações do site |
 
 ## 9. Contas que precisam ser criadas (antes/durante a Fase 1)
 
@@ -379,11 +382,15 @@ explicando o erro do Google para contas não confirmadas.
 - Painel `/admin/questoes` (professor ou admin): lista com filtros, criar/editar/publicar/apagar questão (com a proteção
   do histórico), bancas/assuntos/provas e **importação por planilha** (com modelo para baixar).
 - Seed: 4 bancas, 6 assuntos, 3 provas fictícias e 30 questões comentadas de exemplo.
-- Testes: 283 unitários + 94 de integração; 57 cenários novos no navegador (inclusive celular de 360 px) e os das
-  Fases 2, 3 e 4 repetidos sem regressão (36 + 48 + 55).
+- Testes: 285 unitários + 97 de integração; 57 cenários novos no navegador (inclusive celular de 360 px), mais 14 das
+  correções da revisão, e os das Fases 2, 3 e 4 repetidos sem regressão (36 + 48 + 55).
 - Os testes no navegador acharam 2 problemas, corrigidos: a tela de resultado do simulado quebrava (o servidor chamava
   uma função de um componente do navegador) e o modelo de planilha usava um assunto que não existe no seed
   (agora um teste importa o próprio modelo).
+- Revisão de código no PR [#5](https://github.com/felipeyamate/site_concurso_ti/pull/5): 10 achados, todos corrigidos — os
+  principais: resposta no instante da troca do gabarito era corrigida com o gabarito antigo; teste do professor travava a
+  questão; quem perdia o acesso ainda finalizava simulados abertos (e via os gabaritos); relógio do simulado dependia do
+  relógio do aparelho; planilha acima de 1 MB dava erro genérico. Os casos principais têm testes que falham sem a correção.
 
 **Como testar:** [README.md → "Como testar a Fase 5"](./README.md#6-como-testar-a-fase-5-passo-a-passo).
 

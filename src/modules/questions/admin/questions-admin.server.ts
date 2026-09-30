@@ -6,7 +6,9 @@
  * integração chamam direto.
  *
  * Regras de histórico (PROJECT.md, "nunca apagar histórico de aluno"):
- *  - Questão já respondida (ou num simulado) NÃO se apaga: despublica.
+ *  - "Histórico de aluno" = resposta (ou simulado) de quem é ALUNO ou tem/teve matrícula — a mesma
+ *    regra das aulas (Fase 3). Professor/admin testando a questão não trava nada.
+ *  - Questão já respondida por aluno (ou num simulado de aluno) NÃO se apaga: despublica.
  *  - Numa questão com histórico, dá para corrigir textos (enunciado, alternativas, comentário),
  *    mas NÃO o tipo, as letras das alternativas nem o gabarito — as respostas antigas foram
  *    corrigidas com eles. Para trocar o gabarito, despublique e cadastre a questão corrigida.
@@ -23,7 +25,7 @@ import { UserFacingError } from "@/lib/form-state";
 import { findAvailableSlug } from "@/modules/catalog/admin/slug";
 
 import { CsvError, parseCsv } from "../csv";
-import { parseQuestionImport, type ImportError } from "../import-questions";
+import { importCodes, parseQuestionImport, type ImportError } from "../import-questions";
 import type { QuestionFormData } from "../schemas";
 
 type Tx = Prisma.TransactionClient;
@@ -32,11 +34,17 @@ export const QUESTIONS_ADMIN_PAGE_SIZE = 30;
 
 const lockQuestion = (tx: Tx, questionId: string) => tx.$executeRaw`SELECT id FROM questions WHERE id = ${questionId} FOR UPDATE`;
 
-/** A questão tem histórico de aluno (resposta ou simulado)? */
-async function hasHistory(tx: Tx, questionId: string): Promise<boolean> {
+/**
+ * Quem conta como ALUNO para o histórico: é aluno hoje, ou tem (ou teve) alguma matrícula — um aluno
+ * promovido a professor (ex.: monitor) continua protegido. Mesma ideia de `catalog-admin.server.ts`.
+ */
+const STUDENT_USER: Prisma.UserWhereInput = { OR: [{ role: "STUDENT" }, { enrollments: { some: {} } }] };
+
+/** A questão tem histórico de ALUNO (resposta ou simulado)? Respostas de professor testando não contam. */
+async function hasStudentHistory(tx: Tx, questionId: string): Promise<boolean> {
   const [attempts, items] = await Promise.all([
-    tx.questionAttempt.count({ where: { questionId } }),
-    tx.mockExamQuestion.count({ where: { questionId } }),
+    tx.questionAttempt.count({ where: { questionId, user: STUDENT_USER } }),
+    tx.mockExamQuestion.count({ where: { questionId, mockExam: { user: STUDENT_USER } } }),
   ]);
   return attempts + items > 0;
 }
@@ -210,11 +218,15 @@ export async function listQuestionsForAdmin(filters: AdminQuestionFilters) {
 export async function getQuestionForAdmin(questionId: string) {
   const question = await prisma.question.findUnique({
     where: { id: questionId },
-    include: { options: { orderBy: { label: "asc" } }, _count: { select: { attempts: true, mockExamItems: true } } },
+    include: { options: { orderBy: { label: "asc" } }, _count: { select: { attempts: true } } },
   });
   if (!question) return null;
-  const correct = await prisma.questionAttempt.count({ where: { questionId, isCorrect: true } });
-  return { ...question, correctAttempts: correct };
+  const [correct, studentHistory] = await Promise.all([
+    prisma.questionAttempt.count({ where: { questionId, isCorrect: true } }),
+    hasStudentHistory(prisma, questionId),
+  ]);
+  // `hasStudentHistory`: a tela trava tipo/letras/gabarito com a MESMA regra que o servidor confere.
+  return { ...question, correctAttempts: correct, hasStudentHistory: studentHistory };
 }
 
 /** Confere assunto, banca e prova; a banca de uma questão de prova é a da prova. */
@@ -265,7 +277,7 @@ export async function saveQuestion(data: QuestionFormData): Promise<{ id: string
         select: { id: true, type: true, correctAnswer: true, options: { select: { label: true } } },
       });
       if (!current) throw new UserFacingError("Questão não encontrada.");
-      if (await hasHistory(tx, current.id)) {
+      if (await hasStudentHistory(tx, current.id)) {
         const sameLabels =
           current.options.map((option) => option.label).sort().join() === data.options.map((option) => option.label).join();
         if (current.type !== data.type || current.correctAnswer !== data.correctAnswer || !sameLabels) {
@@ -300,9 +312,13 @@ export async function deleteQuestion(questionId: string): Promise<void> {
     await lockQuestion(tx, questionId);
     const exists = await tx.question.findUnique({ where: { id: questionId }, select: { id: true } });
     if (!exists) throw new UserFacingError("Questão não encontrada.");
-    if (await hasHistory(tx, questionId)) {
+    if (await hasStudentHistory(tx, questionId)) {
       throw new UserFacingError("Esta questão já foi respondida por alunos: despublique em vez de apagar (o histórico deles fica).");
     }
+    // Sobraram só testes de professor/admin: saem junto (a chave estrangeira impede apagar a questão
+    // com respostas). Apagar o simulado leva as questões e as respostas dele (cascata).
+    await tx.mockExam.deleteMany({ where: { items: { some: { questionId } } } });
+    await tx.questionAttempt.deleteMany({ where: { questionId } });
     await tx.question.delete({ where: { id: questionId } });
   });
 }
@@ -329,13 +345,13 @@ export async function importQuestionsFromCsv(csvText: string): Promise<ImportOut
     throw error;
   }
 
-  const codes = parsed.rows.slice(1).flatMap((row) => row.filter(Boolean));
+  const codes = importCodes(parsed.rows);
   const [subjects, boards, exams, existing] = await Promise.all([
     prisma.subject.findMany({ select: { id: true, name: true, slug: true } }),
     prisma.board.findMany({ select: { id: true, name: true, slug: true } }),
     prisma.exam.findMany({ select: { id: true, slug: true, boardId: true } }),
-    // Só os códigos que podem estar na planilha (qualquer célula) — não a tabela inteira.
-    prisma.question.findMany({ where: { code: { in: codes.slice(0, 50_000) } }, select: { code: true } }),
+    // Só os códigos da planilha (coluna `codigo`) — não a tabela inteira.
+    codes.length > 0 ? prisma.question.findMany({ where: { code: { in: codes } }, select: { code: true } }) : [],
   ]);
   const result = parseQuestionImport({
     rows: parsed.rows,

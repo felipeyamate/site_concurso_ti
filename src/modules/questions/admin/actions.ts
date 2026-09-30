@@ -2,8 +2,8 @@
  * actions.ts — Server Actions do painel do banco de questões (PROFESSOR ou mais).
  *
  * Quem chama: os formulários de `components/` (páginas /admin/questoes/...).
- * O que devolve: um `FormState` (mensagem + erros por campo), um resultado de importação, ou
- * redireciona para outra página.
+ * O que devolve: um `FormState` (mensagem + erros por campo; na importação, os erros por linha em
+ * `details`), ou redireciona para outra página.
  *
  * Toda ação: 1. confere login + perfil PROFESSOR (`getSessionWithRole` — uma ação pode ser
  * chamada direto por HTTP); 2. valida (zod); 3. grava (`questions-admin.server.ts`);
@@ -19,7 +19,7 @@ import { redirect } from "next/navigation";
 import { errorState, formDataToObject, invalidState, stateFromError, successState, type FormState } from "@/lib/form-state";
 import { PERMISSION_DENIED_MESSAGE, getSessionWithRole } from "@/modules/auth/action-guards";
 
-import type { ImportError } from "../import-questions";
+import { IMPORT_TOO_LARGE_MESSAGE, MAX_IMPORT_BYTES } from "../import-questions";
 import { boardSchema, deleteByIdSchema, examSchema, questionSchema, subjectSchema } from "../schemas";
 import {
   deleteBoard,
@@ -33,9 +33,6 @@ import {
   saveSubject,
   setQuestionPublished,
 } from "./questions-admin.server";
-
-// Um CSV de 500 questões fica bem abaixo disso; acima, é outro tipo de arquivo.
-const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 
 function refreshQuestionScreens() {
   revalidatePath("/", "layout");
@@ -179,29 +176,26 @@ export async function deleteQuestionAction(_previous: FormState, formData: FormD
 // Importação
 // ---------------------------------------------------------------------------------------------
 
-export type ImportState =
-  | { status: "idle" }
-  | { status: "error"; message: string; errors: ImportError[] }
-  | { status: "success"; message: string };
-
-export async function importQuestionsAction(_previous: ImportState, formData: FormData): Promise<ImportState> {
-  if (!(await teacher())) return { status: "error", message: PERMISSION_DENIED_MESSAGE, errors: [] };
+export async function importQuestionsAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  if (!(await teacher())) return errorState(PERMISSION_DENIED_MESSAGE);
   const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) return { status: "error", message: "Escolha o arquivo CSV da planilha.", errors: [] };
-  if (file.size > MAX_IMPORT_BYTES) return { status: "error", message: "Arquivo grande demais (máximo 2 MB).", errors: [] };
+  if (!(file instanceof File) || file.size === 0) return errorState("Escolha o arquivo CSV da planilha.");
+  if (file.size > MAX_IMPORT_BYTES) return errorState(IMPORT_TOO_LARGE_MESSAGE);
 
   try {
     const outcome = await importQuestionsFromCsv(await file.text());
     if (!outcome.ok) {
-      return { status: "error", message: "Nada foi importado. Corrija a planilha e envie de novo:", errors: outcome.errors };
+      return errorState(
+        "Nada foi importado. Corrija a planilha e envie de novo:",
+        {},
+        outcome.errors.map((error) => `Linha ${error.line}: ${error.message}`),
+      );
     }
     refreshQuestionScreens();
-    return {
-      status: "success",
-      message: `${outcome.created} ${outcome.created === 1 ? "questão importada" : "questões importadas"} como rascunho. Revise e publique na lista.`,
-    };
+    return successState(
+      `${outcome.created} ${outcome.created === 1 ? "questão importada" : "questões importadas"} como rascunho. Revise e publique na lista.`,
+    );
   } catch (error) {
-    console.error("[questoes] Falha na importação:", error);
-    return { status: "error", message: "Não foi possível importar agora. Tente de novo.", errors: [] };
+    return stateFromError(error, "importar a planilha");
   }
 }

@@ -30,7 +30,7 @@ export default async function EditQuestionPage({ params }: PageProps<"/admin/que
   await requireRole("TEACHER", `/admin/questoes/${questionId}`);
   const [question, { boards, subjects, exams }] = await Promise.all([getQuestionForAdmin(questionId), listClassification()]);
   if (!question) notFound();
-  const hasHistory = question._count.attempts + question._count.mockExamItems > 0;
+  const hasHistory = question.hasStudentHistory;
 
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-6">
@@ -41,9 +41,9 @@ export default async function EditQuestionPage({ params }: PageProps<"/admin/que
         <h1 className="text-2xl font-semibold tracking-tight">Editar questão</h1>
         <QuestionsSubnav current={null} />
         <p className="text-muted-foreground text-sm">
-          {question._count.attempts} resposta(s) de alunos
+          {question._count.attempts} resposta(s)
           {question._count.attempts > 0 ? ` · ${accuracyPercent(question.correctAttempts, question._count.attempts)}% de acerto` : ""}.
-          {hasHistory ? " Como já foi respondida, dá para corrigir os textos, mas não o tipo, as letras nem o gabarito." : ""}
+          {hasHistory ? " Como alunos já responderam, dá para corrigir os textos, mas não o tipo, as letras nem o gabarito." : ""}
         </p>
       </div>
 

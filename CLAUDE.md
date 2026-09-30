@@ -32,6 +32,8 @@
   TEACHER para conteúdo (cursos, aulas, vídeos, PDFs), ADMIN para usuários, perfis e matrículas.
   Formulários usam `useAdminForm` + `FormState`; erros esperados são `UserFacingError` (`src/lib/form-state.ts`).
   Exceção: o envio de PDF (3 passos, `attachment-manager.tsx`) não usa o `useAdminForm`, mas usa `FormState` + `FormStatus`.
+  Lista de erros detalhados (ex.: por linha da planilha): `FormState.details`, mostrada pelo `FormStatus`.
+  Server Action aceita até 1 MB por envio (padrão do Next, mantido): arquivo maior só com conferência antes de enviar.
 - Nunca apagar histórico de aluno: curso com matrícula ou aula com progresso de ALUNO não se apaga (despublicar).
   Toda operação "confere e depois grava/apaga" trava as linhas antes de conferir (ver `lockRows` em
   `catalog-admin.server.ts`, `lockEnrollment` em `enrollment/grant.ts` e `withAdvisoryLock` em `src/lib/db-locks.ts`)
@@ -62,8 +64,10 @@
 - Banco de questões: o nível de acesso sai SEMPRE de `getQuestionBankLevelFor` + `checkAnswerPermission`
   (`src/modules/questions/`), nunca de um `if` solto. Gabarito (`correctAnswer`) e comentário (`explanation`) nunca entram
   no `select` de listas nem de simulado em andamento: só saem em `answerQuestion` e no simulado finalizado.
-  Responder, criar/salvar/finalizar simulado rodam com `withAdvisoryLock` (`questions:<aluno>` / `mock-exam:<id>`).
-  Questão com resposta de aluno não muda tipo/letras/gabarito nem se apaga (`questions-admin.server.ts`).
+  Responder, criar/salvar/finalizar simulado rodam com `withAdvisoryLock` (`questions:<aluno>` / `mock-exam:<id>`);
+  responder também trava a questão com `FOR SHARE` (o painel usa `FOR UPDATE`). Salvar/finalizar simulado conferem o acesso.
+  Questão com resposta de ALUNO (`hasStudentHistory`) não muda tipo/letras/gabarito nem se apaga (`questions-admin.server.ts`).
+  Relógio na tela: conta a partir do tempo restante medido no servidor, nunca comparando com o relógio do aparelho.
 - Componente com `"use client"` só exporta componentes: função usada também no servidor (ex.: `choicesFor`) fica num
   arquivo "puro" (senão a página quebra ao ser montada no servidor).
 - Tabela com rolagem lateral: o contêiner `overflow-x-auto` leva `relative` (senão textos `sr-only`

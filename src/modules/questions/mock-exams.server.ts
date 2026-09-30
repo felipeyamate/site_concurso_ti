@@ -18,6 +18,7 @@ import "server-only";
 
 import { randomInt } from "node:crypto";
 
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { withAdvisoryLock } from "@/lib/db-locks";
 import { UserFacingError } from "@/lib/form-state";
@@ -39,6 +40,16 @@ import { getQuestionBankLevelFor, type QuestionViewer } from "./questions.server
 const cryptoRandom = () => randomInt(0, 2 ** 32) / 2 ** 32;
 
 /**
+ * Simulado é só para quem tem acesso completo (ver `access.ts`). Conferido ao criar, ao salvar e
+ * ao finalizar: o acesso pode acabar no meio do caminho (reembolso, fim da assinatura).
+ */
+async function ensureMockExamAccess(tx: Prisma.TransactionClient, viewer: QuestionViewer, now: Date): Promise<void> {
+  if (!canUseMockExams(await getQuestionBankLevelFor(viewer, now, tx))) {
+    throw new UserFacingError("Simulados são para quem tem um curso ou a assinatura. Veja os planos.");
+  }
+}
+
+/**
  * Cria um simulado.
  * Passos (com a trava do aluno):
  *  1. Acesso completo (simulado não é da conta gratuita) e menos de MAX_OPEN_MOCK_EXAMS abertos.
@@ -56,10 +67,7 @@ export async function createMockExam(input: {
 }): Promise<{ mockExamId: string }> {
   const now = input.now ?? new Date();
   return withAdvisoryLock(prisma, `questions:${input.viewer.id}`, async (tx) => {
-    const level = await getQuestionBankLevelFor(input.viewer, now, tx);
-    if (!canUseMockExams(level)) {
-      throw new UserFacingError("Simulados são para quem tem um curso ou a assinatura. Veja os planos.");
-    }
+    await ensureMockExamAccess(tx, input.viewer, now);
     const open = await tx.mockExam.count({ where: { userId: input.viewer.id, finishedAt: null } });
     if (open >= MAX_OPEN_MOCK_EXAMS) {
       throw new UserFacingError(`Você já tem ${MAX_OPEN_MOCK_EXAMS} simulados em andamento. Finalize um deles antes de começar outro.`);
@@ -110,8 +118,10 @@ export async function createMockExam(input: {
 
 /**
  * O simulado para a tela: dono só (de outra pessoa = null → "não encontrado").
- * Antes de finalizar: enunciado, alternativas e a resposta marcada — SEM gabarito/comentário.
- * Depois: também gabarito, comentário e se acertou.
+ * Antes de finalizar: enunciado, alternativas e a resposta marcada — SEM gabarito/comentário
+ * (nem chegam a ser buscados no banco). Depois: também gabarito, comentário e se acertou.
+ * `remainingMs` = quanto tempo falta, medido AQUI (relógio do servidor): o navegador conta a partir
+ * disso, sem depender do relógio do aparelho do aluno (que pode estar adiantado ou atrasado).
  */
 export async function getMockExamForOwner(input: { userId: string; mockExamId: string; now?: Date }) {
   const now = input.now ?? new Date();
@@ -137,8 +147,6 @@ export async function getMockExamForOwner(input: { userId: string; mockExamId: s
               id: true,
               type: true,
               statement: true,
-              correctAnswer: true,
-              explanation: true,
               options: { orderBy: { label: "asc" }, select: { label: true, text: true } },
               subject: { select: { id: true, name: true } },
               board: { select: { name: true } },
@@ -152,6 +160,17 @@ export async function getMockExamForOwner(input: { userId: string; mockExamId: s
   if (!mockExam || mockExam.userId !== input.userId) return null;
 
   const finished = mockExam.finishedAt !== null;
+  // Gabarito e comentário: só de simulado finalizado (numa segunda consulta).
+  const answerKeys = finished
+    ? new Map(
+        (
+          await prisma.question.findMany({
+            where: { id: { in: mockExam.items.map((item) => item.question.id) } },
+            select: { id: true, correctAnswer: true, explanation: true },
+          })
+        ).map((question) => [question.id, question]),
+      )
+    : null;
   const deadline = mockExamDeadline(mockExam.startedAt, mockExam.timeLimitMinutes);
   return {
     id: mockExam.id,
@@ -162,15 +181,16 @@ export async function getMockExamForOwner(input: { userId: string; mockExamId: s
     finishedAt: mockExam.finishedAt,
     correctCount: mockExam.correctCount,
     deadline,
+    remainingMs: deadline ? Math.max(0, deadline.getTime() - now.getTime()) : null,
     timeIsUp: !finished && isPastDeadline({ startedAt: mockExam.startedAt, timeLimitMinutes: mockExam.timeLimitMinutes, now }),
-    items: mockExam.items.map(({ question, ...item }) => {
-      const { correctAnswer, explanation, ...visible } = question;
+    items: mockExam.items.map((item) => {
+      const key = answerKeys?.get(item.question.id);
       return {
         position: item.position,
         answer: item.answer,
-        question: visible,
+        question: item.question,
         // Só depois de finalizado.
-        result: finished ? { isCorrect: item.isCorrect === true, correctAnswer, explanation } : null,
+        result: key ? { isCorrect: item.isCorrect === true, correctAnswer: key.correctAnswer, explanation: key.explanation } : null,
       };
     }),
   };
@@ -179,11 +199,11 @@ export type MockExamView = NonNullable<Awaited<ReturnType<typeof getMockExamForO
 
 /**
  * Salva (ou apaga, com `answer = null`) a resposta de uma questão do simulado.
- * Recusa: simulado de outra pessoa, já finalizado, tempo esgotado (com tolerância) ou letra
- * inválida para a questão.
+ * Recusa: simulado de outra pessoa, já finalizado, sem acesso completo (ex.: reembolso depois de
+ * começar o simulado), tempo esgotado (com tolerância) ou letra inválida para a questão.
  */
 export async function saveMockExamAnswer(input: {
-  userId: string;
+  viewer: QuestionViewer;
   mockExamId: string;
   questionId: string;
   answer: string | null;
@@ -195,8 +215,9 @@ export async function saveMockExamAnswer(input: {
       where: { id: input.mockExamId },
       select: { userId: true, finishedAt: true, startedAt: true, timeLimitMinutes: true },
     });
-    if (!mockExam || mockExam.userId !== input.userId) throw new UserFacingError("Simulado não encontrado.");
+    if (!mockExam || mockExam.userId !== input.viewer.id) throw new UserFacingError("Simulado não encontrado.");
     if (mockExam.finishedAt) throw new UserFacingError("Este simulado já foi finalizado.");
+    await ensureMockExamAccess(tx, input.viewer, now);
     if (isPastDeadline({ ...mockExam, now, graceSeconds: DEADLINE_GRACE_SECONDS })) {
       throw new UserFacingError("O tempo do simulado acabou. Finalize para ver o resultado.");
     }
@@ -222,10 +243,12 @@ export async function saveMockExamAnswer(input: {
  * Finaliza (corrige) o simulado. Chamar de novo não muda nada (devolve o que já estava).
  * Passos (com a trava do simulado):
  *  1. Confere o dono; se já finalizado, termina aqui.
- *  2. Corrige cada questão, grava acertos/nota e a hora do fim.
- *  3. Cada questão RESPONDIDA vira uma tentativa (desempenho do aluno); em branco não.
+ *  2. Confere o acesso completo: finalizar ENTREGA o gabarito e os comentários — quem perdeu o
+ *     acesso (reembolso, fim da assinatura) não finaliza os simulados que deixou abertos.
+ *  3. Corrige as questões (duas gravações: as certas e as outras), grava a nota e a hora do fim.
+ *  4. Cada questão RESPONDIDA vira uma tentativa (desempenho do aluno); em branco não.
  */
-export async function finishMockExam(input: { userId: string; mockExamId: string; now?: Date }): Promise<{ correctCount: number }> {
+export async function finishMockExam(input: { viewer: QuestionViewer; mockExamId: string; now?: Date }): Promise<{ correctCount: number }> {
   const now = input.now ?? new Date();
   return withAdvisoryLock(prisma, `mock-exam:${input.mockExamId}`, async (tx) => {
     const mockExam = await tx.mockExam.findUnique({
@@ -237,21 +260,21 @@ export async function finishMockExam(input: { userId: string; mockExamId: string
         items: { select: { id: true, questionId: true, answer: true, answeredAt: true, question: { select: { correctAnswer: true } } } },
       },
     });
-    if (!mockExam || mockExam.userId !== input.userId) throw new UserFacingError("Simulado não encontrado.");
+    if (!mockExam || mockExam.userId !== input.viewer.id) throw new UserFacingError("Simulado não encontrado.");
     if (mockExam.finishedAt) return { correctCount: mockExam.correctCount ?? 0 };
+    await ensureMockExamAccess(tx, input.viewer, now);
 
     const score = scoreMockExam(mockExam.items.map((item) => ({ answer: item.answer, correctAnswer: item.question.correctAnswer })));
-    for (const item of mockExam.items) {
-      await tx.mockExamQuestion.update({
-        where: { id: item.id },
-        data: { isCorrect: item.answer !== null && item.answer === item.question.correctAnswer },
-      });
-    }
+    const correctIds = mockExam.items
+      .filter((item) => item.answer !== null && item.answer === item.question.correctAnswer)
+      .map((item) => item.id);
+    await tx.mockExamQuestion.updateMany({ where: { mockExamId: input.mockExamId, id: { in: correctIds } }, data: { isCorrect: true } });
+    await tx.mockExamQuestion.updateMany({ where: { mockExamId: input.mockExamId, id: { notIn: correctIds } }, data: { isCorrect: false } });
     const answered = mockExam.items.filter((item) => item.answer !== null);
     if (answered.length > 0) {
       await tx.questionAttempt.createMany({
         data: answered.map((item) => ({
-          userId: input.userId,
+          userId: input.viewer.id,
           questionId: item.questionId,
           answer: item.answer as string,
           isCorrect: item.answer === item.question.correctAnswer,

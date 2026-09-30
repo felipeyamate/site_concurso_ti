@@ -32,7 +32,8 @@ export function MockExamResult({ mockExam }: { mockExam: MockExamView }) {
 
   return (
     <div className="grid gap-6">
-      <Card>
+      {/* `min-w-0`: sem isto, a tabela larga "estica" o card e a página rola para o lado no celular. */}
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle className="text-3xl">
             {correct} de {mockExam.questionCount} ({percent}%)

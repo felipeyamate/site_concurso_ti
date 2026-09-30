@@ -17,6 +17,8 @@ export type FormState = {
   status: "idle" | "success" | "error";
   message: string | null;
   fieldErrors: FieldErrors;
+  // Opcional: uma lista de detalhes embaixo da mensagem (ex.: os erros por linha da planilha).
+  details?: string[];
 };
 
 export const initialFormState: FormState = { status: "idle", message: null, fieldErrors: {} };
@@ -36,8 +38,8 @@ export function successState(message: string): FormState {
   return { status: "success", message, fieldErrors: {} };
 }
 
-export function errorState(message: string, fieldErrors: FieldErrors = {}): FormState {
-  return { status: "error", message, fieldErrors };
+export function errorState(message: string, fieldErrors: FieldErrors = {}, details?: string[]): FormState {
+  return details ? { status: "error", message, fieldErrors, details } : { status: "error", message, fieldErrors };
 }
 
 /** Erros do zod → a PRIMEIRA mensagem de cada campo (a tela mostra uma por campo). */

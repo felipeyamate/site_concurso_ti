@@ -74,7 +74,7 @@ export async function saveMockAnswerAction(formData: FormData): Promise<{ ok: tr
   const parsed = saveMockAnswerSchema.safeParse(formDataToObject(formData));
   if (!parsed.success) return { ok: false, message: "Resposta inválida." };
   try {
-    await saveMockExamAnswer({ userId: session.user.id, ...parsed.data });
+    await saveMockExamAnswer({ viewer: { id: session.user.id, role: session.user.role }, ...parsed.data });
     return { ok: true };
   } catch (error) {
     if (error instanceof UserFacingError) return { ok: false, message: error.message };
@@ -89,7 +89,7 @@ export async function finishMockExamAction(_previous: FormState, formData: FormD
   const parsed = mockExamIdSchema.safeParse(formDataToObject(formData));
   if (!parsed.success) return invalidState(parsed.error);
   try {
-    await finishMockExam({ userId: session.user.id, mockExamId: parsed.data.mockExamId });
+    await finishMockExam({ viewer: { id: session.user.id, role: session.user.role }, mockExamId: parsed.data.mockExamId });
   } catch (error) {
     return stateFromError(error, "finalizar o simulado");
   }

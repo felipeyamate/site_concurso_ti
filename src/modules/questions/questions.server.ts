@@ -146,7 +146,11 @@ export type AnswerResult = {
  *
  * Passos (com a trava do aluno — a cota grátis é "confere e grava": sem a trava, várias
  * respostas ao mesmo tempo passariam do limite):
- *  1. A questão existe e está publicada (professor/admin também respondem rascunhos, para testar).
+ *  1. Trava a questão para leitura (`FOR SHARE`) e confere se existe e está publicada (professor/
+ *     admin também respondem rascunhos, para testar). A trava espera um professor que esteja
+ *     trocando o gabarito agora (`FOR UPDATE` no painel) e faz o painel esperar esta resposta —
+ *     assim a correção nunca usa um gabarito que está sendo trocado. Vários alunos ao mesmo
+ *     tempo não se bloqueiam (`FOR SHARE` só barra quem vai ALTERAR a linha).
  *  2. Nível de acesso e cota do dia (`checkAnswerPermission`).
  *  3. A resposta é uma letra válida para a questão.
  *  4. Grava a tentativa e devolve o gabarito + comentário (só agora eles saem do servidor).
@@ -160,6 +164,7 @@ export async function answerQuestion(input: {
   const now = input.now ?? new Date();
   const isStaff = hasMinimumRole(input.viewer.role, "TEACHER");
   const result = await withAdvisoryLock(prisma, `questions:${input.viewer.id}`, async (tx) => {
+    await tx.$executeRaw`SELECT id FROM questions WHERE id = ${input.questionId} FOR SHARE`;
     const question = await tx.question.findUnique({
       where: { id: input.questionId },
       select: { id: true, type: true, isPublished: true, correctAnswer: true, explanation: true, options: { select: { label: true } } },

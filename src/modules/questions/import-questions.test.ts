@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseCsv } from "./csv";
-import { MAX_IMPORT_ROWS, parseQuestionImport } from "./import-questions";
+import { MAX_IMPORT_ROWS, importCodes, parseQuestionImport } from "./import-questions";
 
 const lookups = {
   subjects: [
@@ -120,5 +120,17 @@ describe("parseQuestionImport", () => {
     expect(importCsv(HEADER)).toMatchObject({ ok: false, errors: [{ line: 1 }] });
     const many = [HEADER, ...Array.from({ length: MAX_IMPORT_ROWS + 1 }, () => ";CE;x;;;;;;C;c;redes;;")].join("\n");
     expect(importCsv(many)).toMatchObject({ ok: false, errors: [{ line: 1, message: expect.stringContaining("No máximo") }] });
+  });
+});
+
+describe("importCodes", () => {
+  it("só a coluna `codigo`, sem espaços nas pontas e sem repetir (as outras células não entram)", () => {
+    const { rows } = parseCsv([HEADER, '" BB-1 ";ME;Enunciado longo;a;b;;;;A;Comentário;seguranca;;', ";ME;Sem código;a;b;;;;A;c;seguranca;;", "BB-1;ME;x;a;b;;;;A;c;seguranca;;"].join("\n"));
+    expect(importCodes(rows)).toEqual(["BB-1"]);
+  });
+
+  it("sem a coluna `codigo`: nenhum código", () => {
+    const { rows } = parseCsv(["tipo;enunciado;a;b;gabarito;comentario;assunto", "ME;x;a;b;A;c;seguranca"].join("\n"));
+    expect(importCodes(rows)).toEqual([]);
   });
 });

@@ -11,12 +11,13 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { prisma } from "@/lib/db";
-import { grantEnrollment } from "@/modules/enrollment/grant";
+import { grantEnrollment, revokeEnrollment } from "@/modules/enrollment/grant";
 import { FREE_DAILY_ANSWERS } from "@/modules/questions/access";
 import {
   deleteBoard,
   deleteQuestion,
   deleteSubject,
+  getQuestionForAdmin,
   importQuestionsFromCsv,
   saveExam,
   saveQuestion,
@@ -230,21 +231,21 @@ describe("simulados", () => {
     expect(JSON.stringify(before)).not.toContain("SEGREDO-COMENTARIO");
     expect(before?.items.every((item) => item.result === null)).toBe(true);
     expect(await getMockExamForOwner({ userId: other.id, mockExamId, now: T0 })).toBeNull();
-    await expect(saveMockExamAnswer({ userId: other.id, mockExamId, questionId: bank.q1.id, answer: "B", now: T0 })).rejects.toThrow(
+    await expect(saveMockExamAnswer({ viewer: other, mockExamId, questionId: bank.q1.id, answer: "B", now: T0 })).rejects.toThrow(
       /não encontrado/,
     );
 
-    await saveMockExamAnswer({ userId: student.id, mockExamId, questionId: bank.q1.id, answer: "B", now: T0 }); // certo
-    await saveMockExamAnswer({ userId: student.id, mockExamId, questionId: bank.q2.id, answer: "A", now: T0 }); // errado
-    await saveMockExamAnswer({ userId: student.id, mockExamId, questionId: bank.tf.id, answer: "C", now: T0 });
-    await saveMockExamAnswer({ userId: student.id, mockExamId, questionId: bank.tf.id, answer: null, now: T0 }); // apagou
-    await expect(saveMockExamAnswer({ userId: student.id, mockExamId, questionId: bank.tf.id, answer: "A", now: T0 })).rejects.toThrow(
+    await saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.q1.id, answer: "B", now: T0 }); // certo
+    await saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.q2.id, answer: "A", now: T0 }); // errado
+    await saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.tf.id, answer: "C", now: T0 });
+    await saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.tf.id, answer: null, now: T0 }); // apagou
+    await expect(saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.tf.id, answer: "A", now: T0 })).rejects.toThrow(
       /inválida/,
     );
 
-    expect(await finishMockExam({ userId: student.id, mockExamId, now: at(1) })).toEqual({ correctCount: 1 });
+    expect(await finishMockExam({ viewer: student, mockExamId, now: at(1) })).toEqual({ correctCount: 1 });
     // Finalizar de novo não muda nada nem duplica tentativas.
-    expect(await finishMockExam({ userId: student.id, mockExamId, now: at(2) })).toEqual({ correctCount: 1 });
+    expect(await finishMockExam({ viewer: student, mockExamId, now: at(2) })).toEqual({ correctCount: 1 });
     const attempts = await prisma.questionAttempt.findMany({ where: { mockExamId } });
     expect(attempts).toHaveLength(2); // só as respondidas
     expect(attempts.every((attempt) => attempt.source === "MOCK_EXAM")).toBe(true);
@@ -252,7 +253,7 @@ describe("simulados", () => {
     const after = await getMockExamForOwner({ userId: student.id, mockExamId, now: at(2) });
     const q1Item = after?.items.find((item) => item.question.id === bank.q1.id);
     expect(q1Item?.result).toEqual({ isCorrect: true, correctAnswer: "B", explanation: "SEGREDO-COMENTARIO-Q1" });
-    await expect(saveMockExamAnswer({ userId: student.id, mockExamId, questionId: bank.q3.id, answer: "A", now: at(2) })).rejects.toThrow(
+    await expect(saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.q3.id, answer: "A", now: at(2) })).rejects.toThrow(
       /já foi finalizado/,
     );
 
@@ -264,13 +265,29 @@ describe("simulados", () => {
     const student = await createEnrolledStudent("q-aluno");
     const { mockExamId } = await createMockExam({ viewer: student, boardId: null, subjectIds: [], count: 10, timeLimitMinutes: 30, now: T0 });
     const justAfter = new Date(T0.getTime() + 30 * 60 * 1000 + 10 * 1000);
-    await saveMockExamAnswer({ userId: student.id, mockExamId, questionId: bank.q1.id, answer: "B", now: justAfter });
+    await saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.q1.id, answer: "B", now: justAfter });
     const late = new Date(T0.getTime() + 32 * 60 * 1000);
-    await expect(saveMockExamAnswer({ userId: student.id, mockExamId, questionId: bank.q2.id, answer: "C", now: late })).rejects.toThrow(
+    await expect(saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.q2.id, answer: "C", now: late })).rejects.toThrow(
       /tempo do simulado acabou/,
     );
     expect(await getMockExamForOwner({ userId: student.id, mockExamId, now: late })).toMatchObject({ timeIsUp: true });
-    expect(await finishMockExam({ userId: student.id, mockExamId, now: late })).toEqual({ correctCount: 1 });
+    expect(await finishMockExam({ viewer: student, mockExamId, now: late })).toEqual({ correctCount: 1 });
+  });
+
+  it("quem perde o acesso (ex.: reembolso) não salva nem finaliza o simulado aberto (finalizar entregaria o gabarito)", async () => {
+    const student = await createEnrolledStudent("q-aluno");
+    const { mockExamId } = await createMockExam({ viewer: student, boardId: null, subjectIds: [], count: 10, timeLimitMinutes: null, now: T0 });
+    await saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.q1.id, answer: "B", now: T0 });
+    const course = await prisma.course.findUniqueOrThrow({ where: { slug: "teste-questoes" } });
+    await revokeEnrollment(prisma, { userId: student.id, courseId: course.id, now: at(1) });
+
+    await expect(saveMockExamAnswer({ viewer: student, mockExamId, questionId: bank.q2.id, answer: "A", now: at(2) })).rejects.toThrow(
+      /Simulados são para/,
+    );
+    await expect(finishMockExam({ viewer: student, mockExamId, now: at(2) })).rejects.toThrow(/Simulados são para/);
+    const view = await getMockExamForOwner({ userId: student.id, mockExamId, now: at(2) });
+    expect(view).toMatchObject({ finishedAt: null });
+    expect(JSON.stringify(view)).not.toContain("SEGREDO-COMENTARIO");
   });
 
   it("no máximo 3 simulados em andamento", async () => {
@@ -280,7 +297,7 @@ describe("simulados", () => {
     await create();
     const { mockExamId } = await create();
     await expect(create()).rejects.toThrow(/em andamento/);
-    await finishMockExam({ userId: student.id, mockExamId, now: T0 });
+    await finishMockExam({ viewer: student, mockExamId, now: T0 });
     await expect(create()).resolves.toHaveProperty("mockExamId");
   });
 });
@@ -346,6 +363,52 @@ describe("painel de questões", () => {
     expect(await prisma.question.findUnique({ where: { id: bank.q3.id } })).toBeNull();
   });
 
+  it("professor testando não trava a questão (troca o gabarito e apaga, levando os testes); aluno promovido continua protegido", async () => {
+    const teacher = await createUser("q-prof", "TEACHER");
+    await answerQuestion({ viewer: teacher, questionId: bank.q2.id, answer: "A", now: T0 });
+    const { mockExamId } = await createMockExam({ viewer: teacher, boardId: null, subjectIds: [], count: 10, timeLimitMinutes: null, now: T0 });
+    await finishMockExam({ viewer: teacher, mockExamId, now: T0 });
+    const q2 = { questionId: bank.q2.id, optionA: "A", optionB: "B", optionC: "C", optionD: "D", examId: bank.exam.id };
+    await saveQuestion(formFor({ ...q2, correctAnswer: "D" }));
+    expect(await prisma.question.findUniqueOrThrow({ where: { id: bank.q2.id } })).toMatchObject({ correctAnswer: "D" });
+    expect(await getQuestionForAdmin(bank.q2.id)).toMatchObject({ hasStudentHistory: false });
+
+    await deleteQuestion(bank.q2.id);
+    expect(await prisma.question.findUnique({ where: { id: bank.q2.id } })).toBeNull();
+    expect(await prisma.mockExam.findUnique({ where: { id: mockExamId } })).toBeNull();
+
+    // Monitor: era aluno (tem matrícula) e virou professor — as respostas dele contam como de aluno.
+    const monitor = await createEnrolledStudent("q-monitor");
+    await prisma.user.update({ where: { id: monitor.id }, data: { role: "TEACHER" } });
+    await answerQuestion({ viewer: { id: monitor.id, role: "TEACHER" }, questionId: bank.q3.id, answer: "A", now: T0 });
+    expect(await getQuestionForAdmin(bank.q3.id)).toMatchObject({ hasStudentHistory: true });
+    await expect(deleteQuestion(bank.q3.id)).rejects.toThrow(/despublique/);
+  });
+
+  it("resposta no instante em que o professor troca o gabarito: corrige com o gabarito novo (trava da questão)", async () => {
+    const student = await createEnrolledStudent("q-aluno");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let signalLocked!: () => void;
+    const locked = new Promise<void>((resolve) => (signalLocked = resolve));
+    // O "professor" no meio do `saveQuestion`: linha travada (FOR UPDATE) e gabarito trocado, ainda sem confirmar.
+    const teacherSave = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT id FROM questions WHERE id = ${bank.q2.id} FOR UPDATE`;
+        await tx.question.update({ where: { id: bank.q2.id }, data: { correctAnswer: "D" } });
+        signalLocked();
+        await gate;
+      },
+      { timeout: 20_000 },
+    );
+    await locked;
+    const answering = answerQuestion({ viewer: student, questionId: bank.q2.id, answer: "D", now: T0 });
+    await new Promise((resolve) => setTimeout(resolve, 300)); // a resposta chega e espera a trava
+    release();
+    await teacherSave;
+    expect(await answering).toMatchObject({ isCorrect: true, correctAnswer: "D" });
+  });
+
   it("banca/assunto com questões não se apagam; prova que troca de banca leva as questões junto", async () => {
     await expect(deleteBoard(bank.cesgranrio.id)).rejects.toThrow(/não pode ser apagada/);
     await expect(deleteSubject(bank.security.id)).rejects.toThrow(/não pode ser apagado/);
@@ -368,8 +431,11 @@ describe("painel de questões", () => {
       ["IMP-1", false, bank.cesgranrio.id, 2],
       ["IMP-2", false, bank.cebraspe.id, 0],
     ]);
-    // Importar de novo: os códigos já existem.
-    expect(await importQuestionsFromCsv([header, "IMP-1;ME;Ok;x;y;;;;A;c;seguranca;;"].join("\n"))).toMatchObject({ ok: false });
+    // Importar de novo: os códigos já existem (mesmo com espaços em volta, a linha certa é apontada).
+    expect(await importQuestionsFromCsv([header, '" IMP-1 ";ME;Ok;x;y;;;;A;c;seguranca;;'].join("\n"))).toEqual({
+      ok: false,
+      errors: [{ line: 2, message: 'Já existe uma questão com o código "IMP-1".' }],
+    });
   });
 });
 
